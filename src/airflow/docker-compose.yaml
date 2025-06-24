@@ -100,6 +100,14 @@ services:
       retries: 5
       start_period: 5s
     restart: always
+  #ADDED for deploying on VM with JWT authentification for REST API
+  webserver:
+    ports:
+      - "8080:8080"
+    environment:
+      - AIRFLOW__API__AUTH_BACKEND=airflow.api.auth.backend.jwt_auth
+      - AIRFLOW__API__JWT_ALGORITHM=HS256
+      - AIRFLOW__API__JWT_SECRET_KEY
 
   redis:
     # Redis is limited to 7.2-bookworm due to licencing change
