@@ -61,7 +61,7 @@ x-airflow-common:
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'true'
-    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:7507/execution/'
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
     # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
@@ -119,9 +119,9 @@ services:
     <<: *airflow-common
     command: api-server
     ports:
-      - "7507:8080"
+      - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:7507/api/v2/version"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
       interval: 30s
       timeout: 10s
       retries: 5

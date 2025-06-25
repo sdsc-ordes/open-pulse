@@ -13,7 +13,7 @@ echo -e "AIRFLOW_UID=$(id -u)" > .env
 ```
 docker compose up -d
 ```
-(Note: the api server is currently configured for port `7507`.)
+(Note: the api server is currently configured for port `8080`.)
 
 ## Sending in DAGs 
 
@@ -25,7 +25,7 @@ For executing a API call:
 
 1. Get your JWT token 
 ```
-curl -X POST http://localhost:7507/auth/token   -H "Content-Type: application/json"   -d '{
+curl -X POST http://localhost:8080/auth/token   -H "Content-Type: application/json"   -d '{
     "username": "airflow",
     "password": "airflow"
   }'
@@ -34,7 +34,7 @@ The response is YOUR_TOKEN mentioned below.
 
 2. Get the DACS 
 ```
-curl -X GET "http://localhost:7507/api/v2/dags" \
+curl -X GET "http://localhost:8080/api/v2/dags" \
   -H "Accept: application/json" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
