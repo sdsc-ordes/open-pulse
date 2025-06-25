@@ -1,0 +1,11 @@
+.env
+
+# Ignore all Airflow related configurations
+**/airflow/config/
+!.gitkeep
+**/airflow/dags/
+!.gitkeep
+**/airflow/plugins/
+!.gitkeep
+**/airflow/logs/
+!.gitkeep
