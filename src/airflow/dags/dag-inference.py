@@ -22,7 +22,7 @@ with DAG(
     inference_task = DockerOperator(
         task_id='call_runai',
         image='ghcr.io/sdsc-ordes/open-pulse-airflow:latest',
-        auto_remove=True,
+        auto_remove='success',
         environment={
             'INFERENCE_URL': Variable.get("INFERENCE_URL"),
             'NEO4J_DATABASE': Variable.get("NEO4J_DATABASE"),
