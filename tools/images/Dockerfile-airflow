@@ -4,6 +4,6 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir requests
 
-COPY ../src/inference.py .
+COPY ../../src/airflow/src/inference.py .
 
-ENTRYPOINT ["python", "inference.py"]
+ENTRYPOINT ["python", "airflow_inference.py"]
