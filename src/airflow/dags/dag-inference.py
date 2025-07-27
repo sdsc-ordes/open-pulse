@@ -2,6 +2,8 @@ from airflow import DAG
 from airflow.providers.docker.operators.docker import DockerOperator
 from datetime import datetime, timedelta
 
+from airflow.models import Variable
+
 default_args = {
     'owner': 'airflow',
     'retries': 1,
