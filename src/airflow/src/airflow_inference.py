@@ -2,8 +2,6 @@ import requests
 import logging
 import os
 
-from airflow.models import Variable
-
 BASE_URL = os.getenv('INFERENCE_URL')
 NEO4J_DB = os.getenv('NEO4J_DATABASE')
 API_TOKEN = os.getenv('API_TOKEN')
