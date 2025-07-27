@@ -9,17 +9,16 @@ default_args = {
 }
 
 with DAG(
-    dag_id='weekly_inference_dag',
+    dag_id='inference_dag',
     default_args=default_args,
     description='Trigger ML inference every week',
-    schedule_interval='0 9 * * 1',  # Every Monday at 9:00 AM
     start_date=datetime(2024, 1, 1),
     catchup=False,
     tags=['ml', 'neo4j', 'inference'],
 ) as dag:
 
     inference_task = DockerOperator(
-        task_id='inference',
+        task_id='call_runai',
         image='ghcr.io/sdsc-ordes/open-pulse-airflow:latest',
         auto_remove=True,
         environment={
