@@ -8,7 +8,7 @@ on:
   pull_request:
     paths:
       - 'pyproject.toml'
-      - './docker/**'
+      - 'tools/images/**'
       - '.github/workflows/**'
 
 env:

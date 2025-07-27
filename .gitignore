@@ -1,10 +1,11 @@
 .env
 .DS_Store
 
+# Ignore any file anywhere in the repository called env_variables
+src/airflow/src/env_variables.json
+
 # Ignore all Airflow related configurations
 **/airflow/config/
-!.gitkeep
-**/airflow/dags/
 !.gitkeep
 **/airflow/plugins/
 !.gitkeep
