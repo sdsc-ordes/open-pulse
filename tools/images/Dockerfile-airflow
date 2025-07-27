@@ -2,7 +2,9 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir requests
+RUN pip install --no-cache-dir "apache-airflow==2.9.1" \
+    --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.9.1/constraints-3.9.txt" \
+    requests
 
 COPY ../../src/airflow/src/airflow_inference.py .
 
