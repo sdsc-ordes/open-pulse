@@ -58,7 +58,6 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-    AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
@@ -81,6 +80,9 @@ x-airflow-common:
     AIRFLOW__CELERY__WORKER_HEARTBEAT: 30
     AIRFLOW__SCHEDULER__SCHEDULER_HEARTBEAT_SEC: 10
     AIRFLOW__SCHEDULER__SCHEDULER_JOB_HEARTBEAT_SEC: 5
+    # added for authentification
+    AIRFLOW__WEBSERVER__SECRET_KEY: YyNOwRa3rf9XemBaUR5H0Akvphhd8t4e8dAma830_HM=
+    AIRFLOW__CORE__FERNET_KEY: YyNOwRa3rf9XemBaUR5H0Akvphhd8t4e8dAma830_HM= 
 
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
