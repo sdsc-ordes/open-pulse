@@ -82,6 +82,7 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__SCHEDULER_JOB_HEARTBEAT_SEC: 5
     # added for authentification
     AIRFLOW__WEBSERVER__SECRET_KEY: YyNOwRa3rf9XemBaUR5H0Akvphhd8t4e8dAma830_HM=
+    AIRFLOW__API_AUTH._JWT_SECRET: YyNOwRa3rf9XemBaUR5H0Akvphhd8t4e8dAma830_HM=
     AIRFLOW__CORE__FERNET_KEY: YyNOwRa3rf9XemBaUR5H0Akvphhd8t4e8dAma830_HM= 
 
   volumes:
