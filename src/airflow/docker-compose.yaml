@@ -156,6 +156,8 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   airflow-dag-processor:
     <<: *airflow-common
@@ -196,6 +198,8 @@ services:
         condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   airflow-triggerer:
     <<: *airflow-common
