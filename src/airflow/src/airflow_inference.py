@@ -7,7 +7,7 @@ NEO4J_DB = os.getenv('NEO4J_DATABASE')
 API_TOKEN = os.getenv('API_TOKEN')
 
 def call_ml_inference():
-    url = f"{BASE_URL}/v1/test"
+    url = f"{BASE_URL}/test"
     headers = {
         'Authorization': f'Bearer {API_TOKEN}'
     }
