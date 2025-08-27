@@ -11,11 +11,13 @@ def call_ml_inference():
     headers = {
         'Authorization': f'Bearer {API_TOKEN}'
     }
+    print(f"Calling inference endpoint: {url}")
 
     try:
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         result = response.json()
+        print(f"Inference API response: {result}")
         logging.info("Inference API response: %s", result)
     except requests.exceptions.RequestException as e:
         logging.error("Failed to call inference endpoint: %s", str(e))
