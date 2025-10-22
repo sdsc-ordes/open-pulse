@@ -1,1 +1,44 @@
-/tentris-server/instance_data.ttl
+# Docker & Database Data
+# Ignore all runtime database files. These should never be in Git.
+
+# Ignore any local data folders for GraphDB, Neo4j, and Portainer
+# These are typically created by their docker-compose.yaml files
+/src/graphdb/data/
+/src/graphdb/graphdb-data/
+/src/neo4j/data/
+/srcs/portainer/data/
+
+# Large Data Files & Sensitive Secrets
+# These files bloat the repository or expose private credentials.
+
+# Ignore the large raw data file
+src/tentris-server/instance_data.ttl
+
+# Ignore the user-specific license file
+src/tentris-server/tentris-license.toml
+
+# Python & Jupyter Notebook
+
+# Ignore the Python virtual environment
+/src/tentris-server/.venv/
+/src/tentris-server/data/
+
+# Ignore Python caches and compiled files
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore Jupyter notebook checkpoint files
+.ipynb_checkpoints/
+
+# OS & Editor-Specific Files
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db

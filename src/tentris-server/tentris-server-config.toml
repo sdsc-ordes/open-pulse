@@ -1,0 +1,18 @@
+# Hackathon Server Configuration
+# This file goes inside 'tentris-server/'
+
+[serve]
+# This is the most important setting for the hackathon
+read-only = true
+
+# The container's internal port
+bind-address = "[::]:9080"
+
+# Allow plenty of concurrent requests
+limit-concurrent-requests = 64
+
+# Give participants a 3-minute limit per query
+limit-query-duration-secs = 180
+
+# Set a 1GB response size limit as a safety net
+limit-sparql-response-body-size = 1073741824
