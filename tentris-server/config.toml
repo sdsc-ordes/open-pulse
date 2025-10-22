@@ -1,0 +1,17 @@
+# Hackathon Server Configuration
+
+# This is the most important setting for the hackathon
+read_only = true
+
+[serve]
+# Set the port the server listens on *inside* the container
+bind_address = "[::]:9080"
+
+# Allow plenty of concurrent requests
+limit_concurrent_requests = 64
+
+# Give participants a 3-minute limit per query
+limit_query_duration_secs = 180
+
+# Set a reasonable 1GB response size limit
+limit_sparql_response_body_size = 1073741824
