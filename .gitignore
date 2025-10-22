@@ -56,3 +56,4 @@ src/tentris-server/tentris-license.toml
 
 # Windows
 Thumbs.db
+.DS_Store
