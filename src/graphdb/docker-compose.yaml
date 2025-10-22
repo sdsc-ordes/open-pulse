@@ -1,0 +1,13 @@
+services:
+  graphdb:
+    image: khaller/graphdb-free:10.6.2
+    container_name: graphdb
+    ports:
+      - "${GRAPHDB_PORT}:7200"
+    environment:
+      - JAVA_OPTIONS=${GRAPHDB_JAVA_OPTIONS}
+    volumes:
+      - ${GRAPHDB_DIR}/data:/opt/graphdb/data:rw
+      - ${GRAPHDB_DIR}/logs:/opt/graphdb/logs:rw"
+      - ${GRAPHDB_DIR}/work:/opt/graphdb/work:rw"
+      - ${GRAPHDB_USER_PROPERTIES}:/opt/graphdb/etc/user.properties:ro
