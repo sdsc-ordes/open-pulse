@@ -11,15 +11,16 @@ docker run -d \
   neo4j:latest
 ```
 ## How to deploy tentris
-
 ```bash
-docker run -d \
-  -p 9080:9080 \
-  --name hackathon-db \
-  -v "$(pwd)/tentris-license.toml:/config/tentris-license.toml:ro" \
-  -v "$(pwd)/tentris-server-config.toml:/config/tentris-server-config.toml:ro" \
-  -v "$(pwd)/data:/data" \
-  -v "$(pwd)/instance_data.ttl:/app/instance_data.ttl:ro" \
-  -e "TENTRIS_RDF_FILE=/app/instance_data.ttl" \
-  ghcr.io/tentris/tentris:latest
+docker compose up -d
 ```
+
+then, on the user side to run queries:
+
+```sh
+curl -c "/tmp/my-tentris-cookie"  --data "username=test&password=test" http://localhost:9080/login
+```
+
+```sh
+curl -b "/tmp/my-tentris-cookie" -H "Content-Type: application/sparql-update"  --data "INSERT DATA { <s> <p> <o> }" http://localhost:9080/update
+```                                                                                     

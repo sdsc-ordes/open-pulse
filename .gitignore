@@ -1,6 +1,6 @@
 .env
 .DS_Store
-
+tentris.env
 # Ignore any file anywhere in the repository called env_variables
 src/airflow/src/env_variables.json
 
