@@ -15,12 +15,16 @@ docker run -d \
 docker compose up -d
 ```
 
-then, on the user side to run queries:
-
-```sh
-curl -c "/tmp/my-tentris-cookie"  --data "username=test&password=test" http://localhost:9080/login
+then, to update the data via queries:
+Login on the Terminal
+curl can be used to log in via the terminal.
 ```
-
-```sh
-curl -b "/tmp/my-tentris-cookie" -H "Content-Type: application/sparql-update"  --data "INSERT DATA { <s> <p> <o> }" http://localhost:9080/update
-```                                                                                     
+curl -c "/tmp/my-cookie" \
+    --data "username=YOUR_USERNAME&password=YOUR_PASSWORD" http://128.178.219.51:7502/login
+```
+After logging in, you need to send the cookie you received to the server every time you want to issue a query (with -b).
+```
+curl -b "/tmp/my-cookie" -H "Content-Type: application/sparql-update" \
+    --data "CONSTRUCT {<s> <p> <o>} WHERE { ?s ?p ?o }" http://128.178.219.51:7502/update
+```
+                                                                        
