@@ -12,7 +12,7 @@ services:
       - TENTRIS_RDF_FILE=/app/instance_data.ttl
       
     ports:
-      - "9080:9080"
+      - "7502:9080"
       
     volumes:
       - ./src/tentris-server/tentris-license.toml:/config/tentris-license.toml:ro

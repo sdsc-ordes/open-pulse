@@ -19,16 +19,8 @@ Copy and paste the command below. This will:
 - Mount your license, config, and data files.
 - Mount the empty data directory for persistence.
 - Tell the container to load your instance_data.ttl on its first run.
-
+- Run the container in detached mode
 
 ```bash
-docker run -d \
-  -p 9080:9080 \
-  --name hackathon-db \
-  -v "$(pwd)/tentris-license.toml:/config/tentris-license.toml:ro" \
-  -v "$(pwd)/tentris-server-config.toml:/config/tentris-server-config.toml:ro" \
-  -v "$(pwd)/data:/data" \
-  -v "$(pwd)/instance_data.ttl:/app/instance_data.ttl:ro" \
-  -e "TENTRIS_RDF_FILE=/app/instance_data.ttl" \
-  ghcr.io/tentris/tentris:latest
+docker compose up -d
 ```
