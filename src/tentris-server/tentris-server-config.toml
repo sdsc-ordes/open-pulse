@@ -2,10 +2,11 @@
 
 [serve]
 read-only = false
-bind-address = "[::]:9080"
+bind-address = "0.0.0.0:9080"
+#bind-address = "[::]:9080" #ipv6
 limit-concurrent-requests = 64
 limit-query-duration-secs = 180
 limit-sparql-response-body-size = 1073741824
 
 [serve.auth]
-allow-guests = true
+allow-guests = false
