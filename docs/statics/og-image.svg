@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Open Pulse social preview">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#080b12"/>
+      <stop offset="100%" stop-color="#0b1220"/>
+    </linearGradient>
+    <radialGradient id="a1" cx="0.15" cy="0.15" r="0.9">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="a2" cx="0.85" cy="0.2" r="0.8">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.26"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="a3" cx="0.6" cy="0.85" r="0.75">
+      <stop offset="0%" stop-color="#1d4ed8" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#1d4ed8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="line" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.35"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#a1)"/>
+  <rect width="1200" height="630" fill="url(#a2)"/>
+  <rect width="1200" height="630" fill="url(#a3)"/>
+
+  <g stroke="url(#line)" stroke-width="1.5" fill="none" opacity="0.72">
+    <path d="M130 430 L265 315 L390 380 L520 255 L710 330 L900 235 L1050 315"/>
+    <path d="M180 220 L330 280 L490 205 L640 265 L815 200 L965 255"/>
+    <path d="M120 520 L265 470 L440 530 L620 460 L815 520 L1020 455"/>
+  </g>
+
+  <g fill="#bfdbfe" opacity="0.9">
+    <circle cx="130" cy="430" r="6"/>
+    <circle cx="265" cy="315" r="8"/>
+    <circle cx="390" cy="380" r="6"/>
+    <circle cx="520" cy="255" r="9"/>
+    <circle cx="710" cy="330" r="7"/>
+    <circle cx="900" cy="235" r="8"/>
+    <circle cx="1050" cy="315" r="7"/>
+    <circle cx="180" cy="220" r="5"/>
+    <circle cx="330" cy="280" r="6"/>
+    <circle cx="490" cy="205" r="5"/>
+    <circle cx="640" cy="265" r="6"/>
+    <circle cx="815" cy="200" r="5"/>
+    <circle cx="965" cy="255" r="6"/>
+  </g>
+
+  <g font-family="Manrope, Segoe UI, Arial, sans-serif" fill="#e2e8f0">
+    <text x="96" y="132" font-size="30" letter-spacing="7" fill="#93c5fd">OPEN SCIENCE COMMUNITY INTELLIGENCE</text>
+    <text x="96" y="254" font-size="116" font-weight="700" letter-spacing="10">OPEN PULSE</text>
+    <text x="96" y="320" font-size="42" fill="#cbd5e1">Mapping and connecting living software ecosystems.</text>
+    <text x="96" y="370" font-size="31" fill="#94a3b8">Swiss Data Science Center × EPFL Open Science</text>
+  </g>
+
+  <g font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="20" fill="#bfdbfe">
+    <text x="96" y="548">github.com/sdsc-ordes/open-pulse</text>
+  </g>
+
+  <rect x="852" y="70" width="260" height="58" rx="29" fill="#1e3a8a" fill-opacity="0.25" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="982" y="107" text-anchor="middle" font-family="Manrope, Segoe UI, Arial, sans-serif" font-size="20" fill="#dbeafe">
+    Community Constellations
+  </text>
+</svg>
