@@ -6,6 +6,7 @@ on:
       - "analysis/**"
       - ".github/workflows/ci.yml"
       - "**/*.md"
+      - "**/*.json"
       - "**/*.yml"
       - "**/*.yaml"
       - "**/*.sh"
@@ -17,6 +18,7 @@ on:
       - "analysis/**"
       - ".github/workflows/ci.yml"
       - "**/*.md"
+      - "**/*.json"
       - "**/*.yml"
       - "**/*.yaml"
       - "**/*.sh"
@@ -50,12 +52,31 @@ jobs:
               - ".github/workflows/ci.yml"
             docs_or_yaml:
               - "**/*.md"
+              - "**/*.json"
               - "**/*.yml"
               - "**/*.yaml"
               - ".github/workflows/ci.yml"
             shell:
               - "**/*.sh"
               - ".github/workflows/ci.yml"
+
+  pre-commit-quality-gates:
+    name: Pre-commit quality gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pre-commit
+        run: python -m pip install pre-commit
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
 
   python-lint-and-test:
     name: Python lint and tests (analysis)

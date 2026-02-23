@@ -37,3 +37,13 @@ Thanks for helping improve this project.
 
 - Do not commit secrets, credentials, runtime data, or large generated artifacts.
 - Follow `.editorconfig` and repository lint/format conventions.
+
+## Pre-commit Quality Gates
+
+- Install pre-commit once in your local environment:
+  - `python -m pip install pre-commit`
+  - `pre-commit install`
+- Run all configured checks before opening a PR:
+  - `pre-commit run --all-files`
+- When hooks report fixes (for example formatting), review and re-stage those changes before committing.
+- CI runs the same `.pre-commit-config.yaml` hooks to keep local and remote quality gates aligned.
