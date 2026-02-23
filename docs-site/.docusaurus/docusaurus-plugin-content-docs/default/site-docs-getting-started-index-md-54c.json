@@ -1,0 +1,26 @@
+{
+  "id": "getting-started/index",
+  "title": "Getting Started",
+  "description": "This site is the documentation source of truth for Open Pulse.",
+  "source": "@site/docs/getting-started/index.md",
+  "sourceDirName": "getting-started",
+  "slug": "/getting-started",
+  "permalink": "/getting-started",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "Getting Started",
+    "slug": "/getting-started"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Open Pulse Documentation",
+    "permalink": "/"
+  },
+  "next": {
+    "title": "Architecture",
+    "permalink": "/architecture"
+  }
+}
