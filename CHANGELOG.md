@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added root `.pre-commit-config.yaml` with hooks for trailing whitespace, EOF fixes, YAML/JSON validation, Ruff lint/format on `analysis/`, and optional Markdown linting.
 - Added `.github/workflows/ci.yml` baseline CI with path-scoped triggers and split jobs for analysis lint/tests, YAML/Markdown validation, and shell script sanity checks.
 - Added `LICENSE` with Apache-2.0 terms.
 - Added `CONTRIBUTING.md` with branching, PR, semantic commit, and review rules.
@@ -35,6 +36,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Updated `CONTRIBUTING.md` with pre-commit installation and all-files execution guidance for local quality checks before PRs.
+- Updated `.github/workflows/ci.yml` to execute `pre-commit run --all-files` in CI for local/CI quality-gate parity.
 - Normalized `.gitignore` for Python artifacts, Docker/runtime data, local data, and secret-like files.
 - Updated `docs/README.md` to mark static landing as legacy and point to new docs migration/branch-model documentation.
 - Updated `.gitignore` with docs tooling artifacts (`node_modules/`, `docs-site/build/`).
