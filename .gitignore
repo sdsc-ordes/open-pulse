@@ -7,6 +7,7 @@ tentris.env
 **/*.pem
 **/*.key
 **/*secret*
+.internal
 
 # Airflow local/runtime files
 src/airflow/src/env_variables.json
@@ -40,3 +41,7 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# JavaScript/docs tooling artifacts
+node_modules/
+docs-site/build/

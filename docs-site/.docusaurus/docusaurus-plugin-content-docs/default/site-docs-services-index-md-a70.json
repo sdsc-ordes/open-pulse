@@ -1,0 +1,26 @@
+{
+  "id": "services/index",
+  "title": "Services",
+  "description": "Use this section for runtime service documentation in src/.",
+  "source": "@site/docs/services/index.md",
+  "sourceDirName": "services",
+  "slug": "/services",
+  "permalink": "/services",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "Services",
+    "slug": "/services"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Architecture",
+    "permalink": "/architecture"
+  },
+  "next": {
+    "title": "Analysis",
+    "permalink": "/analysis"
+  }
+}

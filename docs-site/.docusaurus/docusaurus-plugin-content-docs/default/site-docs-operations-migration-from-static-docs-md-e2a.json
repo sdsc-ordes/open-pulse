@@ -1,0 +1,22 @@
+{
+  "id": "operations/migration-from-static-docs",
+  "title": "Migration from Static Docs Landing",
+  "description": "The current docs/ folder remains the static GitHub Pages landing while content is migrated to Docusaurus in docs-site/.",
+  "source": "@site/docs/operations/migration-from-static-docs.md",
+  "sourceDirName": "operations",
+  "slug": "/operations/migration-from-static-docs",
+  "permalink": "/operations/migration-from-static-docs",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "Migration from Static Docs Landing",
+    "slug": "/operations/migration-from-static-docs"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Branch Model",
+    "permalink": "/operations/branch-model"
+  }
+}

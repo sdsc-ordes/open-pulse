@@ -1,0 +1,22 @@
+{
+  "id": "index",
+  "title": "Open Pulse Documentation",
+  "description": "This site contains the Open Pulse documentation source of truth managed in the docs branch workflow.",
+  "source": "@site/docs/index.md",
+  "sourceDirName": ".",
+  "slug": "/",
+  "permalink": "/",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "title": "Open Pulse Documentation",
+    "slug": "/"
+  },
+  "sidebar": "docsSidebar",
+  "next": {
+    "title": "Getting Started",
+    "permalink": "/getting-started"
+  }
+}
