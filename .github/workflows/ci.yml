@@ -1,0 +1,125 @@
+name: CI Baseline
+
+on:
+  pull_request:
+    paths:
+      - "analysis/**"
+      - ".github/workflows/ci.yml"
+      - "**/*.md"
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "**/*.sh"
+  push:
+    branches:
+      - main
+      - "release/**"
+    paths:
+      - "analysis/**"
+      - ".github/workflows/ci.yml"
+      - "**/*.md"
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "**/*.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-baseline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect changed scopes
+    runs-on: ubuntu-latest
+    outputs:
+      analysis: ${{ steps.filter.outputs.analysis }}
+      docs_or_yaml: ${{ steps.filter.outputs.docs_or_yaml }}
+      shell: ${{ steps.filter.outputs.shell }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Evaluate changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            analysis:
+              - "analysis/**"
+              - ".github/workflows/ci.yml"
+            docs_or_yaml:
+              - "**/*.md"
+              - "**/*.yml"
+              - "**/*.yaml"
+              - ".github/workflows/ci.yml"
+            shell:
+              - "**/*.sh"
+              - ".github/workflows/ci.yml"
+
+  python-lint-and-test:
+    name: Python lint and tests (analysis)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.analysis == 'true'
+    defaults:
+      run:
+        working-directory: analysis
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install analysis dependencies
+        run: uv sync --group dev --group test
+
+      - name: Run Ruff
+        run: uv run ruff check .
+
+      - name: Run pytest
+        run: uv run pytest -q
+
+  yaml-and-markdown-validation:
+    name: YAML and Markdown validation
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docs_or_yaml == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Lint YAML
+        uses: ibiqlik/action-yamllint@v3
+
+      - name: Lint Markdown
+        uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: "**/*.md"
+
+  shell-script-sanity:
+    name: Shell script sanity
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.shell == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          mapfile -t shell_files < <(git ls-files '*.sh')
+          if [ "${#shell_files[@]}" -eq 0 ]; then
+            echo "No shell scripts found."
+            exit 0
+          fi
+          shellcheck "${shell_files[@]}"

@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added `.github/workflows/ci.yml` baseline CI with path-scoped triggers and split jobs for analysis lint/tests, YAML/Markdown validation, and shell script sanity checks.
 - Added `LICENSE` with Apache-2.0 terms.
 - Added `CONTRIBUTING.md` with branching, PR, semantic commit, and review rules.
 - Added `SECURITY.md` with private vulnerability reporting and disclosure workflow.
