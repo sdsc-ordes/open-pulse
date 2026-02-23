@@ -12,7 +12,7 @@ Please report suspected vulnerabilities privately and do not open public issues 
 
 ## Disclosure Process
 
-1. We acknowledge receipt within 3 business days.
+1. We acknowledge receipt.
 2. We triage and validate the report.
 3. We define severity, impacted versions, and remediation plan.
 4. We prepare and test a fix.
