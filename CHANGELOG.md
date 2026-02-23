@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added `.github/workflows/docs-build.yml` to run Docusaurus validation with `pnpm install --frozen-lockfile` and `pnpm build` so broken links fail CI.
+- Added PR docs preview artifact publishing in `docs-build` so pull requests provide downloadable static docs output.
+- Added `.github/workflows/docs-pages-deploy.yml` to build validated docs artifacts from the `docs` branch and deploy them to GitHub Pages.
 - Added `.github/workflows/release.yml` to trigger on stable semver tags (`vX.Y.Z`), build release assets (image archives, checksums, analysis wheel), and create draft GitHub releases with generated notes.
 - Added `docs-site/docs/operations/release-checklist.md` covering `main` branch protection baseline, release execution steps, and release finalization checks.
 - Added root `.pre-commit-config.yaml` with hooks for trailing whitespace, EOF fixes, YAML/JSON validation, Ruff lint/format on `analysis/`, and optional Markdown linting.
