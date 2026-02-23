@@ -1,0 +1,8 @@
+services:
+  grimoirelab-db:
+    ports:
+      - "5432:5432"
+
+  grimoirelab-worker:
+    environment:
+      GRIMOIRELAB_DB_HOST: grimoirelab-db

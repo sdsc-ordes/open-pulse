@@ -1,25 +1,101 @@
-
 services:
-  tentris-db:
-    image: ghcr.io/tentris/tentris:latest
-    container_name: hackathon-db
+  neo4j:
+    image: neo4j:2025.05.1
+    container_name: neo4j-open-pulse
     restart: unless-stopped
-    
-    env_file:
-      - ./src/tentris-server/tentris.env
-      
-    environment:
-      - TENTRIS_RDF_FILE=/app/instance_data.ttl
-      
     ports:
-      - "7502:9080"
-      
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    environment:
+      NEO4J_AUTH: "${NEO4J_AUTH:-neo4j/openpulse-dev-password}"
+      NEO4J_PLUGINS: '${NEO4J_PLUGINS:-["graph-data-science","apoc"]}'
+      NEO4J_dbms_security_procedures_unrestricted: "${NEO4J_UNRESTRICTED:-apoc.*}"
+      NEO4J_dbms_security_procedures_allowlist: "${NEO4J_ALLOWLIST:-apoc.*}"
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
     volumes:
-      - ./src/tentris-server/tentris-license.toml:/config/tentris-license.toml:ro
-      - ./src/tentris-server/tentris-server-config.toml:/config/tentris-server-config.toml:ro
-      - ./src/tentris-server/instance_data.ttl:/app/instance_data.ttl:ro
-      
-      - tentris_data:/data
-      
+      - neo4j_logs:/logs
+      - neo4j_config:/config
+      - neo4j_data:/data
+      - neo4j_plugins:/plugins
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "cypher-shell -u neo4j -p $${NEO4J_AUTH#*/} 'RETURN 1' >/dev/null 2>&1 || exit 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  analysis-notebook:
+    image: python:3.12-slim
+    container_name: open-pulse-analysis
+    profiles:
+      - analysis
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    command: ["python", "-m", "http.server", "8888"]
+    ports:
+      - "${ANALYSIS_NOTEBOOK_PORT:-8888}:8888"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8888')\" >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  grimoirelab-db:
+    image: postgres:16-alpine
+    container_name: grimoirelab-db
+    profiles:
+      - grimoirelab
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${GRIMOIRELAB_DB_USER:-grimoire}"
+      POSTGRES_PASSWORD: "${GRIMOIRELAB_DB_PASSWORD:-grimoire}"
+      POSTGRES_DB: "${GRIMOIRELAB_DB_NAME:-grimoirelab}"
+    volumes:
+      - grimoirelab_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  grimoirelab-worker:
+    image: alpine:3.20
+    container_name: grimoirelab-worker
+    profiles:
+      - grimoirelab
+    depends_on:
+      grimoirelab-db:
+        condition: service_healthy
+    command: ["sh", "-c", "echo GrimoireLab profile enabled; sleep infinity"]
+
+  portainer:
+    image: portainer/portainer-ce
+    container_name: portainer
+    profiles:
+      - orchestration
+    restart: unless-stopped
+    ports:
+      - "${PORTAINER_PORT:-7508}:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    command: --admin-password "${PORTAINER_HASHED_PASSWORD:-$$2y$$10$$replace-with-bcrypt-hash}"
+
 volumes:
-  tentris_data:
+  neo4j_logs:
+  neo4j_config:
+  neo4j_data:
+  neo4j_plugins:
+  grimoirelab_db_data:
+  portainer_data:
