@@ -22,6 +22,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added a root README decision note defining `src/`, `analysis/`, and `infra/` boundaries.
 - Added `infra/env/.env.example` documenting required root Compose environment variables.
 - Added `infra/compose/` profile override assets for analysis, grimoirelab, and orchestration stacks.
+- Added `analysis/` as an installable Python package scaffold managed by `uv`, including `pyproject.toml`, `README.md`, `src/openpulse_analysis/`, and `tests/`.
+- Added `openpulse-analysis` console entry point and baseline `dev`/`test` dependency groups.
+- Added `analysis/uv.lock` and initial CLI/test scaffolding to support package install, smoke runs, and packaging validation.
 
 ### Changed
 
