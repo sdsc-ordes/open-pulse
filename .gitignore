@@ -45,3 +45,4 @@ Thumbs.db
 # JavaScript/docs tooling artifacts
 node_modules/
 docs-site/build/
+docs-site/.docusaurus/
