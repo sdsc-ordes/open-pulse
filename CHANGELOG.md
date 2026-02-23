@@ -18,9 +18,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added documentation information architecture in `docs-site/docs/` with `getting-started`, `architecture`, `services`, `analysis`, and `operations` sections.
 - Added explicit docs branch responsibilities in `docs-site/docs/operations/branch-model.md` (`docs` as source of truth, `main` as reference/output consumer).
 - Added migration mapping from static `docs/` landing to Docusaurus source in `docs-site/docs/operations/migration-from-static-docs.md`.
+- Added a root README service catalog with ports, compose profile, and status columns.
+- Added a root README decision note defining `src/`, `analysis/`, and `infra/` boundaries.
 
 ### Changed
 
 - Normalized `.gitignore` for Python artifacts, Docker/runtime data, local data, and secret-like files.
 - Updated `docs/README.md` to mark static landing as legacy and point to new docs migration/branch-model documentation.
 - Updated `.gitignore` with docs tooling artifacts (`node_modules/`, `docs-site/build/`).
+- Rewrote root `README.md` for onboarding with project purpose, architecture overview, DB stack quick start, `uv`-based analysis quick start, documentation navigation links, and release/contribution references.
