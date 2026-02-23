@@ -7,6 +7,11 @@ Thanks for helping improve this project.
 - Use short-lived feature branches from `develop`.
 - Name branches with clear intent, for example: `feat/<topic>`, `fix/<topic>`, `docs/<topic>`, or `chore/<topic>`.
 - Keep pull requests focused on one concern.
+- `main` is protected: direct pushes are blocked and required checks must pass before merge.
+- Required checks for merge to `main`:
+  - `ci`
+  - `docker-validate`
+  - `docs-build`
 
 ## Commit Rules
 
@@ -26,12 +31,24 @@ Thanks for helping improve this project.
   - validation steps (commands run, manual checks)
   - screenshots/logs when UI or behavior changes
 - Ensure CI checks pass before requesting review.
+- Keep your branch up to date with `main` before merge.
 
 ## Review Rules
 
 - At least one reviewer approval is required before merge.
 - Changes under owned paths must be reviewed by matching `CODEOWNERS`.
 - Address review comments with follow-up commits (avoid force-push rewrites during active review unless agreed).
+
+## Release Strategy
+
+- Stable releases are cut from semver tags only (`vX.Y.Z`).
+- Pushing a matching tag triggers `.github/workflows/release.yml`.
+- The release workflow builds and attaches:
+  - analysis image archive
+  - devcontainer image archive
+  - release checksums
+  - analysis wheel artifact
+- Follow `docs-site/docs/operations/release-checklist.md` before publishing any draft release.
 
 ## Local Development Expectations
 
