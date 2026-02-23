@@ -11,3 +11,4 @@ Start with:
 
 - [Branch model](./branch-model.md)
 - [Migration from static docs landing](./migration-from-static-docs.md)
+- [Release checklist](./release-checklist.md)
