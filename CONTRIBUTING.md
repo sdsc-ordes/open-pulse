@@ -4,7 +4,7 @@ Thanks for helping improve this project.
 
 ## Branching Rules
 
-- Use short-lived feature branches from `main`.
+- Use short-lived feature branches from `develop`.
 - Name branches with clear intent, for example: `feat/<topic>`, `fix/<topic>`, `docs/<topic>`, or `chore/<topic>`.
 - Keep pull requests focused on one concern.
 
