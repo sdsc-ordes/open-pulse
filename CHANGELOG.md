@@ -20,6 +20,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added migration mapping from static `docs/` landing to Docusaurus source in `docs-site/docs/operations/migration-from-static-docs.md`.
 - Added a root README service catalog with ports, compose profile, and status columns.
 - Added a root README decision note defining `src/`, `analysis/`, and `infra/` boundaries.
+- Added `infra/env/.env.example` documenting required root Compose environment variables.
+- Added `infra/compose/` profile override assets for analysis, grimoirelab, and orchestration stacks.
 
 ### Changed
 
@@ -27,3 +29,5 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Updated `docs/README.md` to mark static landing as legacy and point to new docs migration/branch-model documentation.
 - Updated `.gitignore` with docs tooling artifacts (`node_modules/`, `docs-site/build/`).
 - Rewrote root `README.md` for onboarding with project purpose, architecture overview, DB stack quick start, `uv`-based analysis quick start, documentation navigation links, and release/contribution references.
+- Refactored root `docker-compose.yml` into a profile-aware topology with default Neo4j plus opt-in `analysis`, `grimoirelab`, and `orchestration` services.
+- Added healthchecks and dependency readiness gates for key profile services (`neo4j`, `analysis-notebook`, and `grimoirelab-db`).
