@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Implemented `grimoire` command group with three sub-commands: `prepare-config` (SPARQL-based GrimoireLab config generator with placeholder query), `ui` (password-protected Streamlit app scaffold for visual config creation), and `install-watcher` (cron job installer for git-based config change detection, Linux/macOS only).
+- Added `src/open_pulse/grimoire/` sub-package with `sparql_config.py`, `streamlit_app.py`, and `cronjob.py` modules.
+- Added grimoire command tests covering config generation, custom endpoints, Streamlit import guard, watcher installer argument passing, SPARQL config builder, watcher script generation, and Windows platform guard.
+
 - Implemented `quest` command group with `start`, `run-step`, and `list-steps` sub-commands for analysis pipeline execution.
 - Added Pydantic config schema (`pipeline/config.py`) for quest YAML validation with retry, logging, and per-step configuration.
 - Added pipeline runner (`pipeline/runner.py`) with configurable retry/backoff logic, Python logging setup, and integration with the existing sequential orchestrator for checkpoint/resume support.
