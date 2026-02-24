@@ -9,6 +9,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Implemented `deploy up` command with Docker availability check, interactive profile selection via `questionary`, `.env` loading/generation from `infra/env/.env.example`, and `docker compose up -d` invocation with profile flags.
+- Added `deploy down` command to tear down services with optional `--volumes` flag.
+- Added `deploy ps` command to show container status.
+- Added deploy command tests covering Docker-not-available error, profile flag pass-through, `.env` template creation, `down`, and `ps` sub-commands.
+- Added CLI Command Reference section to `AGENTS.md` with `deploy` sub-command docs.
+
 - Added core CLI dependencies to `pyproject.toml`: `typer`, `questionary`, `pydantic`, `pyyaml`, `python-dotenv`, and `rich`.
 - Added `grimoire-ui` optional dependency group with `streamlit` for the GrimoireLab config UI.
 - Replaced argparse CLI with a Typer-based entry point (`cli.py`) exposing four command groups: `deploy`, `quest`, `grimoire`, and `health` (all stubs).

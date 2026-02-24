@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
 from open_pulse.cli import app
+from open_pulse.commands import deploy as deploy_mod
 from open_pulse.orchestrator import run_sequential
 from open_pulse.tasks import FunctionTask
 
@@ -25,10 +27,87 @@ def test_version_flag() -> None:
     assert "0.1.0" in result.output
 
 
-def test_deploy_up_placeholder() -> None:
-    result = runner.invoke(app, ["deploy", "up"])
+# -- Deploy command tests ----------------------------------------------------
+
+
+def test_deploy_up_no_docker_exits_1() -> None:
+    with patch.object(deploy_mod, "_docker_available", return_value=False):
+        result = runner.invoke(app, ["deploy", "up", "--profile", "default"])
+    assert result.exit_code == 1
+    assert "Docker" in result.output
+
+
+def test_deploy_up_with_profile_flag(tmp_path: Path) -> None:
+    compose_file = tmp_path / "docker-compose.yml"
+    compose_file.write_text("services: {}", encoding="utf-8")
+    env_file = tmp_path / ".env"
+    env_file.write_text("FOO=bar", encoding="utf-8")
+
+    with (
+        patch.object(deploy_mod, "_docker_available", return_value=True),
+        patch.object(deploy_mod, "_find_project_root", return_value=tmp_path),
+        patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+    ):
+        result = runner.invoke(app, ["deploy", "up", "--profile", "analysis"])
+
     assert result.exit_code == 0
-    assert "placeholder" in result.output
+    cmd = mock_run.call_args[0][0]
+    assert "--profile" in cmd
+    assert "analysis" in cmd
+    assert "up" in cmd
+    assert "-d" in cmd
+
+
+def test_deploy_up_creates_env_from_template(tmp_path: Path) -> None:
+    compose_file = tmp_path / "docker-compose.yml"
+    compose_file.write_text("services: {}", encoding="utf-8")
+    template_dir = tmp_path / "infra" / "env"
+    template_dir.mkdir(parents=True)
+    (template_dir / ".env.example").write_text("A=1\nB=2\n", encoding="utf-8")
+
+    with (
+        patch.object(deploy_mod, "_docker_available", return_value=True),
+        patch.object(deploy_mod, "_find_project_root", return_value=tmp_path),
+        patch("subprocess.run", return_value=MagicMock(returncode=0)),
+    ):
+        result = runner.invoke(app, ["deploy", "up", "--profile", "default"])
+
+    assert result.exit_code == 0
+    created = tmp_path / ".env"
+    assert created.is_file()
+    assert created.read_text(encoding="utf-8") == "A=1\nB=2\n"
+
+
+def test_deploy_down_runs_compose_down(tmp_path: Path) -> None:
+    compose_file = tmp_path / "docker-compose.yml"
+    compose_file.write_text("services: {}", encoding="utf-8")
+
+    with (
+        patch.object(deploy_mod, "_docker_available", return_value=True),
+        patch.object(deploy_mod, "_find_project_root", return_value=tmp_path),
+        patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+    ):
+        result = runner.invoke(app, ["deploy", "down"])
+
+    assert result.exit_code == 0
+    cmd = mock_run.call_args[0][0]
+    assert "down" in cmd
+
+
+def test_deploy_ps_runs_compose_ps(tmp_path: Path) -> None:
+    compose_file = tmp_path / "docker-compose.yml"
+    compose_file.write_text("services: {}", encoding="utf-8")
+
+    with (
+        patch.object(deploy_mod, "_docker_available", return_value=True),
+        patch.object(deploy_mod, "_find_project_root", return_value=tmp_path),
+        patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
+    ):
+        result = runner.invoke(app, ["deploy", "ps"])
+
+    assert result.exit_code == 0
+    cmd = mock_run.call_args[0][0]
+    assert "ps" in cmd
 
 
 def test_quest_start_placeholder() -> None:
