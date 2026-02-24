@@ -21,6 +21,11 @@ open-pulse-1/
         quest.py              # (b) Quest pipeline execution
         grimoire.py           # (c) GrimoireLab config tools
         health.py             # (d) Service health checks
+      grimoire/               # GrimoireLab sub-package
+        __init__.py
+        sparql_config.py      # SPARQL query + GrimoireLab config gen
+        streamlit_app.py      # Streamlit UI (password-protected)
+        cronjob.py            # Cron-based config watcher installer
       pipeline/               # Quest pipeline steps and runner
         __init__.py
         config.py             # Pydantic config models for quest YAML
@@ -164,6 +169,30 @@ quest:
 - Checkpoint files are written to `.quest-checkpoints/<quest-name>.json`
 - Individual step modules live under `src/open_pulse/pipeline/` and are
   registered in the runner's `STEP_REGISTRY`
+
+### `grimoire` -- GrimoireLab configuration tools
+
+| Sub-command | Description |
+|-------------|-------------|
+| `open-pulse grimoire prepare-config` | Run SPARQL queries against Neo4j/Tentris and generate a GrimoireLab `projects.json` config file. Currently uses a placeholder query. |
+| `open-pulse grimoire ui` | Launch a password-protected Streamlit app for visual GrimoireLab config creation. Requires the `grimoire-ui` optional extra. |
+| `open-pulse grimoire install-watcher` | Install a cron job that periodically pulls a git repo and detects config file changes. Linux/macOS only. |
+
+**Options for `grimoire prepare-config`:**
+- `--neo4j` -- Neo4j Bolt endpoint (default: `bolt://localhost:7687`)
+- `--tentris` -- Tentris SPARQL endpoint (default: `http://localhost:7502/sparql`)
+- `--output` / `-o` -- Output path for `projects.json` (default: `projects.json`)
+
+**Options for `grimoire install-watcher`:**
+- `--repo` / `-r` (required) -- Git remote URL of the repository to watch
+- `--config-path` -- Relative path to the config file inside the repo (default: `projects.json`)
+- `--branch` / `-b` -- Git branch to track (default: `main`)
+- `--schedule` / `-s` -- Cron schedule expression (default: `*/30 * * * *`)
+- `--clone-dir` -- Local directory to clone the repo into (default: `~/.open-pulse/grimoire-watcher`)
+
+**Streamlit UI notes:**
+- Password protection: set `GRIMOIRE_UI_PASSWORD` env var or add `password` to `.streamlit/secrets.toml`
+- Install the optional dependency: `pip install open-pulse[grimoire-ui]`
 
 ## Conventions
 
