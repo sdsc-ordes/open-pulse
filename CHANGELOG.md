@@ -11,6 +11,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Added core CLI dependencies to `pyproject.toml`: `typer`, `questionary`, `pydantic`, `pyyaml`, `python-dotenv`, and `rich`.
 - Added `grimoire-ui` optional dependency group with `streamlit` for the GrimoireLab config UI.
+- Replaced argparse CLI with a Typer-based entry point (`cli.py`) exposing four command groups: `deploy`, `quest`, `grimoire`, and `health` (all stubs).
+- Added `src/open_pulse/commands/` package with stub modules `deploy.py`, `quest.py`, `grimoire.py`, and `health.py`.
+- Added Typer CliRunner tests for every stub command; kept pure orchestrator tests unchanged.
 
 ### Changed
 
