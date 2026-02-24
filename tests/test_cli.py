@@ -2,17 +2,72 @@ import json
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
-from open_pulse import cli
+from open_pulse.cli import app
 from open_pulse.orchestrator import run_sequential
 from open_pulse.tasks import FunctionTask
 
+runner = CliRunner()
+
+
+# -- Typer CLI tests ---------------------------------------------------------
+
 
 def test_cli_help_exits_cleanly() -> None:
-    try:
-        cli.main(["--help"])
-    except SystemExit as exc:
-        assert exc.code == 0
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+
+
+def test_version_flag() -> None:
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert "0.1.0" in result.output
+
+
+def test_deploy_up_placeholder() -> None:
+    result = runner.invoke(app, ["deploy", "up"])
+    assert result.exit_code == 0
+    assert "placeholder" in result.output
+
+
+def test_quest_start_placeholder() -> None:
+    result = runner.invoke(app, ["quest", "start"])
+    assert result.exit_code == 0
+    assert "placeholder" in result.output
+
+
+def test_quest_run_step_placeholder() -> None:
+    result = runner.invoke(app, ["quest", "run-step", "crawler"])
+    assert result.exit_code == 0
+    assert "placeholder" in result.output
+
+
+def test_grimoire_prepare_config_placeholder() -> None:
+    result = runner.invoke(app, ["grimoire", "prepare-config"])
+    assert result.exit_code == 0
+    assert "placeholder" in result.output
+
+
+def test_grimoire_ui_placeholder() -> None:
+    result = runner.invoke(app, ["grimoire", "ui"])
+    assert result.exit_code == 0
+    assert "placeholder" in result.output
+
+
+def test_grimoire_install_watcher_placeholder() -> None:
+    result = runner.invoke(app, ["grimoire", "install-watcher"])
+    assert result.exit_code == 0
+    assert "placeholder" in result.output
+
+
+def test_health_placeholder() -> None:
+    result = runner.invoke(app, ["health"])
+    assert result.exit_code == 0
+    assert "placeholder" in result.output
+
+
+# -- Orchestrator tests (no CLI dependency) -----------------------------------
 
 
 def test_orchestration_order_runs_in_sequence(tmp_path: Path) -> None:
@@ -28,33 +83,22 @@ def test_orchestration_order_runs_in_sequence(tmp_path: Path) -> None:
     assert completed == ("one", "two", "three")
 
 
-def test_failure_propagates_with_non_zero_exit(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_failure_propagates(tmp_path: Path) -> None:
+    from open_pulse.orchestrator import OrchestrationError
+
     def ok(_ctx: dict[str, object]) -> None:
         return None
 
     def fail(_ctx: dict[str, object]) -> None:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(
-        cli,
-        "get_registered_tasks",
-        lambda: (
-            FunctionTask(name="ok-step", func=ok),
-            FunctionTask(name="failing-step", func=fail),
-        ),
+    tasks = (
+        FunctionTask(name="ok-step", func=ok),
+        FunctionTask(name="failing-step", func=fail),
     )
 
-    exit_code = cli.main(
-        ["run", "--checkpoint-path", str(tmp_path / "checkpoint.json")]
-    )
-    output = capsys.readouterr().out
-
-    assert exit_code == 1
-    assert "Run failed on task: failing-step" in output
+    with pytest.raises(OrchestrationError, match="failing-step"):
+        run_sequential(tasks, tmp_path / "checkpoint.json")
 
 
 def test_resume_continues_from_next_step(tmp_path: Path) -> None:
@@ -74,33 +118,6 @@ def test_resume_continues_from_next_step(tmp_path: Path) -> None:
 
     assert executed == ["second", "third"]
     assert completed == ("first", "second", "third")
-
-
-def test_list_tasks_and_doctor_commands(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setattr(
-        cli,
-        "get_registered_tasks",
-        lambda: (
-            FunctionTask(name="alpha", func=lambda _ctx: None),
-            FunctionTask(name="beta", func=lambda _ctx: None),
-        ),
-    )
-
-    list_exit = cli.main(["list-tasks"])
-    list_output = capsys.readouterr().out
-    doctor_exit = cli.main(
-        ["doctor", "--checkpoint-path", str(tmp_path / "checkpoint.json")]
-    )
-    doctor_output = capsys.readouterr().out
-
-    assert list_exit == 0
-    assert list_output.splitlines() == ["alpha", "beta"]
-    assert doctor_exit == 0
-    assert "OK:" in doctor_output
 
 
 def test_shell_wrapper_forwards_args_and_exit_semantics() -> None:

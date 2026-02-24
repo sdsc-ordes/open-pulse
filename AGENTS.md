@@ -11,10 +11,16 @@ open-pulse-1/
   src/                        # Python package source (src-layout)
     open_pulse/               # Package source
       __init__.py
-      cli.py                  # argparse-based CLI entry point
+      cli.py                  # Typer CLI entry point (registers command groups)
       orchestrator.py         # Sequential orchestrator with checkpoint/resume
       tasks.py                # Task protocol and FunctionTask adapter
       registry.py             # Task registry (deterministic execution order)
+      commands/               # CLI command groups
+        __init__.py
+        deploy.py             # (a) Deploy helper (Docker Compose)
+        quest.py              # (b) Quest pipeline execution
+        grimoire.py           # (c) GrimoireLab config tools
+        health.py             # (d) Service health checks
   tests/                      # pytest test suite
     test_cli.py
   infra/
@@ -77,7 +83,10 @@ docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
 ## Conventions
 
 - **Package name**: `open-pulse` (import as `open_pulse`)
-- **Entry point**: `open-pulse` console script → `open_pulse.cli:main`
+- **Entry point**: `open-pulse` console script → `open_pulse.cli:main` (Typer app)
+- **CLI structure**: four command groups registered via `app.add_typer()`:
+  `deploy` (Docker deploy), `quest` (pipeline), `grimoire` (GrimoireLab),
+  and `health` (top-level service-health command)
 - **Commit style**: semantic commits (`feat:`, `fix:`, `refactor:`, etc.)
 - **Changelog**: Keep a Changelog format in `CHANGELOG.md`
 - **Service assets**: live under `infra/services/<name>/`, not `src/`
