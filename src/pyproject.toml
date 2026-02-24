@@ -3,9 +3,9 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "openpulse-analysis"
+name = "open-pulse"
 version = "0.1.0"
-description = "Open Pulse analysis toolkit package."
+description = "Open Pulse unified CLI and analysis toolkit."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
@@ -14,7 +14,7 @@ authors = [
 dependencies = []
 
 [project.scripts]
-openpulse-analysis = "openpulse_analysis.cli:main"
+open-pulse = "open_pulse.cli:main"
 
 [dependency-groups]
 dev = [
@@ -28,4 +28,4 @@ test = [
 testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/openpulse_analysis"]
+packages = ["open_pulse"]

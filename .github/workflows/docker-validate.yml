@@ -5,7 +5,7 @@ on:
     paths:
       - "docker-compose.yml"
       - "infra/compose/**"
-      - "analysis/docker/**"
+      - "src/docker/**"
       - ".devcontainer/**"
       - ".github/workflows/docker-validate.yml"
   push:
@@ -15,7 +15,7 @@ on:
     paths:
       - "docker-compose.yml"
       - "infra/compose/**"
-      - "analysis/docker/**"
+      - "src/docker/**"
       - ".devcontainer/**"
       - ".github/workflows/docker-validate.yml"
 
@@ -53,9 +53,9 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - name: analysis
+          - name: open-pulse
             context: .
-            dockerfile: analysis/docker/Dockerfile
+            dockerfile: src/docker/Dockerfile
           - name: devcontainer
             context: .devcontainer
             dockerfile: .devcontainer/Dockerfile

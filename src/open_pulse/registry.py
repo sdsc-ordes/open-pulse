@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from openpulse_analysis.tasks import AnalysisTask, FunctionTask
+from open_pulse.tasks import AnalysisTask, FunctionTask
 
 
 def _noop(_context: dict[str, object]) -> None:

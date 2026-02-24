@@ -1,19 +1,19 @@
 {
-  "name": "Open Pulse Analysis",
+  "name": "Open Pulse",
   "build": {
     "dockerfile": "Dockerfile",
     "context": ".."
   },
   "remoteUser": "vscode",
   "workspaceFolder": "/workspaces/open-pulse-1",
-  "postCreateCommand": "cd analysis && uv sync --group dev --group test",
+  "postCreateCommand": "cd src && uv sync --group dev --group test",
   "customizations": {
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/workspaces/open-pulse-1/analysis/.venv/bin/python",
+        "python.defaultInterpreterPath": "/workspaces/open-pulse-1/src/.venv/bin/python",
         "python.testing.pytestEnabled": true,
         "python.testing.pytestArgs": [
-          "analysis/tests"
+          "src/tests"
         ],
         "editor.formatOnSave": true,
         "[python]": {
