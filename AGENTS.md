@@ -170,6 +170,24 @@ quest:
 - Individual step modules live under `src/open_pulse/pipeline/` and are
   registered in the runner's `STEP_REGISTRY`
 
+### `health` -- Service health checks
+
+| Usage | Description |
+|-------|-------------|
+| `open-pulse health` | Run all health checks: Docker daemon reachability, container status, endpoint probes, and smoke tests. Reports results in rich tables. Exits with code 1 when any check fails. |
+
+**Options:**
+- `--neo4j` -- Neo4j HTTP endpoint to probe (default: `http://localhost:7474`)
+- `--neo4j-bolt` -- Neo4j Bolt endpoint to probe (default: `bolt://localhost:7687`)
+- `--tentris` -- Tentris SPARQL endpoint to probe (default: `http://localhost:7502/sparql`)
+- `--grimoirelab-db` -- GrimoireLab PostgreSQL host:port (default: `localhost:5432`)
+
+**Checks performed:**
+1. Docker daemon reachability (`docker info`)
+2. Container status via `docker compose ps` (name, service, state, status, ports)
+3. Endpoint probes: HTTP for Neo4j browser and Tentris SPARQL; TCP for Neo4j Bolt and GrimoireLab DB
+4. Smoke tests: CLI version, pipeline config schema validation, Compose config validation (when Docker is available)
+
 ### `grimoire` -- GrimoireLab configuration tools
 
 | Sub-command | Description |

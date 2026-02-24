@@ -9,6 +9,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Implemented `health` command with Docker daemon check, container status table, endpoint probes (Neo4j HTTP/Bolt, Tentris SPARQL, GrimoireLab DB), smoke tests (CLI version, pipeline config schema, Compose config validation), and rich table output. Exits with code 1 when any check fails. Configurable via `--neo4j`, `--neo4j-bolt`, `--tentris`, and `--grimoirelab-db` options.
+- Added health command tests covering Docker unavailable, all-ok scenario, failing endpoints, stopped containers, custom endpoint options, no-containers hint, HTTP/TCP probe unit tests, host:port parsing, smoke test validation, and container status JSON parsing.
+
 - Implemented `grimoire` command group with three sub-commands: `prepare-config` (SPARQL-based GrimoireLab config generator with placeholder query), `ui` (password-protected Streamlit app scaffold for visual config creation), and `install-watcher` (cron job installer for git-based config change detection, Linux/macOS only).
 - Added `src/open_pulse/grimoire/` sub-package with `sparql_config.py`, `streamlit_app.py`, and `cronjob.py` modules.
 - Added grimoire command tests covering config generation, custom endpoints, Streamlit import guard, watcher installer argument passing, SPARQL config builder, watcher script generation, and Windows platform guard.
