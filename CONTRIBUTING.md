@@ -44,10 +44,10 @@ Thanks for helping improve this project.
 - Stable releases are cut from semver tags only (`vX.Y.Z`).
 - Pushing a matching tag triggers `.github/workflows/release.yml`.
 - The release workflow builds and attaches:
-  - analysis image archive
+  - open-pulse image archive
   - devcontainer image archive
   - release checksums
-  - analysis wheel artifact
+  - open-pulse wheel artifact
 - Follow `docs-site/docs/operations/release-checklist.md` before publishing any draft release.
 
 ## Local Development Expectations

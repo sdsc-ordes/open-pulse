@@ -10,21 +10,21 @@ tentris.env
 .internal
 
 # Airflow local/runtime files
-src/airflow/src/env_variables.json
+infra/services/airflow/src/env_variables.json
 **/airflow/config/
 **/airflow/plugins/
 **/airflow/logs/
 
 # Docker/database runtime data
-src/graphdb/data/
-src/graphdb/graphdb-data/
-src/neo4j/data/
-src/portainer/data/
+infra/services/graphdb/data/
+infra/services/graphdb/graphdb-data/
+infra/services/neo4j/data/
+infra/services/portainer/data/
 
 # Tentris local data and licenses
-src/tentris-server/data/
-src/tentris-server/instance_data.ttl
-src/tentris-server/tentris-license.toml
+infra/services/tentris-server/data/
+infra/services/tentris-server/instance_data.ttl
+infra/services/tentris-server/tentris-license.toml
 
 # Python and notebooks
 **/__pycache__/

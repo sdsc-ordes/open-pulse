@@ -1,42 +1,40 @@
 # Open Pulse
 
 Open Pulse is a repository for runtime graph-data services and analysis workflows.
-It combines deployable service assets in `src/` with analysis-oriented code in
-`analysis/` and shared infrastructure controls in `infra/`.
+It combines a unified CLI package in `src/` with deployable service assets in
+`infra/services/` and shared infrastructure controls in `infra/`.
 
 ## Project Purpose
 
 - Provide reproducible graph data services for development and operations.
-- Support data/analysis workflows as a separate Python package lifecycle.
+- Support data/analysis workflows via a unified Python CLI package.
 - Keep infrastructure and documentation discoverable for new contributors.
 
 ## System Architecture
 
 The repository is organized around three boundaries:
 
-- `src/`: runtime services and service-specific deployment assets.
-- `analysis/`: standalone Python analysis package (target path:
-  `analysis/src/openpulse_analysis`).
-- `infra/`: shared infrastructure configuration (cross-service and environment
-  concerns).
+- `src/`: unified Python CLI package (`open-pulse`) and associated tests,
+  Dockerfile, and build metadata.
+- `infra/services/`: service-specific deployment assets (Docker Compose files,
+  env templates, READMEs) for Neo4j, Tentris, Portainer, etc.
+- `infra/`: shared infrastructure configuration (cross-service compose overrides,
+  environment templates).
 
 ### Decision Note: Boundaries
 
-Use `src/` for long-running service runtime concerns, `analysis/` for
-reproducible research/orchestration code and package metadata, and `infra/` for
-cross-cutting operational configuration. This separation avoids coupling analysis
-release cadence to service deployment changes.
+Use `src/` for CLI source code and package metadata, `infra/services/` for
+per-service deployment assets, and `infra/` for cross-cutting operational
+configuration. This separation keeps the CLI release cadence independent of
+service deployment changes.
 
 ## Service Catalog
 
 | Service | Path | Ports | Compose Profile | Status |
 | --- | --- | --- | --- | --- |
-| Tentris DB | `src/tentris-server/` | `7502 -> 9080` | `default` | active |
-| Neo4j | `src/neo4j/` | `7474`, `7687` | `service-local` | available |
-| GraphDB | `src/graphdb/` | configurable | `service-local` | available |
-| Airflow | `src/airflow/` | `8080` | `service-local` | available |
-| Portainer | `src/portainer/` | configurable | `service-local` | available |
-| GrimoireLab (optional) | `src/` | configurable | `grimoire` | planned |
+| Tentris DB | `infra/services/tentris-server/` | `7502 -> 9080` | `default` | active |
+| Neo4j | `infra/services/neo4j/` | `7474`, `7687` | `service-local` | available |
+| Portainer | `infra/services/portainer/` | configurable | `service-local` | available |
 
 ## Quick Start: DB Stack
 
@@ -61,18 +59,15 @@ docker compose down
 The root `docker-compose.yml` currently starts Tentris DB (`hackathon-db`) on
 `http://localhost:7502`.
 
-## Quick Start: Analysis with `uv`
+## Quick Start: CLI with `uv`
 
-Analysis package layout and commands are centered in `analysis/`.
+The CLI package lives in `src/`.
 
 ```bash
-cd analysis
+cd src
 uv sync
-uv run python -m openpulse_analysis --help
+uv run open-pulse --help
 ```
-
-If `analysis/` is not present in your checkout yet, follow the analysis docs for
-the current scaffold status before running commands.
 
 ## Documentation Links
 

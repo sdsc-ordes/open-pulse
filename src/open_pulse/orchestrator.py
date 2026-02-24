@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from openpulse_analysis.tasks import AnalysisTask
+from open_pulse.tasks import AnalysisTask
 
 
 @dataclass(frozen=True, slots=True)

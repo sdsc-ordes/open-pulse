@@ -21,14 +21,14 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh -s -- --version ${UV_VERSION
 
 WORKDIR /app
 
-COPY analysis/pyproject.toml analysis/uv.lock analysis/README.md ./
+COPY src/pyproject.toml src/uv.lock src/README.md ./
 RUN uv sync --frozen --no-dev --no-editable
 
-COPY analysis/src ./src
+COPY src/open_pulse ./open_pulse
 RUN uv sync --frozen --no-dev \
     && chown -R ${APP_USER}:${APP_USER} /app
 
 USER ${APP_USER}
 
-ENTRYPOINT ["uv", "run", "openpulse-analysis"]
+ENTRYPOINT ["uv", "run", "open-pulse"]
 CMD ["doctor"]

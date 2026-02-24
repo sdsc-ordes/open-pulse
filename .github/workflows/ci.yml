@@ -3,7 +3,7 @@ name: CI Baseline
 on:
   pull_request:
     paths:
-      - "analysis/**"
+      - "src/**"
       - ".github/workflows/ci.yml"
       - "**/*.md"
       - "**/*.json"
@@ -15,7 +15,7 @@ on:
       - main
       - "release/**"
     paths:
-      - "analysis/**"
+      - "src/**"
       - ".github/workflows/ci.yml"
       - "**/*.md"
       - "**/*.json"
@@ -35,7 +35,7 @@ jobs:
     name: Detect changed scopes
     runs-on: ubuntu-latest
     outputs:
-      analysis: ${{ steps.filter.outputs.analysis }}
+      src: ${{ steps.filter.outputs.src }}
       docs_or_yaml: ${{ steps.filter.outputs.docs_or_yaml }}
       shell: ${{ steps.filter.outputs.shell }}
     steps:
@@ -47,8 +47,8 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            analysis:
-              - "analysis/**"
+            src:
+              - "src/**"
               - ".github/workflows/ci.yml"
             docs_or_yaml:
               - "**/*.md"
@@ -79,13 +79,13 @@ jobs:
         run: pre-commit run --all-files
 
   python-lint-and-test:
-    name: Python lint and tests (analysis)
+    name: Python lint and tests (src)
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.analysis == 'true'
+    if: needs.changes.outputs.src == 'true'
     defaults:
       run:
-        working-directory: analysis
+        working-directory: src
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -98,7 +98,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install analysis dependencies
+      - name: Install dependencies
         run: uv sync --group dev --group test
 
       - name: Run Ruff

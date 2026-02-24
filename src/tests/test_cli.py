@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from openpulse_analysis import cli
-from openpulse_analysis.orchestrator import run_sequential
-from openpulse_analysis.tasks import FunctionTask
+from open_pulse import cli
+from open_pulse.orchestrator import run_sequential
+from open_pulse.tasks import FunctionTask
 
 
 def test_cli_help_exits_cleanly() -> None:
@@ -107,5 +107,5 @@ def test_shell_wrapper_forwards_args_and_exit_semantics() -> None:
     wrapper = Path(__file__).resolve().parents[1] / "scripts" / "run-sequential.sh"
     content = wrapper.read_text(encoding="utf-8")
 
-    assert "exec openpulse-analysis run \"$@\"" in content
+    assert "exec open-pulse run \"$@\"" in content
     assert "set -eu" in content

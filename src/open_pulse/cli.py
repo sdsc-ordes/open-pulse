@@ -1,4 +1,4 @@
-"""Command line interface for openpulse-analysis."""
+"""Command line interface for open-pulse."""
 
 from __future__ import annotations
 
@@ -6,17 +6,17 @@ import argparse
 import os
 from pathlib import Path
 
-from openpulse_analysis import __version__
-from openpulse_analysis.orchestrator import OrchestrationError, run_sequential
-from openpulse_analysis.registry import get_registered_tasks
+from open_pulse import __version__
+from open_pulse.orchestrator import OrchestrationError, run_sequential
+from open_pulse.registry import get_registered_tasks
 
-DEFAULT_CHECKPOINT = ".openpulse-analysis.checkpoint.json"
+DEFAULT_CHECKPOINT = ".openpulse.checkpoint.json"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="openpulse-analysis",
-        description="Open Pulse analysis command line interface.",
+        prog="open-pulse",
+        description="Open Pulse command line interface.",
     )
     parser.add_argument(
         "--version",

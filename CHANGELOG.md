@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Moved service deployment configs (`neo4j/`, `tentris-server/`, `portainer/`) from `src/` to `infra/services/` so `src/` is reserved for CLI source code.
+- Moved analysis package from `analysis/src/openpulse_analysis/` into `src/open_pulse/`, renaming the package from `openpulse-analysis` to `open-pulse`.
+- Moved analysis tests from `analysis/tests/` to `src/tests/`.
+- Moved analysis Dockerfile from `analysis/docker/` to `src/docker/`.
+- Moved `analysis/pyproject.toml`, `analysis/uv.lock`, and `analysis/README.md` into `src/`.
+- Moved `analysis/scripts/run-sequential.sh` to `src/scripts/run-sequential.sh`.
+- Updated all CI workflows, `.pre-commit-config.yaml`, `.devcontainer/devcontainer.json`, `.github/CODEOWNERS`, `.gitignore`, and root `README.md` to reference new paths.
+- Renamed CLI entry point from `openpulse-analysis` to `open-pulse`.
+
+### Added
+
+- Added `AGENTS.md` documenting the new directory layout, key commands, and conventions.
+
+### Removed
+
+- Removed `analysis/` directory (contents migrated to `src/`).
+
 ### Added
 
 - Added `.github/workflows/docs-build.yml` to run Docusaurus validation with `pnpm install --frozen-lockfile` and `pnpm build` so broken links fail CI.
