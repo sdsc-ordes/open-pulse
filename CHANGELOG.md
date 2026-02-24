@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Added core CLI dependencies to `src/pyproject.toml`: `typer`, `questionary`, `pydantic`, `pyyaml`, `python-dotenv`, and `rich`.
+- Added `grimoire-ui` optional dependency group with `streamlit` for the GrimoireLab config UI.
+
 ### Changed
 
 - Moved service deployment configs (`neo4j/`, `tentris-server/`, `portainer/`) from `src/` to `infra/services/` so `src/` is reserved for CLI source code.

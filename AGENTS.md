@@ -92,3 +92,16 @@ docker build -f src/docker/Dockerfile -t open-pulse:local .
 - uv (package manager)
 - Docker + Docker Compose (for service deployment)
 - pnpm + Node.js 20 (for docs-site only)
+
+### CLI package (`src/pyproject.toml`)
+
+Core runtime dependencies:
+- `typer` -- CLI framework (replaces argparse)
+- `questionary` -- interactive terminal prompts
+- `pydantic` -- config validation
+- `pyyaml` -- YAML config parsing
+- `python-dotenv` -- `.env` file loading
+- `rich` -- terminal output formatting (used by typer)
+
+Optional dependency groups:
+- `grimoire-ui` (`pip install open-pulse[grimoire-ui]`): `streamlit` for the GrimoireLab config UI
