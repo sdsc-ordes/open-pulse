@@ -35,7 +35,13 @@ open-pulse-1/
         metadata_extractor.py # Step: extract metadata (placeholder)
         tentris_upload.py     # Step: upload to Tentris (placeholder)
   tests/                      # pytest test suite
-    test_cli.py
+    conftest.py               # Shared fixtures (CliRunner, invoke helper)
+    test_cli.py               # CLI entry point: help text, --version, subcommand presence
+    test_deploy.py            # deploy up/down/ps: Docker checks, profiles, env creation, volumes
+    test_quest.py             # Quest config loading, pipeline runner, retry, CLI commands
+    test_grimoire.py          # Grimoire CLI commands, SPARQL config builder, cronjob unit tests
+    test_health.py            # Health CLI, endpoint probes, container status, smoke tests
+    test_orchestrator.py      # Sequential orchestrator: ordering, checkpoint, resume, failure
   config/                     # Example configuration files
     quest.example.yml         # Example quest pipeline config
   infra/

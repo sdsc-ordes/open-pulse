@@ -7,6 +7,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+
+- Split monolithic `tests/test_cli.py` into per-domain test modules: `test_cli.py` (entry point), `test_deploy.py`, `test_quest.py`, `test_grimoire.py`, `test_health.py`, and `test_orchestrator.py`. Added `conftest.py` with shared fixtures.
+- Added new test cases: `deploy down --volumes` flag pass-through, `deploy down`/`ps` Docker-unavailable guards, `deploy up --file` compose override, `quest start --resume` flag forwarding, `quest start --config` custom path, pipeline failure propagation, grimoire `install-watcher --clone-dir`, mixed-state container health check, orchestrator checkpoint persistence on success and failure, and empty task list handling.
+
 ### Added
 
 - Implemented `health` command with Docker daemon check, container status table, endpoint probes (Neo4j HTTP/Bolt, Tentris SPARQL, GrimoireLab DB), smoke tests (CLI version, pipeline config schema, Compose config validation), and rich table output. Exits with code 1 when any check fails. Configurable via `--neo4j`, `--neo4j-bolt`, `--tentris`, and `--grimoirelab-db` options.
