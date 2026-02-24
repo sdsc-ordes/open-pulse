@@ -21,10 +21,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh -s -- --version ${UV_VERSION
 
 WORKDIR /app
 
-COPY src/pyproject.toml src/uv.lock src/README.md ./
+COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-editable
 
-COPY src/open_pulse ./open_pulse
+COPY src/open_pulse ./src/open_pulse
 RUN uv sync --frozen --no-dev \
     && chown -R ${APP_USER}:${APP_USER} /app
 

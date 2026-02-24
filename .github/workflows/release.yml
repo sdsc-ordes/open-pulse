@@ -34,7 +34,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: src/docker/Dockerfile
+          file: tools/images/Dockerfile-open-pulse
           load: true
           tags: open-pulse/open-pulse:${{ github.ref_name }}
 
@@ -57,7 +57,7 @@ jobs:
         run: |
           python -m pip install build
           mkdir -p release-artifacts/python
-          python -m build src --wheel --outdir release-artifacts/python
+          python -m build --wheel --outdir release-artifacts/python
 
       - name: Create draft GitHub release
         uses: softprops/action-gh-release@v2

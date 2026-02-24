@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/ci.yml"
       - "**/*.md"
       - "**/*.json"
@@ -16,6 +19,9 @@ on:
       - "release/**"
     paths:
       - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/ci.yml"
       - "**/*.md"
       - "**/*.json"
@@ -49,6 +55,9 @@ jobs:
           filters: |
             src:
               - "src/**"
+              - "tests/**"
+              - "pyproject.toml"
+              - "uv.lock"
               - ".github/workflows/ci.yml"
             docs_or_yaml:
               - "**/*.md"
@@ -83,9 +92,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.src == 'true'
-    defaults:
-      run:
-        working-directory: src
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -102,7 +108,7 @@ jobs:
         run: uv sync --group dev --group test
 
       - name: Run Ruff
-        run: uv run ruff check .
+        run: uv run ruff check src/
 
       - name: Run pytest
         run: uv run pytest -q

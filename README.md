@@ -14,8 +14,8 @@ It combines a unified CLI package in `src/` with deployable service assets in
 
 The repository is organized around three boundaries:
 
-- `src/`: unified Python CLI package (`open-pulse`) and associated tests,
-  Dockerfile, and build metadata.
+- `src/`: Python package source code (`open-pulse`) using the standard
+  src-layout, with `pyproject.toml` and `uv.lock` at the project root.
 - `infra/services/`: service-specific deployment assets (Docker Compose files,
   env templates, READMEs) for Neo4j, Tentris, Portainer, etc.
 - `infra/`: shared infrastructure configuration (cross-service compose overrides,
@@ -23,7 +23,7 @@ The repository is organized around three boundaries:
 
 ### Decision Note: Boundaries
 
-Use `src/` for CLI source code and package metadata, `infra/services/` for
+Use `src/` for CLI source code, `infra/services/` for
 per-service deployment assets, and `infra/` for cross-cutting operational
 configuration. This separation keeps the CLI release cadence independent of
 service deployment changes.
@@ -61,10 +61,7 @@ The root `docker-compose.yml` currently starts Tentris DB (`hackathon-db`) on
 
 ## Quick Start: CLI with `uv`
 
-The CLI package lives in `src/`.
-
 ```bash
-cd src
 uv sync
 uv run open-pulse --help
 ```

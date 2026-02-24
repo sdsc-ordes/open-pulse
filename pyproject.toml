@@ -40,4 +40,4 @@ test = [
 testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["open_pulse"]
+packages = ["src/open_pulse"]
