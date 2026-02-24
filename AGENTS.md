@@ -80,6 +80,27 @@ docker compose ps
 docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
 ```
 
+## CLI Command Reference
+
+### `deploy` -- Docker infrastructure management
+
+| Sub-command | Description |
+|-------------|-------------|
+| `open-pulse deploy up` | Deploy services via Docker Compose. Without `--profile` flags, opens an interactive profile selector. Creates `.env` from `infra/env/.env.example` if absent. |
+| `open-pulse deploy down` | Tear down deployed services. Pass `--volumes` / `-v` to also remove named volumes. |
+| `open-pulse deploy ps` | Show the status of deployed containers. |
+
+**Profiles** (selectable interactively or via `--profile`):
+- `default` -- Core services only (Neo4j)
+- `analysis` -- Core + analysis notebook
+- `grimoirelab` -- Core + GrimoireLab DB & worker
+- `orchestration` -- Core + Portainer management UI
+
+**Options for `deploy up`:**
+- `--profile` / `-p` (repeatable) -- Compose profiles to activate
+- `--env-file` / `-e` -- Path to a `.env` file (default: `<root>/.env`, auto-created from template)
+- `--file` / `-f` (repeatable) -- Extra Compose override files to include
+
 ## Conventions
 
 - **Package name**: `open-pulse` (import as `open_pulse`)
