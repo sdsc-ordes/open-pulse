@@ -9,6 +9,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Implemented `quest` command group with `start`, `run-step`, and `list-steps` sub-commands for analysis pipeline execution.
+- Added Pydantic config schema (`pipeline/config.py`) for quest YAML validation with retry, logging, and per-step configuration.
+- Added pipeline runner (`pipeline/runner.py`) with configurable retry/backoff logic, Python logging setup, and integration with the existing sequential orchestrator for checkpoint/resume support.
+- Added placeholder pipeline step modules: `crawler`, `neo4j_upload`, `metadata_extractor`, and `tentris_upload` under `src/open_pulse/pipeline/`.
+- Added `config/quest.example.yml` with documented example quest configuration.
+- Added quest pipeline tests covering config loading, task building, disabled-step filtering, retry behaviour, checkpoint resume, CLI commands, and unknown-step error handling.
+
 - Implemented `deploy up` command with Docker availability check, interactive profile selection via `questionary`, `.env` loading/generation from `infra/env/.env.example`, and `docker compose up -d` invocation with profile flags.
 - Added `deploy down` command to tear down services with optional `--volumes` flag.
 - Added `deploy ps` command to show container status.

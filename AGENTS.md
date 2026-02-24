@@ -21,8 +21,18 @@ open-pulse-1/
         quest.py              # (b) Quest pipeline execution
         grimoire.py           # (c) GrimoireLab config tools
         health.py             # (d) Service health checks
+      pipeline/               # Quest pipeline steps and runner
+        __init__.py
+        config.py             # Pydantic config models for quest YAML
+        runner.py             # Pipeline runner (retry, logging, orchestrator)
+        crawler.py            # Step: crawl source repos (placeholder)
+        neo4j_upload.py       # Step: upload to Neo4j (placeholder)
+        metadata_extractor.py # Step: extract metadata (placeholder)
+        tentris_upload.py     # Step: upload to Tentris (placeholder)
   tests/                      # pytest test suite
     test_cli.py
+  config/                     # Example configuration files
+    quest.example.yml         # Example quest pipeline config
   infra/
     services/                 # Per-service deployment assets
       neo4j/
@@ -100,6 +110,60 @@ docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
 - `--profile` / `-p` (repeatable) -- Compose profiles to activate
 - `--env-file` / `-e` -- Path to a `.env` file (default: `<root>/.env`, auto-created from template)
 - `--file` / `-f` (repeatable) -- Extra Compose override files to include
+
+### `quest` -- Analysis pipeline execution
+
+| Sub-command | Description |
+|-------------|-------------|
+| `open-pulse quest start` | Run the full four-step quest pipeline end-to-end. Uses checkpoint files for resume support. |
+| `open-pulse quest run-step <step>` | Run a single pipeline step by name (no checkpoint). |
+| `open-pulse quest list-steps` | List available pipeline steps. |
+
+**Pipeline steps** (executed in order):
+1. `crawler` -- Crawl source repositories for analysis data (placeholder)
+2. `neo4j_upload` -- Upload crawled data into the Neo4j knowledge graph (placeholder)
+3. `metadata_extractor` -- Extract metadata from graph-stored artefacts (placeholder)
+4. `tentris_upload` -- Upload RDF triples into the Tentris SPARQL store (placeholder)
+
+**Options for `quest start`:**
+- `--config` / `-c` -- Path to quest config YAML (default: `quest.yml`; uses built-in defaults when file is absent)
+- `--resume` / `-r` -- Resume from last checkpoint, skipping already-completed steps
+
+**Options for `quest run-step`:**
+- `--config` / `-c` -- Path to quest config YAML (default: `quest.yml`)
+
+**Config file format** (see `config/quest.example.yml`):
+```yaml
+quest:
+  name: "my-quest-run"
+  retry:
+    max_attempts: 3
+    backoff_seconds: 5
+  logging:
+    level: INFO
+    file: logs/quest.log
+  steps:
+    crawler:
+      enabled: true
+      script: "placeholder"
+    neo4j_upload:
+      enabled: true
+      endpoint: "bolt://localhost:7687"
+    metadata_extractor:
+      enabled: true
+    tentris_upload:
+      enabled: true
+      endpoint: "http://localhost:7502"
+```
+
+**Architecture notes:**
+- Config is validated by Pydantic models in `src/open_pulse/pipeline/config.py`
+- The pipeline runner (`src/open_pulse/pipeline/runner.py`) wraps each step with
+  configurable retry logic and delegates to the existing sequential orchestrator
+  (`src/open_pulse/orchestrator.py`) for checkpoint/resume support
+- Checkpoint files are written to `.quest-checkpoints/<quest-name>.json`
+- Individual step modules live under `src/open_pulse/pipeline/` and are
+  registered in the runner's `STEP_REGISTRY`
 
 ## Conventions
 

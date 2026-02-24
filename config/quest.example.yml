@@ -1,0 +1,24 @@
+quest:
+  name: "my-quest-run"
+  retry:
+    max_attempts: 3
+    backoff_seconds: 5
+  logging:
+    level: INFO
+    file: logs/quest.log
+  steps:
+    crawler:
+      enabled: true
+      script: "placeholder"
+      params: {}
+    neo4j_upload:
+      enabled: true
+      endpoint: "bolt://localhost:7687"
+      params: {}
+    metadata_extractor:
+      enabled: true
+      params: {}
+    tentris_upload:
+      enabled: true
+      endpoint: "http://localhost:7502"
+      params: {}
