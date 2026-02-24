@@ -67,8 +67,8 @@ open-pulse-1/
       .env.example            # Root compose environment template
   tools/
     images/                   # Container image definitions
-      Dockerfile-open-pulse   # Production container image (Python 3.11 + uv)
-      Dockerfile-airflow      # Airflow inference image
+      Dockerfile-open-pulse   # Production container image (Python 3.11 + uv, entrypoint: open-pulse health)
+      Dockerfile-airflow      # Airflow inference image (placeholder -- no source yet)
     scripts/
       run-sequential.sh       # Shell wrapper for sequential run
   docs/                       # Legacy static docs landing
@@ -230,10 +230,16 @@ quest:
 - **Service assets**: live under `infra/services/<name>/`, not `src/`
 - **Project layout**: standard Python src-layout (`pyproject.toml` at root,
   source in `src/open_pulse/`, tests in `tests/`)
-- **Container images**: live under `tools/images/`
+- **Container images**: live under `tools/images/`; `Dockerfile-open-pulse` is
+  the production image (builds from root context, copies `pyproject.toml`,
+  `uv.lock`, and `src/open_pulse/`; default CMD is `health`);
+  `Dockerfile-airflow` is a placeholder with no source yet
+- **Devcontainer**: `.devcontainer/Dockerfile` installs Python 3.11 + uv;
+  `devcontainer.json` runs `uv sync --group dev --group test` on creation
 - **CI triggers**: path-scoped; `src/**`, `tests/**`, `pyproject.toml`, and
-  `uv.lock` trigger Python CI; `tools/images/**`, `infra/`, and
-  `docker-compose.yml` trigger Docker validation
+  `uv.lock` trigger Python CI; `tools/images/**`, `.devcontainer/**`,
+  `pyproject.toml`, `uv.lock`, and `docker-compose.yml` trigger Docker
+  validation; `docs-site/**` triggers docs build
 - **Pre-commit**: configured in `.pre-commit-config.yaml`, Ruff scoped to `src/`
 
 ## Dependencies
