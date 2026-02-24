@@ -31,4 +31,4 @@ RUN uv sync --frozen --no-dev \
 USER ${APP_USER}
 
 ENTRYPOINT ["uv", "run", "open-pulse"]
-CMD ["doctor"]
+CMD ["health"]

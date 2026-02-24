@@ -7,6 +7,8 @@ on:
       - "infra/compose/**"
       - "tools/images/**"
       - ".devcontainer/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/docker-validate.yml"
   push:
     branches:
@@ -17,6 +19,8 @@ on:
       - "infra/compose/**"
       - "tools/images/**"
       - ".devcontainer/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/docker-validate.yml"
 
 permissions:
