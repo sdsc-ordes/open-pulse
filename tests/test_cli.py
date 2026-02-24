@@ -104,7 +104,7 @@ def test_list_tasks_and_doctor_commands(
 
 
 def test_shell_wrapper_forwards_args_and_exit_semantics() -> None:
-    wrapper = Path(__file__).resolve().parents[1] / "scripts" / "run-sequential.sh"
+    wrapper = Path(__file__).resolve().parents[1] / "tools" / "scripts" / "run-sequential.sh"
     content = wrapper.read_text(encoding="utf-8")
 
     assert "exec open-pulse run \"$@\"" in content

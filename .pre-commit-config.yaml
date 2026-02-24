@@ -11,10 +11,8 @@ repos:
     rev: v0.9.10
     hooks:
       - id: ruff
-        args: [--config, src/pyproject.toml]
         files: ^src/
       - id: ruff-format
-        args: [--config, src/pyproject.toml]
         files: ^src/
 
   # Optional markdown linting; remove this block if not needed locally.

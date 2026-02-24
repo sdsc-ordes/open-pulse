@@ -6,22 +6,17 @@ Living project map for AI agents and contributors.
 
 ```
 open-pulse-1/
-  src/                        # Unified Python CLI package ("open-pulse")
+  pyproject.toml              # Package metadata (hatchling, "open-pulse")
+  uv.lock                     # Locked dependency resolution
+  src/                        # Python package source (src-layout)
     open_pulse/               # Package source
       __init__.py
       cli.py                  # argparse-based CLI entry point
       orchestrator.py         # Sequential orchestrator with checkpoint/resume
       tasks.py                # Task protocol and FunctionTask adapter
       registry.py             # Task registry (deterministic execution order)
-    tests/                    # pytest test suite
-      test_cli.py
-    docker/
-      Dockerfile              # Production container image (Python 3.11 + uv)
-    scripts/
-      run-sequential.sh       # Shell wrapper for sequential run
-    pyproject.toml            # Package metadata (hatchling, "open-pulse")
-    uv.lock                   # Locked dependency resolution
-    README.md                 # CLI package documentation
+  tests/                      # pytest test suite
+    test_cli.py
   infra/
     services/                 # Per-service deployment assets
       neo4j/
@@ -43,9 +38,14 @@ open-pulse-1/
       README.md
     env/
       .env.example            # Root compose environment template
+  tools/
+    images/                   # Container image definitions
+      Dockerfile-open-pulse   # Production container image (Python 3.11 + uv)
+      Dockerfile-airflow      # Airflow inference image
+    scripts/
+      run-sequential.sh       # Shell wrapper for sequential run
   docs/                       # Legacy static docs landing
   docs-site/                  # Docusaurus documentation site
-  tools/                      # Utility scripts
   docker-compose.yml          # Root compose (profile-aware topology)
   .devcontainer/              # VS Code/Cursor devcontainer config
   .github/
@@ -61,8 +61,7 @@ open-pulse-1/
 ## Key Commands
 
 ```bash
-# CLI package (from src/)
-cd src
+# CLI package (from project root)
 uv sync --group dev --group test
 uv run open-pulse --help
 uv run pytest -q
@@ -72,7 +71,7 @@ docker compose up -d
 docker compose ps
 
 # Build CLI container (from root)
-docker build -f src/docker/Dockerfile -t open-pulse:local .
+docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
 ```
 
 ## Conventions
@@ -82,7 +81,11 @@ docker build -f src/docker/Dockerfile -t open-pulse:local .
 - **Commit style**: semantic commits (`feat:`, `fix:`, `refactor:`, etc.)
 - **Changelog**: Keep a Changelog format in `CHANGELOG.md`
 - **Service assets**: live under `infra/services/<name>/`, not `src/`
-- **CI triggers**: path-scoped; `src/**` triggers Python CI, `infra/` and
+- **Project layout**: standard Python src-layout (`pyproject.toml` at root,
+  source in `src/open_pulse/`, tests in `tests/`)
+- **Container images**: live under `tools/images/`
+- **CI triggers**: path-scoped; `src/**`, `tests/**`, `pyproject.toml`, and
+  `uv.lock` trigger Python CI; `tools/images/**`, `infra/`, and
   `docker-compose.yml` trigger Docker validation
 - **Pre-commit**: configured in `.pre-commit-config.yaml`, Ruff scoped to `src/`
 
@@ -93,7 +96,7 @@ docker build -f src/docker/Dockerfile -t open-pulse:local .
 - Docker + Docker Compose (for service deployment)
 - pnpm + Node.js 20 (for docs-site only)
 
-### CLI package (`src/pyproject.toml`)
+### CLI package (`pyproject.toml`)
 
 Core runtime dependencies:
 - `typer` -- CLI framework (replaces argparse)

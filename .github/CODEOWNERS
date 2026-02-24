@@ -1,5 +1,8 @@
 # Replace owners with your actual GitHub users/teams if needed.
 /src/ @open-pulse/maintainers
+/tests/ @open-pulse/maintainers
+/tools/ @open-pulse/maintainers
+/pyproject.toml @open-pulse/maintainers
 /infra/ @open-pulse/maintainers
 /docs/ @open-pulse/maintainers
 /*.md @open-pulse/maintainers

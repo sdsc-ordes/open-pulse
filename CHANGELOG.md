@@ -9,10 +9,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- Added core CLI dependencies to `src/pyproject.toml`: `typer`, `questionary`, `pydantic`, `pyyaml`, `python-dotenv`, and `rich`.
+- Added core CLI dependencies to `pyproject.toml`: `typer`, `questionary`, `pydantic`, `pyyaml`, `python-dotenv`, and `rich`.
 - Added `grimoire-ui` optional dependency group with `streamlit` for the GrimoireLab config UI.
 
 ### Changed
+
+- Adopted standard Python src-layout: moved `pyproject.toml` and `uv.lock` from `src/` to project root so `uv` commands run from the root directory.
+- Moved Dockerfile from `src/docker/Dockerfile` to `tools/images/Dockerfile-open-pulse`, matching the existing `tools/images/` convention.
+- Moved tests from `src/tests/` to root-level `tests/`.
+- Moved `src/scripts/run-sequential.sh` to `tools/scripts/run-sequential.sh`.
+- Removed `src/README.md` (root README is sufficient).
+- Updated all CI workflows, `.pre-commit-config.yaml`, `.devcontainer/devcontainer.json`, `AGENTS.md`, and root `README.md` to reference new paths.
 
 - Moved service deployment configs (`neo4j/`, `tentris-server/`, `portainer/`) from `src/` to `infra/services/` so `src/` is reserved for CLI source code.
 - Moved analysis package from `analysis/src/openpulse_analysis/` into `src/open_pulse/`, renaming the package from `openpulse-analysis` to `open-pulse`.

@@ -6,14 +6,14 @@
   },
   "remoteUser": "vscode",
   "workspaceFolder": "/workspaces/open-pulse-1",
-  "postCreateCommand": "cd src && uv sync --group dev --group test",
+  "postCreateCommand": "uv sync --group dev --group test",
   "customizations": {
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/workspaces/open-pulse-1/src/.venv/bin/python",
+        "python.defaultInterpreterPath": "/workspaces/open-pulse-1/.venv/bin/python",
         "python.testing.pytestEnabled": true,
         "python.testing.pytestArgs": [
-          "src/tests"
+          "tests"
         ],
         "editor.formatOnSave": true,
         "[python]": {
