@@ -47,12 +47,15 @@ def run_sequential(
     checkpoint_path: Path,
     *,
     resume: bool = False,
+    initial_context: dict[str, object] | None = None,
 ) -> tuple[str, ...]:
     """Run tasks in order, writing checkpoint state after each success."""
 
     completed = _read_checkpoint(checkpoint_path) if resume else []
     completed_set = set(completed)
     context: dict[str, object] = {"checkpoint_path": str(checkpoint_path)}
+    if initial_context:
+        context.update(initial_context)
 
     for task in tasks:
         if task.name in completed_set:

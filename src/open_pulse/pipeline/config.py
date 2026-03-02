@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from open_pulse.services.config import ServicesConfig
 
 
 class RetryConfig(BaseModel):
@@ -24,6 +26,8 @@ class LoggingConfig(BaseModel):
 class StepConfig(BaseModel):
     """Base config shared by all pipeline steps."""
 
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = True
     params: dict[str, Any] = Field(default_factory=dict)
 
@@ -37,8 +41,6 @@ class CrawlerStepConfig(StepConfig):
 class Neo4jUploadStepConfig(StepConfig):
     """Neo4j upload step configuration."""
 
-    endpoint: str = "bolt://localhost:7687"
-
 
 class MetadataExtractorStepConfig(StepConfig):
     """Metadata extractor step configuration."""
@@ -46,8 +48,6 @@ class MetadataExtractorStepConfig(StepConfig):
 
 class TentrisUploadStepConfig(StepConfig):
     """Tentris upload step configuration."""
-
-    endpoint: str = "http://localhost:7502"
 
 
 class StepsConfig(BaseModel):
@@ -69,6 +69,7 @@ class QuestConfig(BaseModel):
     name: str = "default-quest"
     retry: RetryConfig = Field(default_factory=RetryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    services: ServicesConfig = Field(default_factory=ServicesConfig)
     steps: StepsConfig = Field(default_factory=StepsConfig)
 
 

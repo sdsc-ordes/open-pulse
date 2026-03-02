@@ -95,6 +95,22 @@ def test_empty_task_list(tmp_path: Path) -> None:
     assert completed == ()
 
 
+def test_initial_context_is_passed_to_tasks(tmp_path: Path) -> None:
+    received: dict[str, object] = {}
+
+    def capture(ctx: dict[str, object]) -> None:
+        received.update(ctx)
+
+    tasks = (FunctionTask(name="capture", func=capture),)
+    run_sequential(
+        tasks,
+        tmp_path / "checkpoint.json",
+        initial_context={"services": "service-container"},
+    )
+
+    assert received["services"] == "service-container"
+
+
 def test_shell_wrapper_forwards_args_and_exit_semantics() -> None:
     wrapper = Path(__file__).resolve().parents[1] / "tools" / "scripts" / "run-sequential.sh"
     content = wrapper.read_text(encoding="utf-8")
