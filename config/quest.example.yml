@@ -6,6 +6,11 @@ quest:
   logging:
     level: INFO
     file: logs/quest.log
+  services:
+    neo4j:
+      endpoint: "bolt://localhost:7687"
+    tentris:
+      endpoint: "http://localhost:7502/sparql"
   steps:
     crawler:
       enabled: true
@@ -13,12 +18,10 @@ quest:
       params: {}
     neo4j_upload:
       enabled: true
-      endpoint: "bolt://localhost:7687"
       params: {}
     metadata_extractor:
       enabled: true
       params: {}
     tentris_upload:
       enabled: true
-      endpoint: "http://localhost:7502"
       params: {}

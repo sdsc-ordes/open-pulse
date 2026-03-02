@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Refactored integration boundaries by adding `src/open_pulse/services/` as the shared service layer for Neo4j/Tentris clients, service config defaults, health probes, and run-scoped service lifecycle management.
+- Updated quest pipeline execution to inject a run-scoped `ServiceContainer` into step context and close all services deterministically at the end of full runs and single-step runs.
+- Refactored `open-pulse health` to delegate endpoint probes to `open_pulse.services.health` and source Neo4j/Tentris default endpoints from shared service config constants instead of command-local hardcoded defaults.
+- Updated docs and config examples to document the new `quest.services` block and service-layer architecture.
 - Updated `Dockerfile-open-pulse` default CMD from legacy `doctor` to `health` to match the new Typer CLI command structure.
 - Fixed `Dockerfile-airflow` broken COPY path (`../../src/airflow/...`); commented out the copy as a placeholder since no airflow source exists yet, and bumped base image from Python 3.9 to 3.11.
 - Added `pyproject.toml` and `uv.lock` to `docker-validate.yml` path triggers so dependency changes that affect Docker builds are caught by CI.
@@ -19,6 +23,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added new `open_pulse.services` modules:
+  `config.py`, `base.py`, `neo4j.py`, `tentris.py`, `health.py`, and `container.py`.
+- Added tests for service-container lifecycle behavior in pipeline runs, step-level service context requirements, service-health probe utilities, and orchestrator `initial_context` propagation.
 - Implemented `health` command with Docker daemon check, container status table, endpoint probes (Neo4j HTTP/Bolt, Tentris SPARQL, GrimoireLab DB), smoke tests (CLI version, pipeline config schema, Compose config validation), and rich table output. Exits with code 1 when any check fails. Configurable via `--neo4j`, `--neo4j-bolt`, `--tentris`, and `--grimoirelab-db` options.
 - Added health command tests covering Docker unavailable, all-ok scenario, failing endpoints, stopped containers, custom endpoint options, no-containers hint, HTTP/TCP probe unit tests, host:port parsing, smoke test validation, and container status JSON parsing.
 
@@ -68,6 +75,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added `AGENTS.md` documenting the new directory layout, key commands, and conventions.
 
 ### Removed
+
+- Removed quest step-level endpoint settings (`quest.steps.neo4j_upload.endpoint` and `quest.steps.tentris_upload.endpoint`) from pipeline config models and examples; `quest.services.*.endpoint` is now required as the canonical service configuration location.
 
 - Removed `analysis/` directory (contents migrated to `src/`).
 

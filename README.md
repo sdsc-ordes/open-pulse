@@ -1,83 +1,81 @@
 # Open Pulse
 
-Open Pulse is a repository for runtime graph-data services and analysis workflows.
-It combines a unified CLI package in `src/` with deployable service assets in
-`infra/services/` and shared infrastructure controls in `infra/`.
+Open Pulse is a unified CLI and infrastructure repository for graph-analysis workflows.
+The Python package lives in `src/open_pulse/`; deployment assets live in `infra/services/`.
 
-## Project Purpose
+## Key Structure
 
-- Provide reproducible graph data services for development and operations.
-- Support data/analysis workflows via a unified Python CLI package.
-- Keep infrastructure and documentation discoverable for new contributors.
+- `src/open_pulse/commands/`: CLI command groups (`deploy`, `quest`, `grimoire`, `health`)
+- `src/open_pulse/pipeline/`: quest pipeline config, runner, and steps
+- `src/open_pulse/services/`: shared service clients/config/probes used by pipeline and health
+- `infra/services/`: per-service deployment artifacts (Neo4j, Tentris, Portainer)
+- `config/quest.example.yml`: canonical quest config example
 
-## System Architecture
-
-The repository is organized around three boundaries:
-
-- `src/`: Python package source code (`open-pulse`) using the standard
-  src-layout, with `pyproject.toml` and `uv.lock` at the project root.
-- `infra/services/`: service-specific deployment assets (Docker Compose files,
-  env templates, READMEs) for Neo4j, Tentris, Portainer, etc.
-- `infra/`: shared infrastructure configuration (cross-service compose overrides,
-  environment templates).
-
-### Decision Note: Boundaries
-
-Use `src/` for CLI source code, `infra/services/` for
-per-service deployment assets, and `infra/` for cross-cutting operational
-configuration. This separation keeps the CLI release cadence independent of
-service deployment changes.
-
-## Service Catalog
-
-| Service | Path | Ports | Compose Profile | Status |
-| --- | --- | --- | --- | --- |
-| Tentris DB | `infra/services/tentris-server/` | `7502 -> 9080` | `default` | active |
-| Neo4j | `infra/services/neo4j/` | `7474`, `7687` | `service-local` | available |
-| Portainer | `infra/services/portainer/` | configurable | `service-local` | available |
-
-## Quick Start: DB Stack
-
-From repository root:
+## Quick Start
 
 ```bash
-docker compose up -d
-```
-
-Check service status:
-
-```bash
-docker compose ps
-```
-
-Stop the stack:
-
-```bash
-docker compose down
-```
-
-The root `docker-compose.yml` currently starts Tentris DB (`hackathon-db`) on
-`http://localhost:7502`.
-
-## Quick Start: CLI with `uv`
-
-```bash
-uv sync
+uv sync --group dev --group test
 uv run open-pulse --help
+uv run pytest -q
 ```
 
-## Documentation Links
+## Quest Config (Breaking Change)
 
-- Docs architecture and migration: `docs/README.md`
-- Docusaurus docs root: `docs-site/docs/index.md`
-- Getting started docs: `docs-site/docs/getting-started/index.md`
-- Architecture docs: `docs-site/docs/architecture/index.md`
-- Services docs: `docs-site/docs/services/index.md`
-- Analysis docs: `docs-site/docs/analysis/index.md`
-- Operations docs: `docs-site/docs/operations/index.md`
+Quest service endpoints are now defined only under `quest.services`.
+Step-level endpoint fields were removed and are no longer supported.
 
-## Release and Contribution Links
+```yaml
+quest:
+  name: "my-quest-run"
+  retry:
+    max_attempts: 3
+    backoff_seconds: 5
+  logging:
+    level: INFO
+    file: logs/quest.log
+  services:
+    neo4j:
+      endpoint: "bolt://localhost:7687"
+    tentris:
+      endpoint: "http://localhost:7502/sparql"
+  steps:
+    crawler:
+      enabled: true
+      script: "placeholder"
+    neo4j_upload:
+      enabled: true
+    metadata_extractor:
+      enabled: true
+    tentris_upload:
+      enabled: true
+```
+
+## Service Layer
+
+`open_pulse.services` now contains:
+
+- typed service config defaults
+- Neo4j and Tentris service wrappers
+- shared endpoint probe utilities used by `open-pulse health`
+- run-scoped `ServiceContainer` used by quest pipeline runs
+
+## Health Command Defaults
+
+`open-pulse health` now sources Neo4j/Tentris defaults from shared service config:
+
+- Neo4j HTTP: `http://localhost:7474`
+- Neo4j Bolt: `bolt://localhost:7687`
+- Tentris SPARQL: `http://localhost:7502/sparql`
+- GrimoireLab DB: `localhost:5432`
+
+## Docs
+
+- Docusaurus source: `docs-site/`
+- Docs index: `docs-site/docs/index.md`
+- Legacy static landing: `docs/` (see `docs/README.md`)
+
+## Project Links
 
 - Changelog: `CHANGELOG.md`
-- Contributing guide: `CONTRIBUTING.md`
-- Security policy: `SECURITY.md`
+- Contributing: `CONTRIBUTING.md`
+- Security: `SECURITY.md`

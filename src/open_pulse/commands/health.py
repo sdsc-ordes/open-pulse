@@ -4,20 +4,23 @@ from __future__ import annotations
 
 import json
 import shutil
-import socket
 import subprocess
 from pathlib import Path
 from typing import Annotated
-from urllib.error import URLError
-from urllib.request import Request, urlopen
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-console = Console()
+from open_pulse.services.config import (
+    DEFAULT_GRIMOIRELAB_DB,
+    DEFAULT_NEO4J_BOLT_ENDPOINT,
+    DEFAULT_NEO4J_HTTP_ENDPOINT,
+    DEFAULT_TENTRIS_SPARQL_ENDPOINT,
+)
+from open_pulse.services.health import probe_endpoints
 
-_CONNECT_TIMEOUT = 5
+console = Console()
 
 
 def _find_project_root() -> Path | None:
@@ -74,38 +77,6 @@ def _get_container_statuses(project_root: Path) -> list[dict[str, str]]:
         return []
 
 
-def _probe_http(url: str) -> tuple[bool, str]:
-    """Try an HTTP GET against *url*. Returns ``(ok, detail)``."""
-    try:
-        req = Request(url, method="GET")
-        with urlopen(req, timeout=_CONNECT_TIMEOUT) as resp:  # noqa: S310
-            return True, f"HTTP {resp.status}"
-    except URLError as exc:
-        return False, str(getattr(exc, "reason", exc))
-    except Exception as exc:  # noqa: BLE001
-        return False, str(exc)
-
-
-def _probe_tcp(host: str, port: int) -> tuple[bool, str]:
-    """Try to open a TCP socket to *host*:*port*. Returns ``(ok, detail)``."""
-    try:
-        with socket.create_connection((host, port), timeout=_CONNECT_TIMEOUT):
-            return True, "connection established"
-    except OSError as exc:
-        return False, str(exc)
-
-
-def _parse_host_port(address: str, default_port: int) -> tuple[str, int]:
-    """Split ``host:port`` with a fallback *default_port*."""
-    if ":" in address:
-        host, port_str = address.rsplit(":", 1)
-        try:
-            return host, int(port_str)
-        except ValueError:
-            pass
-    return address, default_port
-
-
 def _probe_endpoints(
     neo4j_http: str,
     neo4j_bolt: str,
@@ -113,26 +84,7 @@ def _probe_endpoints(
     grimoirelab_db: str,
 ) -> list[tuple[str, str, bool, str]]:
     """Probe all known service endpoints and return results."""
-    bolt_addr = neo4j_bolt.removeprefix("bolt://").removeprefix("neo4j://")
-    bolt_host, bolt_port = _parse_host_port(bolt_addr, 7687)
-
-    db_host, db_port = _parse_host_port(grimoirelab_db, 5432)
-
-    results: list[tuple[str, str, bool, str]] = []
-
-    ok, detail = _probe_http(neo4j_http)
-    results.append(("Neo4j (HTTP)", neo4j_http, ok, detail))
-
-    ok, detail = _probe_tcp(bolt_host, bolt_port)
-    results.append(("Neo4j (Bolt)", neo4j_bolt, ok, detail))
-
-    ok, detail = _probe_http(tentris)
-    results.append(("Tentris (SPARQL)", tentris, ok, detail))
-
-    ok, detail = _probe_tcp(db_host, db_port)
-    results.append(("GrimoireLab DB", grimoirelab_db, ok, detail))
-
-    return results
+    return probe_endpoints(neo4j_http, neo4j_bolt, tentris, grimoirelab_db)
 
 
 def _smoke_tests(
@@ -228,19 +180,19 @@ def check(
     neo4j: Annotated[
         str,
         typer.Option(help="Neo4j HTTP endpoint to probe."),
-    ] = "http://localhost:7474",
+    ] = DEFAULT_NEO4J_HTTP_ENDPOINT,
     neo4j_bolt: Annotated[
         str,
         typer.Option("--neo4j-bolt", help="Neo4j Bolt endpoint to probe."),
-    ] = "bolt://localhost:7687",
+    ] = DEFAULT_NEO4J_BOLT_ENDPOINT,
     tentris: Annotated[
         str,
         typer.Option(help="Tentris SPARQL endpoint to probe."),
-    ] = "http://localhost:7502/sparql",
+    ] = DEFAULT_TENTRIS_SPARQL_ENDPOINT,
     grimoirelab_db: Annotated[
         str,
         typer.Option("--grimoirelab-db", help="GrimoireLab PostgreSQL host:port."),
-    ] = "localhost:5432",
+    ] = DEFAULT_GRIMOIRELAB_DB,
 ) -> None:
     """Check the health of all deployed services.
 

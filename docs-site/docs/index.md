@@ -5,12 +5,18 @@ slug: /
 
 # Open Pulse Documentation
 
-This site contains the Open Pulse documentation source of truth managed in the `docs` branch workflow.
+This site is the source of truth for Open Pulse docs.
 
-Use the navigation to access:
+## What changed recently
 
-- Getting started guidance
-- Architecture references
-- Services documentation
-- Analysis package notes
-- Operations runbooks and branch model
+- A shared `open_pulse.services` layer now owns Neo4j/Tentris service clients, config defaults, and health probe utilities.
+- Quest pipeline runs now use a run-scoped service container injected into step context.
+- Quest config is now service-centric: use `quest.services.*.endpoint`.
+
+## Start here
+
+- [Getting Started](./getting-started/index.md)
+- [Architecture](./architecture/index.md)
+- [Services](./services/index.md)
+- [Analysis](./analysis/index.md)
+- [Operations](./operations/index.md)

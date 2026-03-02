@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 
 from open_pulse.orchestrator import run_sequential
+from open_pulse.services.container import ServiceContainer
 from open_pulse.tasks import FunctionTask
 
 from .config import QuestFileConfig, RetryConfig, StepConfig
@@ -171,13 +172,23 @@ def run_pipeline(
     checkpoint = base / f"{quest.name}.json"
 
     tasks = build_tasks(config)
+    services = ServiceContainer.from_quest_config(quest)
+
     logger.info(
         "Starting quest %r with %d step(s)%s",
         quest.name,
         len(tasks),
         " (resuming)" if resume else "",
     )
-    completed = run_sequential(tasks, checkpoint, resume=resume)
+    try:
+        completed = run_sequential(
+            tasks,
+            checkpoint,
+            resume=resume,
+            initial_context={"services": services},
+        )
+    finally:
+        services.close_all()
     logger.info("Quest %r finished — %d step(s) completed", quest.name, len(completed))
     return completed
 
@@ -197,10 +208,14 @@ def run_single_step(
     _configure_logging(config)
 
     quest = config.quest
+    services = ServiceContainer.from_quest_config(quest)
     func = STEP_REGISTRY[step_name]
     wrapped = _wrap_with_retry(func, step_name, quest.retry)
     task = FunctionTask(name=step_name, func=wrapped)
 
     logger.info("Running single step %r for quest %r", step_name, quest.name)
-    task.run({})
+    try:
+        task.run({"services": services})
+    finally:
+        services.close_all()
     logger.info("Step %r completed", step_name)

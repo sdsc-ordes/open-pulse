@@ -1,4 +1,4 @@
-"""Tests for the ``health`` command and supporting probe functions."""
+"""Tests for the ``health`` command and service health probes."""
 
 from __future__ import annotations
 
@@ -10,6 +10,12 @@ from typer.testing import CliRunner
 
 from open_pulse.cli import app
 from open_pulse.commands import health as health_mod
+from open_pulse.services import health as svc_health
+from open_pulse.services.config import (
+    DEFAULT_NEO4J_BOLT_ENDPOINT,
+    DEFAULT_NEO4J_HTTP_ENDPOINT,
+    DEFAULT_TENTRIS_SPARQL_ENDPOINT,
+)
 
 runner = CliRunner()
 
@@ -140,6 +146,23 @@ def test_health_custom_endpoints() -> None:
     )
 
 
+def test_health_default_endpoints_come_from_service_config() -> None:
+    with (
+        patch.object(health_mod, "_docker_available", return_value=False),
+        patch.object(health_mod, "_probe_endpoints") as mock_probe,
+        patch.object(health_mod, "_smoke_tests", return_value=[]),
+    ):
+        mock_probe.return_value = []
+        runner.invoke(app, ["health"])
+
+    mock_probe.assert_called_once_with(
+        DEFAULT_NEO4J_HTTP_ENDPOINT,
+        DEFAULT_NEO4J_BOLT_ENDPOINT,
+        DEFAULT_TENTRIS_SPARQL_ENDPOINT,
+        "localhost:5432",
+    )
+
+
 def test_health_no_containers_shows_hint(tmp_path: Path) -> None:
     with (
         patch.object(health_mod, "_docker_available", return_value=True),
@@ -183,18 +206,18 @@ def test_health_multiple_containers_mixed_states(tmp_path: Path) -> None:
     assert result.exit_code == 1
 
 
-# -- Health unit tests -------------------------------------------------------
+# -- Service health unit tests -----------------------------------------------
 
 
 def test_probe_http_success() -> None:
-    with patch("open_pulse.commands.health.urlopen") as mock_urlopen:
+    with patch("open_pulse.services.health.urlopen") as mock_urlopen:
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_resp.__enter__ = lambda self: self
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_resp
 
-        ok, detail = health_mod._probe_http("http://localhost:7474")
+        ok, detail = svc_health.probe_http("http://localhost:7474")
 
     assert ok is True
     assert "200" in detail
@@ -204,10 +227,10 @@ def test_probe_http_unreachable() -> None:
     from urllib.error import URLError
 
     with patch(
-        "open_pulse.commands.health.urlopen",
+        "open_pulse.services.health.urlopen",
         side_effect=URLError("Connection refused"),
     ):
-        ok, detail = health_mod._probe_http("http://localhost:9999")
+        ok, detail = svc_health.probe_http("http://localhost:9999")
 
     assert ok is False
     assert "refused" in detail.lower()
@@ -218,8 +241,8 @@ def test_probe_tcp_success() -> None:
     mock_sock.__enter__ = lambda self: self
     mock_sock.__exit__ = MagicMock(return_value=False)
 
-    with patch("open_pulse.commands.health.socket.create_connection", return_value=mock_sock):
-        ok, detail = health_mod._probe_tcp("localhost", 7687)
+    with patch("open_pulse.services.health.socket.create_connection", return_value=mock_sock):
+        ok, detail = svc_health.probe_tcp("localhost", 7687)
 
     assert ok is True
     assert "established" in detail
@@ -227,19 +250,40 @@ def test_probe_tcp_success() -> None:
 
 def test_probe_tcp_refused() -> None:
     with patch(
-        "open_pulse.commands.health.socket.create_connection",
+        "open_pulse.services.health.socket.create_connection",
         side_effect=OSError("Connection refused"),
     ):
-        ok, detail = health_mod._probe_tcp("localhost", 9999)
+        ok, detail = svc_health.probe_tcp("localhost", 9999)
 
     assert ok is False
     assert "refused" in detail.lower()
 
 
 def test_parse_host_port() -> None:
-    assert health_mod._parse_host_port("myhost:1234", 5432) == ("myhost", 1234)
-    assert health_mod._parse_host_port("myhost", 5432) == ("myhost", 5432)
-    assert health_mod._parse_host_port("myhost:bad", 5432) == ("myhost:bad", 5432)
+    assert svc_health.parse_host_port("myhost:1234", 5432) == ("myhost", 1234)
+    assert svc_health.parse_host_port("myhost", 5432) == ("myhost", 5432)
+    assert svc_health.parse_host_port("myhost:bad", 5432) == ("myhost:bad", 5432)
+
+
+def test_probe_endpoints_uses_service_clients() -> None:
+    with (
+        patch("open_pulse.services.health.probe_http", return_value=(True, "HTTP 200")),
+        patch("open_pulse.services.health.probe_tcp", return_value=(True, "connection established")),
+        patch("open_pulse.services.health.Neo4jService.check_bolt", return_value=(True, "connection established")),
+        patch("open_pulse.services.health.TentrisService.check_sparql", return_value=(True, "HTTP 200")),
+    ):
+        result = svc_health.probe_endpoints(
+            "http://localhost:7474",
+            "bolt://localhost:7687",
+            "http://localhost:7502/sparql",
+            "localhost:5432",
+        )
+
+    assert len(result) == 4
+    assert result[0][0] == "Neo4j (HTTP)"
+    assert result[1][0] == "Neo4j (Bolt)"
+    assert result[2][0] == "Tentris (SPARQL)"
+    assert result[3][0] == "GrimoireLab DB"
 
 
 def test_smoke_tests_include_version() -> None:

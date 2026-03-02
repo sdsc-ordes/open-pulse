@@ -34,6 +34,14 @@ open-pulse-1/
         neo4j_upload.py       # Step: upload to Neo4j (placeholder)
         metadata_extractor.py # Step: extract metadata (placeholder)
         tentris_upload.py     # Step: upload to Tentris (placeholder)
+      services/               # Shared service clients/config/health probes
+        __init__.py
+        config.py             # Service endpoint defaults + config models
+        base.py               # Service protocols
+        neo4j.py              # Neo4j service client wrapper
+        tentris.py            # Tentris service client wrapper
+        health.py             # Shared endpoint probe helpers
+        container.py          # Run-scoped service container
   tests/                      # pytest test suite
     conftest.py               # Shared fixtures (CliRunner, invoke helper)
     test_cli.py               # CLI entry point: help text, --version, subcommand presence
@@ -153,18 +161,21 @@ quest:
   logging:
     level: INFO
     file: logs/quest.log
+  services:
+    neo4j:
+      endpoint: "bolt://localhost:7687"
+    tentris:
+      endpoint: "http://localhost:7502/sparql"
   steps:
     crawler:
       enabled: true
       script: "placeholder"
     neo4j_upload:
       enabled: true
-      endpoint: "bolt://localhost:7687"
     metadata_extractor:
       enabled: true
     tentris_upload:
       enabled: true
-      endpoint: "http://localhost:7502"
 ```
 
 **Architecture notes:**
