@@ -28,22 +28,7 @@ def install_watcher(
     schedule: str = _DEFAULT_SCHEDULE,
     clone_dir: Path | None = None,
 ) -> None:
-    """Register a cron job that watches *repo_url* for config changes.
-
-    Parameters
-    ----------
-    repo_url:
-        Git remote URL to clone / pull.
-    config_path:
-        Relative path inside the repo to the config file to watch.
-    branch:
-        Git branch to track.
-    schedule:
-        Cron schedule expression (default: every 30 minutes).
-    clone_dir:
-        Local directory to clone into.  Defaults to
-        ``~/.open-pulse/grimoire-watcher``.
-    """
+    """Register a cron job that watches *repo_url* for config changes."""
     if platform.system() == "Windows":
         _console.print(
             "[red bold]Error:[/red bold] Cron is not available on Windows.\n"
@@ -91,19 +76,19 @@ def _build_watcher_script(
 #!/usr/bin/env bash
 set -eu
 
-REPO_DIR="{repo_dir}"
+REPO_DIR=\"{repo_dir}\"
 
-if [ ! -d "$REPO_DIR/.git" ]; then
-    git clone --branch {branch} --single-branch {repo_url} "$REPO_DIR"
+if [ ! -d \"$REPO_DIR/.git\" ]; then
+    git clone --branch {branch} --single-branch {repo_url} \"$REPO_DIR\"
 fi
 
-cd "$REPO_DIR"
-OLD_HASH=$(git rev-parse HEAD:{config_path} 2>/dev/null || echo "none")
+cd \"$REPO_DIR\"
+OLD_HASH=$(git rev-parse HEAD:{config_path} 2>/dev/null || echo \"none\")
 git pull --ff-only origin {branch}
-NEW_HASH=$(git rev-parse HEAD:{config_path} 2>/dev/null || echo "none")
+NEW_HASH=$(git rev-parse HEAD:{config_path} 2>/dev/null || echo \"none\")
 
-if [ "$OLD_HASH" != "$NEW_HASH" ]; then
-    echo "[open-pulse watcher] Config changed: {config_path}"
+if [ \"$OLD_HASH\" != \"$NEW_HASH\" ]; then
+    echo \"[open-pulse watcher] Config changed: {config_path}\"
     # Placeholder: add notification or reload logic here
 fi
 """
