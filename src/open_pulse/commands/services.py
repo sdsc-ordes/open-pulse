@@ -1,4 +1,4 @@
-"""Grimoire command group -- GrimoireLab configuration tools."""
+"""Services command group -- service-oriented tooling."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
-from rich.console import Console
 
-console = Console(stderr=True)
-app = typer.Typer(help="GrimoireLab configuration tools.")
+app = typer.Typer(help="Service-oriented commands.")
+grimoire_app = typer.Typer(help="Grimoire services commands.")
+app.add_typer(grimoire_app, name="grimoire")
 
 
-@app.command(name="prepare-config")
+@grimoire_app.command(name="prepare-config")
 def prepare_config(
     neo4j_endpoint: Annotated[
         str,
@@ -38,7 +38,7 @@ def prepare_config(
     ] = Path("projects.json"),
 ) -> None:
     """Generate GrimoireLab project configuration via SPARQL queries."""
-    from open_pulse.grimoire.sparql_config import generate_config
+    from open_pulse.utils.grimoire.sparql_config import generate_config
 
     generate_config(
         neo4j_endpoint=neo4j_endpoint,
@@ -47,29 +47,7 @@ def prepare_config(
     )
 
 
-@app.command()
-def ui() -> None:
-    """Launch the Streamlit configuration UI.
-
-    Requires the ``grimoire-ui`` optional dependency group
-    (``pip install open-pulse[grimoire-ui]``).
-    """
-    try:
-        import streamlit  # noqa: F401
-    except ImportError:
-        console.print(
-            "[red bold]Error:[/red bold] Streamlit is not installed.\n"
-            "Install the grimoire-ui extra:  "
-            "[bold]pip install open-pulse\\[grimoire-ui][/bold]"
-        )
-        raise typer.Exit(code=1) from None
-
-    from open_pulse.grimoire.streamlit_app import launch_streamlit
-
-    launch_streamlit()
-
-
-@app.command(name="install-watcher")
+@grimoire_app.command(name="install-watcher")
 def install_watcher(
     repo_url: Annotated[
         str,
@@ -114,7 +92,7 @@ def install_watcher(
 
     Linux/macOS only.  On Windows, prints guidance for Task Scheduler.
     """
-    from open_pulse.grimoire.cronjob import install_watcher as _install
+    from open_pulse.utils.grimoire.cronjob import install_watcher as _install
 
     _install(
         repo_url=repo_url,
