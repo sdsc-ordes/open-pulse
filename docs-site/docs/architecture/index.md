@@ -9,7 +9,7 @@ slug: /architecture
 
 - `src/open_pulse/`: CLI and runtime code
 - `infra/services/`: service deployment assets
-- `infra/compose/`: cross-service compose overrides
+- `infra/compose/`: compose topology documentation
 
 ## Runtime structure
 

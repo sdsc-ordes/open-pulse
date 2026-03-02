@@ -22,12 +22,14 @@ from open_pulse.services.health import probe_endpoints
 
 console = Console()
 
+_COMPOSE_FILE = Path("infra/compose/docker-compose.yml")
+
 
 def _find_project_root() -> Path | None:
-    """Walk up from this file to find the repo root (contains docker-compose.yml)."""
+    """Walk up from this file to find the repo root (contains infra compose files)."""
     candidate = Path(__file__).resolve().parent
     for _ in range(10):
-        if (candidate / "docker-compose.yml").is_file():
+        if (candidate / _COMPOSE_FILE).is_file():
             return candidate
         candidate = candidate.parent
     return None
@@ -51,7 +53,7 @@ def _get_container_statuses(project_root: Path) -> list[dict[str, str]]:
         "docker",
         "compose",
         "-f",
-        str(project_root / "docker-compose.yml"),
+        str(project_root / _COMPOSE_FILE),
         "ps",
         "-a",
         "--format",
@@ -109,7 +111,7 @@ def _smoke_tests(
         results.append(("Pipeline config schema", False, str(exc)))
 
     if docker_ok and project_root is not None:
-        compose_file = project_root / "docker-compose.yml"
+        compose_file = project_root / _COMPOSE_FILE
         try:
             proc = subprocess.run(
                 ["docker", "compose", "-f", str(compose_file), "config", "--quiet"],
@@ -119,7 +121,7 @@ def _smoke_tests(
             )
             if proc.returncode == 0:
                 results.append(
-                    ("Compose config", True, "docker-compose.yml is valid")
+                    ("Compose config", True, f"{_COMPOSE_FILE} is valid")
                 )
             else:
                 msg = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "invalid"

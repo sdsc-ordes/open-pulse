@@ -66,10 +66,9 @@ open-pulse-1/
         docker-compose.yaml
         .env.dist
         README.md
-    compose/                  # Cross-service compose overrides
-      docker-compose.analysis.override.yml
-      docker-compose.grimoirelab.override.yml
-      docker-compose.orchestration.override.yml
+    compose/                  # Compose topology docs and guidance
+      docker-compose.yml      # Base compose for all infra services
+      docker-compose.cli.yml  # Optional overlay adding open-pulse CLI container
       README.md
     env/
       .env.example            # Root compose environment template
@@ -81,7 +80,6 @@ open-pulse-1/
       run-sequential.sh       # Shell wrapper for sequential run
   docs/                       # Legacy static docs landing
   docs-site/                  # Docusaurus documentation site
-  docker-compose.yml          # Root compose (profile-aware topology)
   .devcontainer/              # VS Code/Cursor devcontainer config
   .github/
     CODEOWNERS
@@ -102,8 +100,8 @@ uv run open-pulse --help
 uv run pytest -q
 
 # Docker stack (from root)
-docker compose up -d
-docker compose ps
+docker compose -f infra/compose/docker-compose.yml up -d
+docker compose -f infra/compose/docker-compose.yml ps
 
 # Build CLI container (from root)
 docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
@@ -129,6 +127,10 @@ docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
 - `--profile` / `-p` (repeatable) -- Compose profiles to activate
 - `--env-file` / `-e` -- Path to a `.env` file (default: `<root>/.env`, auto-created from template)
 - `--file` / `-f` (repeatable) -- Extra Compose override files to include
+- `--with-cli` -- Include `infra/compose/docker-compose.cli.yml` to run the registry-based CLI container
+
+**Options for `deploy down` / `deploy ps`:**
+- `--with-cli` -- Include `infra/compose/docker-compose.cli.yml` for stack tear-down or status checks
 
 ### `quest` -- Analysis pipeline execution
 
@@ -249,7 +251,7 @@ quest:
   `devcontainer.json` runs `uv sync --group dev --group test` on creation
 - **CI triggers**: path-scoped; `src/**`, `tests/**`, `pyproject.toml`, and
   `uv.lock` trigger Python CI; `tools/images/**`, `.devcontainer/**`,
-  `pyproject.toml`, `uv.lock`, and `docker-compose.yml` trigger Docker
+  `pyproject.toml`, `uv.lock`, and `infra/compose/docker-compose*.yml` trigger Docker
   validation; `docs-site/**` triggers docs build
 - **Pre-commit**: configured in `.pre-commit-config.yaml`, Ruff scoped to `src/`
 

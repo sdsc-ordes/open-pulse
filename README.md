@@ -19,6 +19,23 @@ uv run open-pulse --help
 uv run pytest -q
 ```
 
+## Docker Compose Topology
+
+- `infra/compose/docker-compose.yml`: all infra services
+- `infra/compose/docker-compose.cli.yml`: optional CLI container overlay (registry image)
+
+Start infra only:
+
+```bash
+docker compose -f infra/compose/docker-compose.yml up -d
+```
+
+Start infra + CLI container:
+
+```bash
+docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.cli.yml up -d
+```
+
 ## Quest Config (Breaking Change)
 
 Quest service endpoints are now defined only under `quest.services`.

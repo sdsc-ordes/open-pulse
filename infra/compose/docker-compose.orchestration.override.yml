@@ -1,4 +1,0 @@
-services:
-  portainer:
-    environment:
-      PORTAINER_FEATURE_FLAGS: edge-compute-disabled
