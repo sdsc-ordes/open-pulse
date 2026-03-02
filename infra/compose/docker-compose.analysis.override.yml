@@ -1,6 +1,0 @@
-services:
-  analysis-notebook:
-    environment:
-      ANALYSIS_SOURCE_DIR: /workspace/analysis
-    volumes:
-      - ./analysis:/workspace/analysis:ro

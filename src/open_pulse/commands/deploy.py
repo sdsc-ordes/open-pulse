@@ -21,15 +21,22 @@ _PROFILE_DESCRIPTIONS = {
 console = Console(stderr=True)
 app = typer.Typer(help="Deploy Docker infrastructure.")
 
+_COMPOSE_DIR = Path("infra/compose")
+_BASE_COMPOSE_FILE = _COMPOSE_DIR / "docker-compose.yml"
+_CLI_COMPOSE_FILE = _COMPOSE_DIR / "docker-compose.cli.yml"
+
 
 def _find_project_root() -> Path:
-    """Walk up from this file to find the repo root (contains docker-compose.yml)."""
+    """Walk up from this file to find the repo root (contains infra compose files)."""
     candidate = Path(__file__).resolve().parent
     for _ in range(10):
-        if (candidate / "docker-compose.yml").is_file():
+        if (candidate / _BASE_COMPOSE_FILE).is_file():
             return candidate
         candidate = candidate.parent
-    typer.echo("Error: cannot locate project root (no docker-compose.yml found).", err=True)
+    typer.echo(
+        f"Error: cannot locate project root (no {_BASE_COMPOSE_FILE} found).",
+        err=True,
+    )
     raise typer.Exit(code=1)
 
 
@@ -158,12 +165,19 @@ def up(
             help="Extra Compose file(s) to include (repeatable).",
         ),
     ] = None,
+    with_cli: Annotated[
+        bool,
+        typer.Option(
+            "--with-cli",
+            help=f"Include {_CLI_COMPOSE_FILE} to run the CLI container from registry image.",
+        ),
+    ] = False,
 ) -> None:
     """Deploy services using Docker Compose.
 
     Without ``--profile`` flags the command opens an interactive selector
-    so you can pick which profiles to enable.  The root
-    ``docker-compose.yml`` is always included; pass ``--file`` to layer
+    so you can pick which profiles to enable.  The base compose file
+    ``infra/compose/docker-compose.yml`` is always included; pass ``--file`` to layer
     additional overrides.
     """
     if not _docker_available():
@@ -177,8 +191,10 @@ def up(
 
     env_path = _ensure_env_file(project_root, env_file)
 
-    root_compose = project_root / "docker-compose.yml"
+    root_compose = project_root / _BASE_COMPOSE_FILE
     compose_files: list[Path] = [root_compose]
+    if with_cli:
+        compose_files.append(project_root / _CLI_COMPOSE_FILE)
     if compose_file:
         compose_files.extend(compose_file)
 
@@ -204,6 +220,13 @@ def down(
         bool,
         typer.Option("--volumes", "-v", help="Remove named volumes declared in the Compose file."),
     ] = False,
+    with_cli: Annotated[
+        bool,
+        typer.Option(
+            "--with-cli",
+            help=f"Include {_CLI_COMPOSE_FILE} when tearing down the stack.",
+        ),
+    ] = False,
 ) -> None:
     """Tear down deployed services."""
     if not _docker_available():
@@ -214,8 +237,10 @@ def down(
 
     project_root = _find_project_root()
 
-    root_compose = project_root / "docker-compose.yml"
+    root_compose = project_root / _BASE_COMPOSE_FILE
     files: list[Path] = [root_compose]
+    if with_cli:
+        files.append(project_root / _CLI_COMPOSE_FILE)
     if compose_file:
         files.extend(compose_file)
 
@@ -232,7 +257,15 @@ def down(
 
 
 @app.command()
-def ps() -> None:
+def ps(
+    with_cli: Annotated[
+        bool,
+        typer.Option(
+            "--with-cli",
+            help=f"Include {_CLI_COMPOSE_FILE} when listing containers.",
+        ),
+    ] = False,
+) -> None:
     """Show the status of deployed containers."""
     if not _docker_available():
         console.print(
@@ -242,6 +275,9 @@ def ps() -> None:
 
     project_root = _find_project_root()
 
-    cmd = ["docker", "compose", "-f", str(project_root / "docker-compose.yml"), "ps", "-a"]
+    cmd = ["docker", "compose", "-f", str(project_root / _BASE_COMPOSE_FILE)]
+    if with_cli:
+        cmd.extend(["-f", str(project_root / _CLI_COMPOSE_FILE)])
+    cmd.extend(["ps", "-a"])
     result = subprocess.run(cmd, cwd=str(project_root))
     raise typer.Exit(code=result.returncode)
