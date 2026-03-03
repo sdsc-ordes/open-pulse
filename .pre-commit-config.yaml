@@ -14,4 +14,3 @@ repos:
         files: ^src/
       - id: ruff-format
         files: ^src/
-
