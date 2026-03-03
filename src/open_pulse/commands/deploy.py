@@ -218,7 +218,9 @@ def down(
     ] = None,
     volumes: Annotated[
         bool,
-        typer.Option("--volumes", "-v", help="Remove named volumes declared in the Compose file."),
+        typer.Option(
+            "--volumes", "-v", help="Remove named volumes declared in the Compose file."
+        ),
     ] = False,
     with_cli: Annotated[
         bool,

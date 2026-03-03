@@ -15,8 +15,3 @@ repos:
       - id: ruff-format
         files: ^src/
 
-  # Optional markdown linting; remove this block if not needed locally.
-  - repo: https://github.com/pre-commit/mirrors-markdownlint
-    rev: v0.39.0
-    hooks:
-      - id: markdownlint

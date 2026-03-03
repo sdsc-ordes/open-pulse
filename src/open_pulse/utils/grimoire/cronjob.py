@@ -104,9 +104,7 @@ def _install_cron_entry(cron_line: str) -> None:
             check=False,
         ).stdout
     except FileNotFoundError:
-        _console.print(
-            "[red bold]Error:[/red bold] crontab command not found."
-        )
+        _console.print("[red bold]Error:[/red bold] crontab command not found.")
         raise SystemExit(1) from None
 
     if cron_line in existing:
