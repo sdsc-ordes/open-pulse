@@ -30,9 +30,14 @@ def test_quest_subcommand_appears_in_help() -> None:
     assert "quest" in result.output
 
 
-def test_grimoire_subcommand_appears_in_help() -> None:
+def test_services_subcommand_appears_in_help() -> None:
     result = runner.invoke(app, ["--help"])
-    assert "grimoire" in result.output
+    assert "services" in result.output
+
+
+def test_gui_subcommand_appears_in_help() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert "gui" in result.output
 
 
 def test_health_subcommand_appears_in_help() -> None:

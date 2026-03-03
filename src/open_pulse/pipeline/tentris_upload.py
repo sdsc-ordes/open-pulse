@@ -16,12 +16,19 @@ logger = logging.getLogger(__name__)
 def _services_from_context(context: dict[str, object]) -> ServiceContainer:
     services = context.get("services")
     if not isinstance(services, ServiceContainer):
-        raise RuntimeError("Pipeline context missing ServiceContainer under 'services'.")
+        raise RuntimeError(
+            "Pipeline context missing ServiceContainer under 'services'."
+        )
     return services
 
 
 def run_tentris_upload(context: dict[str, object]) -> None:
     """Upload RDF triples into the Tentris SPARQL store."""
     services = _services_from_context(context)
+    step_cfg = context.get("step_config", {})
+    input_dir = step_cfg.get("input_dir") if isinstance(step_cfg, dict) else None
     services.tentris.upload(context)
-    logger.info("tentris_upload: placeholder step executed via service client")
+    logger.info(
+        "tentris_upload: placeholder step executed via service client (input_dir=%s)",
+        input_dir,
+    )

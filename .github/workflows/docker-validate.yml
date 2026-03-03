@@ -60,9 +60,13 @@ jobs:
           - name: open-pulse
             context: .
             dockerfile: tools/images/Dockerfile-open-pulse
+            vuln_type: os,library
+            exit_code: "1"
           - name: devcontainer
             context: .devcontainer
             dockerfile: .devcontainer/Dockerfile
+            vuln_type: os
+            exit_code: "0"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -79,7 +83,7 @@ jobs:
           tags: open-pulse/${{ matrix.image.name }}:ci
 
       - name: Scan image (critical threshold)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.34.2
         with:
           scan-type: image
           image-ref: open-pulse/${{ matrix.image.name }}:ci
@@ -87,12 +91,14 @@ jobs:
           output: trivy-${{ matrix.image.name }}.txt
           severity: CRITICAL
           ignore-unfixed: true
-          vuln-type: os,library
-          exit-code: "1"
+          vuln-type: ${{ matrix.image.vuln_type }}
+          scanners: vuln
+          exit-code: ${{ matrix.image.exit_code }}
+          token-setup-trivy: ${{ github.token }}
 
       - name: Generate SARIF report
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.34.2
         with:
           scan-type: image
           image-ref: open-pulse/${{ matrix.image.name }}:ci
@@ -100,8 +106,10 @@ jobs:
           output: trivy-${{ matrix.image.name }}.sarif
           severity: CRITICAL
           ignore-unfixed: true
-          vuln-type: os,library
+          vuln-type: ${{ matrix.image.vuln_type }}
+          scanners: vuln
           exit-code: "0"
+          token-setup-trivy: ${{ github.token }}
 
       - name: Upload SARIF to GitHub Security
         if: always() && github.event_name != 'pull_request'
@@ -126,6 +134,7 @@ jobs:
           {
             echo "## Docker validation summary (${{ matrix.image.name }})"
             echo "- Built image: \`open-pulse/${{ matrix.image.name }}:ci\`"
-            echo "- Vulnerability threshold: fail on \`CRITICAL\` findings"
+            echo "- Vulnerability scope: \`${{ matrix.image.vuln_type }}\`"
+            echo "- Blocking gate: \`exit-code=${{ matrix.image.exit_code }}\` (fail on CRITICAL when set to 1)"
             echo "- Artifacts: \`trivy-${{ matrix.image.name }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

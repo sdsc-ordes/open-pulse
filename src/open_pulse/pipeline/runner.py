@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from copy import deepcopy
 from pathlib import Path
 
 import yaml
@@ -94,6 +95,25 @@ def _wrap_with_retry(
     return _retrying
 
 
+# -- Step context wrapper -----------------------------------------------------
+
+
+def _wrap_with_step_context(
+    func: StepFunc,
+    step_name: str,
+    step_cfg: StepConfig,
+) -> StepFunc:
+    """Attach immutable step config data to task context before execution."""
+    step_cfg_data = step_cfg.model_dump()
+
+    def _with_context(context: dict[str, object]) -> None:
+        context["step_name"] = step_name
+        context["step_config"] = deepcopy(step_cfg_data)
+        func(context)
+
+    return _with_context
+
+
 # -- Task builder -------------------------------------------------------------
 
 
@@ -115,7 +135,8 @@ def build_tasks(config: QuestFileConfig) -> tuple[FunctionTask, ...]:
             continue
 
         func = STEP_REGISTRY[name]
-        wrapped = _wrap_with_retry(func, name, quest.retry)
+        with_context = _wrap_with_step_context(func, name, step_cfg)
+        wrapped = _wrap_with_retry(with_context, name, quest.retry)
         tasks.append(FunctionTask(name=name, func=wrapped))
 
     return tuple(tasks)
@@ -200,17 +221,23 @@ def run_single_step(
     """Run a single pipeline step (no checkpoint)."""
     if step_name not in STEP_REGISTRY:
         raise ValueError(
-            f"Unknown step: {step_name!r}. "
-            f"Available: {', '.join(STEP_NAMES)}"
+            f"Unknown step: {step_name!r}. Available: {', '.join(STEP_NAMES)}"
         )
 
     config = load_config(config_path)
     _configure_logging(config)
 
     quest = config.quest
+    step_configs: dict[str, StepConfig] = {
+        "crawler": quest.steps.crawler,
+        "neo4j_upload": quest.steps.neo4j_upload,
+        "metadata_extractor": quest.steps.metadata_extractor,
+        "tentris_upload": quest.steps.tentris_upload,
+    }
     services = ServiceContainer.from_quest_config(quest)
     func = STEP_REGISTRY[step_name]
-    wrapped = _wrap_with_retry(func, step_name, quest.retry)
+    with_context = _wrap_with_step_context(func, step_name, step_configs[step_name])
+    wrapped = _wrap_with_retry(with_context, step_name, quest.retry)
     task = FunctionTask(name=step_name, func=wrapped)
 
     logger.info("Running single step %r for quest %r", step_name, quest.name)
