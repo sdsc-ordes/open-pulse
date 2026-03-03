@@ -128,6 +128,8 @@ jobs:
 
       - name: Lint YAML
         uses: ibiqlik/action-yamllint@v3
+        with:
+          config_file: .yamllint
 
       - name: Lint Markdown
         uses: DavidAnson/markdownlint-cli2-action@v20
