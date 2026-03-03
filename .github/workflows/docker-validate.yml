@@ -79,7 +79,7 @@ jobs:
           tags: open-pulse/${{ matrix.image.name }}:ci
 
       - name: Scan image (critical threshold)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.34.2
         with:
           scan-type: image
           image-ref: open-pulse/${{ matrix.image.name }}:ci
@@ -89,10 +89,11 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           exit-code: "1"
+          token-setup-trivy: ${{ github.token }}
 
       - name: Generate SARIF report
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.34.2
         with:
           scan-type: image
           image-ref: open-pulse/${{ matrix.image.name }}:ci
@@ -102,6 +103,7 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           exit-code: "0"
+          token-setup-trivy: ${{ github.token }}
 
       - name: Upload SARIF to GitHub Security
         if: always() && github.event_name != 'pull_request'
