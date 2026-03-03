@@ -36,18 +36,26 @@ class CrawlerStepConfig(StepConfig):
     """Crawler step configuration."""
 
     script: str = "placeholder"
+    output_dir: str = ".quest-artifacts/crawler-json"
 
 
 class Neo4jUploadStepConfig(StepConfig):
     """Neo4j upload step configuration."""
 
+    input_dir: str = ".quest-artifacts/crawler-json"
+
 
 class MetadataExtractorStepConfig(StepConfig):
     """Metadata extractor step configuration."""
 
+    input_dir: str = ".quest-artifacts/crawler-json"
+    output_dir: str = ".quest-artifacts/metadata-json"
+
 
 class TentrisUploadStepConfig(StepConfig):
     """Tentris upload step configuration."""
+
+    input_dir: str = ".quest-artifacts/metadata-json"
 
 
 class StepsConfig(BaseModel):

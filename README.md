@@ -5,9 +5,11 @@ The Python package lives in `src/open_pulse/`; deployment assets live in `infra/
 
 ## Key Structure
 
-- `src/open_pulse/commands/`: CLI command groups (`deploy`, `quest`, `grimoire`, `health`)
+- `src/open_pulse/commands/`: CLI command groups (`deploy`, `quest`, `services`, `gui`, `health`)
 - `src/open_pulse/pipeline/`: quest pipeline config, runner, and steps
 - `src/open_pulse/services/`: shared service clients/config/probes used by pipeline and health
+- `src/open_pulse/utils/grimoire/`: grimoire utilities (SPARQL config generation, cron watcher installer)
+- `src/open_pulse/gui/grimoire_streamlit.py`: Streamlit UI for Grimoire config
 - `infra/services/`: per-service deployment artifacts (Neo4j, Tentris, Portainer)
 - `config/quest.example.yml`: canonical quest config example
 
@@ -84,6 +86,12 @@ quest:
 - Neo4j Bolt: `bolt://localhost:7687`
 - Tentris SPARQL: `http://localhost:7502/sparql`
 - GrimoireLab DB: `localhost:5432`
+
+## Grimoire Commands
+
+- `open-pulse services grimoire prepare-config`
+- `open-pulse services grimoire install-watcher`
+- `open-pulse gui grimoire`
 
 ## Docs
 

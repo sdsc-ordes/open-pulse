@@ -9,9 +9,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
-- Simplified Compose topology to a two-file model: `docker-compose.yml` for infra services and `docker-compose.cli.yml` as an optional CLI overlay.
+- Simplified Compose topology to a two-file model under `infra/compose/`: `docker-compose.yml` for infra services and `docker-compose.cli.yml` as an optional CLI overlay.
 - Updated `deploy` command with a `--with-cli` flag on `up`, `down`, and `ps` to include the CLI overlay file without requiring manual `--file` arguments.
 - Updated compose/deploy documentation (`README.md`, `infra/compose/README.md`, `AGENTS.md`) to reflect registry-based CLI container usage (no local build in compose flow).
+- Refactored grimoire command surface: replaced top-level `open-pulse grimoire ...` with `open-pulse services grimoire ...` for service actions and `open-pulse gui grimoire` for Streamlit UI.
+- Reorganized grimoire implementation modules by responsibility: logic moved to `open_pulse.utils.grimoire` and Streamlit UI moved to `open_pulse.gui.grimoire_streamlit`.
 - Refactored integration boundaries by adding `src/open_pulse/services/` as the shared service layer for Neo4j/Tentris clients, service config defaults, health probes, and run-scoped service lifecycle management.
 - Updated quest pipeline execution to inject a run-scoped `ServiceContainer` into step context and close all services deterministically at the end of full runs and single-step runs.
 - Refactored `open-pulse health` to delegate endpoint probes to `open_pulse.services.health` and source Neo4j/Tentris default endpoints from shared service config constants instead of command-local hardcoded defaults.
@@ -26,6 +28,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Added new command groups `services` and `gui` with grimoire subcommands split by domain (`services grimoire prepare-config`, `services grimoire install-watcher`, `gui grimoire`).
+- Added `open_pulse.utils.grimoire` package (`sparql_config.py`, `cronjob.py`) and `open_pulse.gui.grimoire_streamlit`.
 - Added new `open_pulse.services` modules:
   `config.py`, `base.py`, `neo4j.py`, `tentris.py`, `health.py`, and `container.py`.
 - Added tests for service-container lifecycle behavior in pipeline runs, step-level service context requirements, service-health probe utilities, and orchestrator `initial_context` propagation.
@@ -79,6 +83,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Removed
 
+- Removed legacy grimoire command/module layout: deleted `src/open_pulse/commands/grimoire.py` and migrated/deleted modules from `src/open_pulse/grimoire/` (`sparql_config.py`, `cronjob.py`, `streamlit_app.py`).
 - Removed legacy profile-specific compose override files under `infra/compose/` (`docker-compose.analysis.override.yml`, `docker-compose.grimoirelab.override.yml`, `docker-compose.orchestration.override.yml`) in favor of the new two-file compose model.
 - Removed quest step-level endpoint settings (`quest.steps.neo4j_upload.endpoint` and `quest.steps.tentris_upload.endpoint`) from pipeline config models and examples; `quest.services.*.endpoint` is now required as the canonical service configuration location.
 

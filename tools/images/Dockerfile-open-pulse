@@ -15,7 +15,7 @@ RUN apt-get update \
 
 RUN useradd --create-home --home-dir /home/${APP_USER} --shell /bin/bash --uid ${APP_UID} ${APP_USER}
 
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh -s -- --version ${UV_VERSION} \
+RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/uv \
     && mv /root/.local/bin/uvx /usr/local/bin/uvx
 

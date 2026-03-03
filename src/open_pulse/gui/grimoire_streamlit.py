@@ -1,8 +1,8 @@
 """Streamlit-based GrimoireLab configuration UI.
 
-Launch via ``open-pulse grimoire ui``.  The app is password-protected:
+Launch via ``open-pulse gui grimoire``.  The app is password-protected:
 set the ``GRIMOIRE_UI_PASSWORD`` environment variable **or** add it to
-``.streamlit/secrets.toml`` as ``password = "..."``.
+``.streamlit/secrets.toml`` as ``password = \"...\"``.
 
 Requires the ``grimoire-ui`` optional dependency group::
 
@@ -63,7 +63,7 @@ def main() -> None:
     )
 
     if st.button("Generate config"):
-        from open_pulse.grimoire.sparql_config import generate_config
+        from open_pulse.utils.grimoire.sparql_config import generate_config
 
         path = generate_config(
             neo4j_endpoint=neo4j_endpoint,

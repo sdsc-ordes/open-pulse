@@ -19,13 +19,18 @@ open-pulse-1/
         __init__.py
         deploy.py             # (a) Deploy helper (Docker Compose)
         quest.py              # (b) Quest pipeline execution
-        grimoire.py           # (c) GrimoireLab config tools
-        health.py             # (d) Service health checks
-      grimoire/               # GrimoireLab sub-package
+        services.py           # (c) Service-oriented commands (includes grimoire)
+        gui.py                # (d) Interactive UI commands
+        health.py             # (e) Service health checks
+      utils/                  # Shared utility logic
         __init__.py
-        sparql_config.py      # SPARQL query + GrimoireLab config gen
-        streamlit_app.py      # Streamlit UI (password-protected)
-        cronjob.py            # Cron-based config watcher installer
+        grimoire/
+          __init__.py
+          sparql_config.py    # SPARQL query + GrimoireLab config gen
+          cronjob.py          # Cron-based config watcher installer
+      gui/                    # GUI application modules
+        __init__.py
+        grimoire_streamlit.py # Streamlit UI (password-protected)
       pipeline/               # Quest pipeline steps and runner
         __init__.py
         config.py             # Pydantic config models for quest YAML
@@ -207,25 +212,30 @@ quest:
 3. Endpoint probes: HTTP for Neo4j browser and Tentris SPARQL; TCP for Neo4j Bolt and GrimoireLab DB
 4. Smoke tests: CLI version, pipeline config schema validation, Compose config validation (when Docker is available)
 
-### `grimoire` -- GrimoireLab configuration tools
+### `services grimoire` -- GrimoireLab service tools
 
 | Sub-command | Description |
 |-------------|-------------|
-| `open-pulse grimoire prepare-config` | Run SPARQL queries against Neo4j/Tentris and generate a GrimoireLab `projects.json` config file. Currently uses a placeholder query. |
-| `open-pulse grimoire ui` | Launch a password-protected Streamlit app for visual GrimoireLab config creation. Requires the `grimoire-ui` optional extra. |
-| `open-pulse grimoire install-watcher` | Install a cron job that periodically pulls a git repo and detects config file changes. Linux/macOS only. |
+| `open-pulse services grimoire prepare-config` | Run SPARQL queries against Neo4j/Tentris and generate a GrimoireLab `projects.json` config file. Currently uses a placeholder query. |
+| `open-pulse services grimoire install-watcher` | Install a cron job that periodically pulls a git repo and detects config file changes. Linux/macOS only. |
 
-**Options for `grimoire prepare-config`:**
+**Options for `services grimoire prepare-config`:**
 - `--neo4j` -- Neo4j Bolt endpoint (default: `bolt://localhost:7687`)
 - `--tentris` -- Tentris SPARQL endpoint (default: `http://localhost:7502/sparql`)
 - `--output` / `-o` -- Output path for `projects.json` (default: `projects.json`)
 
-**Options for `grimoire install-watcher`:**
+**Options for `services grimoire install-watcher`:**
 - `--repo` / `-r` (required) -- Git remote URL of the repository to watch
 - `--config-path` -- Relative path to the config file inside the repo (default: `projects.json`)
 - `--branch` / `-b` -- Git branch to track (default: `main`)
 - `--schedule` / `-s` -- Cron schedule expression (default: `*/30 * * * *`)
 - `--clone-dir` -- Local directory to clone the repo into (default: `~/.open-pulse/grimoire-watcher`)
+
+### `gui grimoire` -- GrimoireLab Streamlit UI
+
+| Sub-command | Description |
+|-------------|-------------|
+| `open-pulse gui grimoire` | Launch a password-protected Streamlit app for visual GrimoireLab config creation. Requires the `grimoire-ui` optional extra. |
 
 **Streamlit UI notes:**
 - Password protection: set `GRIMOIRE_UI_PASSWORD` env var or add `password` to `.streamlit/secrets.toml`
@@ -235,9 +245,9 @@ quest:
 
 - **Package name**: `open-pulse` (import as `open_pulse`)
 - **Entry point**: `open-pulse` console script → `open_pulse.cli:main` (Typer app)
-- **CLI structure**: four command groups registered via `app.add_typer()`:
-  `deploy` (Docker deploy), `quest` (pipeline), `grimoire` (GrimoireLab),
-  and `health` (top-level service-health command)
+- **CLI structure**: five command groups/commands:
+  `deploy` (Docker deploy), `quest` (pipeline), `services` (service tooling),
+  `gui` (interactive UIs), and `health` (top-level service-health command)
 - **Commit style**: semantic commits (`feat:`, `fix:`, `refactor:`, etc.)
 - **Changelog**: Keep a Changelog format in `CHANGELOG.md`
 - **Service assets**: live under `infra/services/<name>/`, not `src/`

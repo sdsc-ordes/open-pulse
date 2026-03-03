@@ -120,11 +120,13 @@ def _smoke_tests(
                 cwd=str(project_root),
             )
             if proc.returncode == 0:
-                results.append(
-                    ("Compose config", True, f"{_COMPOSE_FILE} is valid")
-                )
+                results.append(("Compose config", True, f"{_COMPOSE_FILE} is valid"))
             else:
-                msg = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "invalid"
+                msg = (
+                    proc.stderr.strip().splitlines()[-1]
+                    if proc.stderr.strip()
+                    else "invalid"
+                )
                 results.append(("Compose config", False, msg))
         except Exception as exc:  # noqa: BLE001
             results.append(("Compose config", False, str(exc)))
