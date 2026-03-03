@@ -139,6 +139,7 @@ jobs:
         if: needs.changes.outputs.markdown == 'true'
         uses: DavidAnson/markdownlint-cli2-action@v20
         with:
+          config: .markdownlint.jsonc
           globs: ${{ needs.changes.outputs.markdown_files }}
           separator: ","
 
