@@ -1,0 +1,16 @@
+extends: default
+
+ignore: |
+  .venv/
+  docs-site/node_modules/
+  docs-site/pnpm-lock.yaml
+
+rules:
+  document-start: disable
+  new-lines: disable
+  truthy:
+    check-keys: false
+  line-length:
+    max: 140
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
