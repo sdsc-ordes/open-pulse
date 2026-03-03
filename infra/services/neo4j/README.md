@@ -23,7 +23,6 @@ NEO4J_DIR=./neo4j
 NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
 ```
 
-
 ## How to deploy this service?
 
 ```

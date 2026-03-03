@@ -1,6 +1,6 @@
 # Portainer
 
-## How to configure your `.env` file.
+## How to configure your `.env` file
 
 Configure the admin password with an bcrypt version of your password. Please pay attention and double `$` when adding the encrypted password. Otherwise, linux will not parse it correctly.
 

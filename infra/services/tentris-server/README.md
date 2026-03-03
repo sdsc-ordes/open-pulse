@@ -2,6 +2,7 @@
 
 This directory contains the necessary files to run a pre-loaded, read-only Tentris database using the official Docker image.
 This setup is intended to provide a central, high-performance SPARQL endpoint for an event like a hackathon. It uses a persistent volume, so the data is loaded only on the first run.
+
 ## Quick Start
 
 1. Prerequisites
