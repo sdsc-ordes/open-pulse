@@ -13,4 +13,13 @@ logger = logging.getLogger(__name__)
 
 def run_crawler(context: dict[str, object]) -> None:
     """Crawl source repositories for analysis data."""
-    logger.info("crawler: placeholder step executed")
+    step_cfg = context.get("step_config", {})
+    output_dir = (
+        step_cfg.get("output_dir")
+        if isinstance(step_cfg, dict)
+        else None
+    )
+    logger.info(
+        "crawler: placeholder step executed (output_dir=%s)",
+        output_dir,
+    )

@@ -41,6 +41,11 @@ def test_quest_config_defaults() -> None:
     assert cfg.quest.services.neo4j.endpoint == "bolt://localhost:7687"
     assert cfg.quest.services.tentris.endpoint == "http://localhost:7502/sparql"
     assert cfg.quest.steps.crawler.enabled is True
+    assert cfg.quest.steps.crawler.output_dir == ".quest-artifacts/crawler-json"
+    assert cfg.quest.steps.neo4j_upload.input_dir == ".quest-artifacts/crawler-json"
+    assert cfg.quest.steps.metadata_extractor.input_dir == ".quest-artifacts/crawler-json"
+    assert cfg.quest.steps.metadata_extractor.output_dir == ".quest-artifacts/metadata-json"
+    assert cfg.quest.steps.tentris_upload.input_dir == ".quest-artifacts/metadata-json"
 
 
 def test_quest_config_from_yaml(tmp_path: Path) -> None:
@@ -53,7 +58,11 @@ def test_quest_config_from_yaml(tmp_path: Path) -> None:
                 "tentris": {"endpoint": "http://sparql:9000/sparql"},
             },
             "steps": {
-                "crawler": {"enabled": False},
+                "crawler": {"enabled": False, "output_dir": "data/raw-crawler"},
+                "metadata_extractor": {
+                    "input_dir": "data/raw-crawler",
+                    "output_dir": "data/extracted-metadata",
+                },
             },
         }
     }
@@ -64,6 +73,9 @@ def test_quest_config_from_yaml(tmp_path: Path) -> None:
     assert cfg.quest.name == "test-run"
     assert cfg.quest.retry.max_attempts == 2
     assert cfg.quest.steps.crawler.enabled is False
+    assert cfg.quest.steps.crawler.output_dir == "data/raw-crawler"
+    assert cfg.quest.steps.metadata_extractor.input_dir == "data/raw-crawler"
+    assert cfg.quest.steps.metadata_extractor.output_dir == "data/extracted-metadata"
     assert cfg.quest.services.neo4j.endpoint == "bolt://db:7687"
     assert cfg.quest.services.tentris.endpoint == "http://sparql:9000/sparql"
     assert cfg.quest.steps.metadata_extractor.enabled is True
@@ -261,6 +273,37 @@ def test_single_step_closes_services(tmp_path: Path) -> None:
         run_single_step(tmp_path / "quest.yml", "crawler")
 
     services.close_all.assert_called_once()
+
+
+def test_runner_injects_step_config_into_context(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def capture(ctx: dict[str, object]) -> None:
+        captured.update(ctx)
+
+    data = {
+        "quest": {
+            "steps": {
+                "crawler": {
+                    "enabled": True,
+                    "output_dir": "data/crawler-json",
+                },
+                "neo4j_upload": {"enabled": False},
+                "metadata_extractor": {"enabled": False},
+                "tentris_upload": {"enabled": False},
+            }
+        }
+    }
+    config_file = tmp_path / "quest.yml"
+    config_file.write_text(yaml.dump(data), encoding="utf-8")
+
+    with patch("open_pulse.pipeline.runner.STEP_REGISTRY", {"crawler": capture}):
+        run_single_step(config_file, "crawler")
+
+    assert captured["step_name"] == "crawler"
+    step_cfg = captured["step_config"]
+    assert isinstance(step_cfg, dict)
+    assert step_cfg["output_dir"] == "data/crawler-json"
 
 
 def test_neo4j_upload_step_requires_services_context() -> None:
