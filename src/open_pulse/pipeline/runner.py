@@ -221,8 +221,7 @@ def run_single_step(
     """Run a single pipeline step (no checkpoint)."""
     if step_name not in STEP_REGISTRY:
         raise ValueError(
-            f"Unknown step: {step_name!r}. "
-            f"Available: {', '.join(STEP_NAMES)}"
+            f"Unknown step: {step_name!r}. Available: {', '.join(STEP_NAMES)}"
         )
 
     config = load_config(config_path)
