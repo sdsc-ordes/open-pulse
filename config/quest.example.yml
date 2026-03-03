@@ -15,13 +15,18 @@ quest:
     crawler:
       enabled: true
       script: "placeholder"
+      output_dir: ".quest-artifacts/crawler-json"
       params: {}
     neo4j_upload:
       enabled: true
+      input_dir: ".quest-artifacts/crawler-json"
       params: {}
     metadata_extractor:
       enabled: true
+      input_dir: ".quest-artifacts/crawler-json"
+      output_dir: ".quest-artifacts/metadata-json"
       params: {}
     tentris_upload:
       enabled: true
+      input_dir: ".quest-artifacts/metadata-json"
       params: {}
