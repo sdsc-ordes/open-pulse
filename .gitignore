@@ -1,59 +1,48 @@
+# Environment and secrets
 .env
-.DS_Store
+.env.*
+!.env.dist
+!.env.example
 tentris.env
-# Ignore any file anywhere in the repository called env_variables
-src/airflow/src/env_variables.json
+**/*.pem
+**/*.key
+**/*secret*
+.internal
 
-# Ignore all Airflow related configurations
+# Airflow local/runtime files
+infra/services/airflow/src/env_variables.json
 **/airflow/config/
-!.gitkeep
 **/airflow/plugins/
-!.gitkeep
 **/airflow/logs/
-!.gitkeep
 
-# Docker & Database Data
-# Ignore all runtime database files. These should never be in Git.
+# Docker/database runtime data
+infra/services/graphdb/data/
+infra/services/graphdb/graphdb-data/
+infra/services/neo4j/data/
+infra/services/portainer/data/
 
-# Ignore any local data folders for GraphDB, Neo4j, and Portainer
-# These are typically created by their docker-compose.yaml files
-/src/graphdb/data/
-/src/graphdb/graphdb-data/
-/src/neo4j/data/
-/srcs/portainer/data/
+# Tentris local data and licenses
+infra/services/tentris-server/data/
+infra/services/tentris-server/instance_data.ttl
+infra/services/tentris-server/tentris-license.toml
 
-# Large Data Files & Sensitive Secrets
-# These files bloat the repository or expose private credentials.
-
-# Ignore the large raw data file
-src/tentris-server/instance_data.ttl
-
-# Ignore the user-specific license file
-src/tentris-server/tentris-license.toml
-
-# Python & Jupyter Notebook
-
-# Ignore the Python virtual environment
-/src/tentris-server/.venv/
-/src/tentris-server/data/
-
-# Ignore Python caches and compiled files
-**pycache**/
+# Python and notebooks
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# Ignore Jupyter notebook checkpoint files
+*.py[cod]
 .ipynb_checkpoints/
+.venv/
+venv/
 
-# OS & Editor-Specific Files
-
-# VS Code
+# Editors and operating systems
 .vscode/
-
-# macOS
+.idea/
 .DS_Store
-
-# Windows
 Thumbs.db
-.DS_Store
+
+# JavaScript/docs tooling artifacts
+node_modules/
+docs-site/build/
+docs-site/.docusaurus/

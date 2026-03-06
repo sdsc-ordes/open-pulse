@@ -1,0 +1,9 @@
+services:
+  open-pulse-cli:
+    image: "${OPEN_PULSE_CLI_IMAGE:-ghcr.io/open-pulse/open-pulse:latest}"
+    container_name: open-pulse-cli
+    restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    command: ["sh", "-c", "sleep infinity"]

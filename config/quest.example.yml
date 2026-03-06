@@ -1,0 +1,32 @@
+quest:
+  name: "my-quest-run"
+  retry:
+    max_attempts: 3
+    backoff_seconds: 5
+  logging:
+    level: INFO
+    file: logs/quest.log
+  services:
+    neo4j:
+      endpoint: "bolt://localhost:7687"
+    tentris:
+      endpoint: "http://localhost:7502/sparql"
+  steps:
+    crawler:
+      enabled: true
+      script: "placeholder"
+      output_dir: ".quest-artifacts/crawler-json"
+      params: {}
+    neo4j_upload:
+      enabled: true
+      input_dir: ".quest-artifacts/crawler-json"
+      params: {}
+    metadata_extractor:
+      enabled: true
+      input_dir: ".quest-artifacts/crawler-json"
+      output_dir: ".quest-artifacts/metadata-json"
+      params: {}
+    tentris_upload:
+      enabled: true
+      input_dir: ".quest-artifacts/metadata-json"
+      params: {}

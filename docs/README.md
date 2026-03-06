@@ -1,5 +1,12 @@
 # Open Pulse GitHub Pages Landing
 
+> Status: this folder is the legacy static landing page while documentation source of truth is being migrated to `docs-site/` (Docusaurus).
+>
+> Migration map and branch responsibilities are documented in:
+>
+> - `docs-site/docs/operations/migration-from-static-docs.md`
+> - `docs-site/docs/operations/branch-model.md`
+
 This folder contains the static landing page for Open Pulse, designed for GitHub Pages with a desktop-first layout, an adaptive scroll mode for smaller/short viewports, and a subtle animated background.
 
 ## Purpose
