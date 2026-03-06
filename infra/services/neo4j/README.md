@@ -1,0 +1,35 @@
+# Neo 4j
+
+## How to configure your .env file?
+
+Please create a folder where your data will be stored, and add it to `NEO4J_DIR`.
+
+```
+NEO4J_HTTP_PORT=7474
+NEO4J_BOLT_PORT=7687
+
+# initial DB user/password  (format:  user/Password)
+NEO4J_AUTH=USER/PASSWORD
+
+# JSON-encoded list of plugins
+NEO4J_PLUGINS=["graph-data-science","apoc"]
+
+# APOC security flags
+NEO4J_UNRESTRICTED=apoc.*
+NEO4J_ALLOWLIST=apoc.*
+
+NEO4J_DIR=./neo4j
+
+NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+```
+
+## How to deploy this service?
+
+```
+docker compose config
+docker compose up -d
+```
+
+```
+docker compose down
+```
