@@ -1,0 +1,157 @@
+services:
+    mariadb:
+      image: mariadb:11.8
+      expose:
+        - "3306"
+      env_file:
+        - ./.env
+      healthcheck:
+        test: [ "CMD", "/usr/local/bin/healthcheck.sh", "--su=root", "--connect", "--innodb_initialized" ]
+        retries: 5
+      volumes:
+        - /srv/grimoire-lab/mariadb:/var/lib/mysql
+
+    valkey:
+      image: valkey/valkey:8
+      expose:
+        - "6379"
+      healthcheck:
+        test: [ "CMD", "valkey-cli", "--raw", "incr", "ping" ]
+        retries: 5
+      volumes:
+        - /srv/grimoire-lab/valkey:/data
+
+    opensearch-node1:
+      image: opensearchproject/opensearch:3
+      env_file:
+        - ./.env
+      environment:
+        - cluster.name=opensearch-cluster
+        - node.name=opensearch-node1
+        - discovery.type=single-node
+        - bootstrap.memory_lock=true # along with the memlock settings below, disables swapping
+        - OPENSEARCH_JAVA_OPTS=${OPENSEARCH_JAVA_OPTS} # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
+      ulimits:
+        memlock:
+          soft: -1
+          hard: -1
+        nofile:
+          soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
+          hard: 65536
+      ports:
+        - 9200:9200
+        - 9600:9600 # required for Performance Analyzer
+      volumes:
+        - /srv/grimoire-lab/opensearch-data:/usr/share/opensearch/data
+
+    opensearch-dashboards:
+      image: opensearchproject/opensearch-dashboards:3
+      env_file:
+        - ./.env
+      ports:
+        - 5601:5601
+
+    prepare-grimoire-config:
+      image: python:3.11-alpine
+      restart: "no"
+      working_dir: /workspace
+      command:
+        - python
+        - /workspace/python-scripts/render_setup_cfg.py
+      env_file:
+        - ./.env
+      environment:
+        - SETUP_CFG_TEMPLATE_PATH=/workspace/templates/setup.cfg.template
+        - PROJECTS_JSON_PATH=/workspace/input/projects.json
+        - RENDERED_CONFIG_DIR=/workspace/output
+      volumes:
+        - ./python-scripts:/workspace/python-scripts:ro
+        - ./config/setup.cfg.template:/workspace/templates/setup.cfg.template:ro
+        - ./config/projects.json:/workspace/input/projects.json:ro
+        - grimoire-conf:/workspace/output
+
+    prepare-opensearch:
+      image: alpine:3.21
+      restart: on-failure:3
+      working_dir: /workspace
+      command:
+        - /bin/sh
+        - -c
+        - apk add --no-cache bash curl >/dev/null && bash /workspace/scripts/prepare-opensearch.sh
+      volumes:
+        - ./scripts:/workspace/scripts:ro
+        - ./config/sigils:/workspace/config/sigils:ro
+      env_file:
+        - ./.env
+      environment:
+        - SCRIPTS_DIR=/workspace/scripts
+        - SIGILS_DIR=/workspace/config/sigils
+      depends_on:
+        - opensearch-node1
+        - opensearch-dashboards
+
+    mordred:
+      restart: on-failure:5
+      image: grimoirelab/grimoirelab:latest
+      env_file:
+        - ./.env
+      environment:
+      - TMPDIR=/home/grimoire/tmp
+      volumes:
+      - grimoire-conf:/home/grimoire/conf
+      - /srv/grimoire-lab/mordred/logs:/home/grimoire/logs
+      - /srv/grimoire-lab/mordred/perceval:/home/grimoire/.perceval
+      - /srv/grimoire-lab/mordred/cache:/home/grimoire/.cache
+      - /srv/grimoire-lab/mordred/tmp:/home/grimoire/tmp
+      depends_on:
+        prepare-grimoire-config:
+          condition: service_completed_successfully
+        nginx:
+          condition: service_healthy
+      mem_limit: 4g
+
+    sortinghat:
+      restart: on-failure:3
+      image: grimoirelab/sortinghat
+      env_file:
+        - ./.env
+      expose:
+        - "9314"
+      volumes:
+        - /srv/grimoire-lab/sortinghat/static:/opt/venv/lib/python3.12/site-packages/sortinghat/static/
+      depends_on:
+        mariadb:
+          condition: service_healthy
+        valkey:
+          condition: service_healthy
+
+    sortinghat_worker:
+      image: grimoirelab/sortinghat-worker
+      env_file:
+        - ./.env
+      depends_on:
+        mariadb:
+          condition: service_healthy
+        valkey:
+          condition: service_healthy
+
+    nginx:
+      restart: on-failure:3
+      image: nginx:latest
+      env_file:
+        - ./.env
+      volumes:
+        - ./config/nginx.conf.template:/etc/nginx/templates/default.conf.template
+        - ./config/uwsgi_params:/etc/nginx/uwsgi_params
+        - /srv/grimoire-lab/sortinghat/static:/sortinghat:ro
+      ports:
+        - 7508:8000 # PORT EDIT needs to be here to expose on a different port.
+      depends_on:
+        - sortinghat
+      healthcheck:
+        test: "curl -s --head http://localhost:8000/identities/api/ | grep Set-Cookie || exit 1"
+        retries: 5
+
+volumes:
+  grimoire-conf:
+
