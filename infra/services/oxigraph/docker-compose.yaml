@@ -1,0 +1,26 @@
+services:
+  oxigraph:
+    image: ghcr.io/oxigraph/oxigraph:0.4.7
+    container_name: oxigraph-open-pulse
+    restart: unless-stopped
+
+    # Standalone deploy publishes the port directly. When run via the main
+    # `infra/compose/docker-compose.yml` stack the port is NOT published — the
+    # sparql-proxy service is the only host-visible entrypoint.
+    ports:
+      - "${OXIGRAPH_PORT:-7878}:7878"
+
+    command:
+      - "serve"
+      - "--location=/data"
+      - "--bind=0.0.0.0:7878"
+
+    volumes:
+      - oxigraph_data:/data
+
+    # The official Oxigraph image is distroless — no shell, no wget/curl, so
+    # the standard CMD-SHELL healthchecks can't run inside it. Probe externally
+    # if you need health (e.g. from the sparql-proxy or `open-pulse health`).
+
+volumes:
+  oxigraph_data:

@@ -36,13 +36,39 @@ infra/services/tentris-server/tentris-license.toml
 .venv/
 venv/
 
+# Python build artefacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Test, lint, and type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Quest pipeline runtime artefacts
+.quest-artifacts/
+.quest-checkpoints/
+logs/
+*.log
+
 # Editors and operating systems
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*~
 
 # JavaScript/docs tooling artifacts
 node_modules/
 docs-site/build/
 docs-site/.docusaurus/
+docs-site/.cache/

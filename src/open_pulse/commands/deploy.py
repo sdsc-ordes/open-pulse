@@ -10,11 +10,12 @@ from typing import Annotated, Optional
 import typer
 from rich.console import Console
 
-_PROFILES = ("default", "analysis", "grimoirelab", "orchestration")
+_PROFILES = ("default", "analysis", "grimoirelab", "crawler", "orchestration")
 _PROFILE_DESCRIPTIONS = {
     "default": "Core services only (Neo4j)",
     "analysis": "Core + analysis notebook",
     "grimoirelab": "Core + GrimoireLab DB & worker",
+    "crawler": "Core + Open Pulse Crawler API",
     "orchestration": "Core + Portainer management UI",
 }
 

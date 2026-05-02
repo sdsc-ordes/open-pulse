@@ -12,6 +12,7 @@ from open_pulse.cli import app
 from open_pulse.commands import health as health_mod
 from open_pulse.services import health as svc_health
 from open_pulse.services.config import (
+    DEFAULT_CRAWLER_ENDPOINT,
     DEFAULT_NEO4J_BOLT_ENDPOINT,
     DEFAULT_NEO4J_HTTP_ENDPOINT,
     DEFAULT_TENTRIS_SPARQL_ENDPOINT,
@@ -52,6 +53,7 @@ def test_health_all_ok(tmp_path: Path) -> None:
         ("Neo4j (Bolt)", "bolt://localhost:7687", True, "connection established"),
         ("Tentris (SPARQL)", "http://localhost:7502/sparql", True, "HTTP 200"),
         ("GrimoireLab DB", "localhost:5432", True, "connection established"),
+        ("Crawler API", "http://localhost:8000/api/v1/health", True, "HTTP 200"),
     ]
     smoke = [
         ("CLI version", True, "v0.1.0"),
@@ -77,6 +79,7 @@ def test_health_failing_endpoint_exits_1(tmp_path: Path) -> None:
         ("Neo4j (Bolt)", "bolt://localhost:7687", True, "connection established"),
         ("Tentris (SPARQL)", "http://localhost:7502/sparql", True, "HTTP 200"),
         ("GrimoireLab DB", "localhost:5432", True, "connection established"),
+        ("Crawler API", "http://localhost:8000/api/v1/health", True, "HTTP 200"),
     ]
 
     with (
@@ -135,6 +138,8 @@ def test_health_custom_endpoints() -> None:
                 "http://sparql:9000/sparql",
                 "--grimoirelab-db",
                 "pghost:5433",
+                "--crawler",
+                "http://crawler-host:8000",
             ],
         )
 
@@ -143,6 +148,7 @@ def test_health_custom_endpoints() -> None:
         "bolt://db:7687",
         "http://sparql:9000/sparql",
         "pghost:5433",
+        "http://crawler-host:8000",
     )
 
 
@@ -160,6 +166,7 @@ def test_health_default_endpoints_come_from_service_config() -> None:
         DEFAULT_NEO4J_BOLT_ENDPOINT,
         DEFAULT_TENTRIS_SPARQL_ENDPOINT,
         "localhost:5432",
+        DEFAULT_CRAWLER_ENDPOINT,
     )
 
 
@@ -271,19 +278,23 @@ def test_probe_endpoints_uses_service_clients() -> None:
         patch("open_pulse.services.health.probe_tcp", return_value=(True, "connection established")),
         patch("open_pulse.services.health.Neo4jService.check_bolt", return_value=(True, "connection established")),
         patch("open_pulse.services.health.TentrisService.check_sparql", return_value=(True, "HTTP 200")),
+        patch("open_pulse.services.health.CrawlerService.check_health", return_value=(True, "HTTP 200")),
     ):
         result = svc_health.probe_endpoints(
             "http://localhost:7474",
             "bolt://localhost:7687",
             "http://localhost:7502/sparql",
             "localhost:5432",
+            "http://localhost:8000",
         )
 
-    assert len(result) == 4
+    assert len(result) == 5
     assert result[0][0] == "Neo4j (HTTP)"
     assert result[1][0] == "Neo4j (Bolt)"
     assert result[2][0] == "Tentris (SPARQL)"
     assert result[3][0] == "GrimoireLab DB"
+    assert result[4][0] == "Crawler API"
+    assert result[4][1] == "http://localhost:8000/api/v1/health"
 
 
 def test_smoke_tests_include_version() -> None:
