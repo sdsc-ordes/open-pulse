@@ -1,0 +1,25 @@
+services:
+  sparql-proxy:
+    image: caddy:2.8-alpine
+    container_name: sparql-proxy-open-pulse
+    restart: unless-stopped
+
+    ports:
+      - "${SPARQL_PROXY_PORT:-7878}:7878"
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./users:/etc/caddy/users:ro
+      - sparql_proxy_data:/data
+      - sparql_proxy_config:/config
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  sparql_proxy_data:
+  sparql_proxy_config:

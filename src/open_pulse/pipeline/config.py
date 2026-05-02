@@ -33,10 +33,26 @@ class StepConfig(BaseModel):
 
 
 class CrawlerStepConfig(StepConfig):
-    """Crawler step configuration."""
+    """Crawler step configuration.
 
-    script: str = "placeholder"
+    Mirrors the ``CrawlRequest`` body of the Open Pulse Crawler API. These
+    fields are sent verbatim as the POST body to ``/api/v1/crawl``; only
+    the trailing local-IO fields (``output_dir``, ``output_filename``) and
+    the polling controls are read by the pipeline step itself.
+    """
+
+    seeds: list[str] = Field(default_factory=list)
+    max_rounds: int = Field(default=2, ge=1, le=10)
+    crawl_dependencies: bool = False
+    crawl_dependents: bool = False
+    min_stars: int = Field(default=0, ge=0)
+    max_dependents: int | None = None
+    batch_size: int | None = None
+    epfl_entities: list[str] = Field(default_factory=list)
     output_dir: str = ".quest-artifacts/crawler-json"
+    output_filename: str = "crawler-graph.json"
+    poll_interval_seconds: float = 5.0
+    timeout_seconds: float = 3600.0
 
 
 class Neo4jUploadStepConfig(StepConfig):

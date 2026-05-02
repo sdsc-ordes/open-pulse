@@ -92,6 +92,73 @@ services:
       - portainer_data:/data
     command: --admin-password "${PORTAINER_HASHED_PASSWORD:-$$2y$$10$$replace-with-bcrypt-hash}"
 
+  crawler:
+    image: ${CRAWLER_IMAGE:-ghcr.io/sdsc-ordes/open-pulse-crawler:latest}
+    container_name: open-pulse-crawler
+    profiles:
+      - crawler
+    environment:
+      API_TOKEN: "${CRAWLER_API_TOKEN:?CRAWLER_API_TOKEN must be set in .env}"
+      GITHUB_TOKEN: "${CRAWLER_GITHUB_TOKEN:?CRAWLER_GITHUB_TOKEN must be set in .env}"
+    ports:
+      - "${CRAWLER_PORT:-8000}:8000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  oxigraph:
+    image: ghcr.io/oxigraph/oxigraph:0.4.7
+    container_name: oxigraph-open-pulse
+    profiles:
+      - sparql
+    restart: unless-stopped
+    # No host port — only the sparql-proxy is reachable from the host. Oxigraph
+    # is reachable from other containers on the compose network as `oxigraph:7878`.
+    expose:
+      - "7878"
+    command:
+      - "serve"
+      - "--location=/data"
+      - "--bind=0.0.0.0:7878"
+    volumes:
+      - oxigraph_data:/data
+    # No healthcheck — the official Oxigraph image is distroless (no /bin/sh,
+    # no wget/curl). The sparql-proxy waits on `service_started` and Caddy
+    # retries the upstream on its own until Oxigraph is accepting connections.
+
+  sparql-proxy:
+    image: caddy:2.8-alpine
+    container_name: sparql-proxy-open-pulse
+    profiles:
+      - sparql
+    restart: unless-stopped
+    depends_on:
+      oxigraph:
+        condition: service_started
+    ports:
+      - "${SPARQL_PROXY_PORT:-7878}:7878"
+    volumes:
+      - ../services/sparql-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../services/sparql-proxy/users:/etc/caddy/users:ro
+      - sparql_proxy_data:/data
+      - sparql_proxy_config:/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   neo4j_logs:
   neo4j_config:
@@ -99,3 +166,6 @@ volumes:
   neo4j_plugins:
   grimoirelab_db_data:
   portainer_data:
+  oxigraph_data:
+  sparql_proxy_data:
+  sparql_proxy_config:

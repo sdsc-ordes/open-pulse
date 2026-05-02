@@ -1,0 +1,18 @@
+quest:
+  name: smoke-crawler
+  retry:
+    max_attempts: 1
+    backoff_seconds: 0
+  services:
+    crawler:
+      endpoint: http://host.docker.internal:8000
+      api_token_env: CRAWLER_API_TOKEN
+  steps:
+    crawler:
+      seeds: ["sdsc-ordes/open-pulse-crawler"]
+      max_rounds: 2
+      poll_interval_seconds: 5.0
+      timeout_seconds: 600.0
+    neo4j_upload: { enabled: false }
+    metadata_extractor: { enabled: false }
+    tentris_upload: { enabled: false }

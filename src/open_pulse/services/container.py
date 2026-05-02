@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from open_pulse.services.config import ServicesConfig
+from open_pulse.services.crawler import CrawlerService
 from open_pulse.services.neo4j import Neo4jService
 from open_pulse.services.tentris import TentrisService
 
@@ -22,6 +23,7 @@ class ServiceContainer:
 
     neo4j: Neo4jService
     tentris: TentrisService
+    crawler: CrawlerService
 
     @classmethod
     def from_services_config(cls, services: ServicesConfig) -> "ServiceContainer":
@@ -29,6 +31,10 @@ class ServiceContainer:
         return cls(
             neo4j=Neo4jService(endpoint=services.neo4j.endpoint),
             tentris=TentrisService(endpoint=services.tentris.endpoint),
+            crawler=CrawlerService(
+                endpoint=services.crawler.endpoint,
+                api_token_env=services.crawler.api_token_env,
+            ),
         )
 
     @classmethod
@@ -40,6 +46,7 @@ class ServiceContainer:
         """Close all managed services."""
         self.neo4j.close()
         self.tentris.close()
+        self.crawler.close()
 
     def __enter__(self) -> "ServiceContainer":
         return self

@@ -1,0 +1,39 @@
+# Caddyfile for the SPARQL reverse proxy.
+#
+# Public read on /query and /. Authenticated writes on /update and /store
+# (the SPARQL Update + Graph Store HTTP Protocol endpoints).
+#
+# Users come from /etc/caddy/users (mounted from infra/services/sparql-proxy/users
+# in the host). One user per line: `user <bcrypt-hash>`.
+#
+# The admin API is enabled on the default localhost:2019 inside the container only
+# (not exposed to the host). This is what powers `caddy reload` for hot-reloading
+# users without restarting the container.
+
+{
+	auto_https off
+}
+
+:7878 {
+	# Match every request that mutates the store.
+	@writes {
+		method POST PUT DELETE PATCH
+		path /update /update/* /store /store/*
+	}
+
+	# Require Basic Auth on writes only. Reads pass through.
+	basic_auth @writes {
+		import /etc/caddy/users
+	}
+
+	# Everything (matched or not) is forwarded to Oxigraph. The matcher above
+	# determines whether basic_auth runs first.
+	reverse_proxy oxigraph:7878 {
+		header_up Host {host}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
