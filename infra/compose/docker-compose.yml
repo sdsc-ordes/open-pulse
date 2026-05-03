@@ -116,6 +116,66 @@ services:
       retries: 5
       start_period: 10s
 
+  extractor:
+    image: ${EXTRACTOR_IMAGE:-ghcr.io/imaging-plaza/git-metadata-extractor:latest}
+    container_name: open-pulse-extractor
+    profiles:
+      - extractor
+    restart: unless-stopped
+    depends_on:
+      selenium:
+        condition: service_healthy
+    environment:
+      # At least one LLM provider must be set; the app picks based on PROVIDER.
+      OPENAI_API_KEY: "${EXTRACTOR_OPENAI_API_KEY:-}"
+      OPENROUTER_API_KEY: "${EXTRACTOR_OPENROUTER_API_KEY:-}"
+      GITHUB_TOKEN: "${EXTRACTOR_GITHUB_TOKEN:?EXTRACTOR_GITHUB_TOKEN must be set in .env}"
+      GITLAB_TOKEN: "${EXTRACTOR_GITLAB_TOKEN:-}"
+      INFOSCIENCE_TOKEN: "${EXTRACTOR_INFOSCIENCE_TOKEN:-}"
+      MODEL: "${EXTRACTOR_MODEL:-gpt-4o-mini}"
+      PROVIDER: "${EXTRACTOR_PROVIDER:-openai}"
+      SELENIUM_REMOTE_URL: "http://selenium:4444/wd/hub"
+      CACHE_DB_PATH: "/app/data/api_cache.db"
+      MAX_CACHE_ENTRIES: "${EXTRACTOR_MAX_CACHE_ENTRIES:-5000}"
+      MAX_SELENIUM_SESSIONS: "${EXTRACTOR_MAX_SELENIUM_SESSIONS:-1}"
+      WORKERS: "${EXTRACTOR_WORKERS:-2}"
+      # The v2 path defaults to mock providers, which need test fixtures that
+      # aren't shipped in the runtime image. Override to use real providers
+      # (which call GitHub via GITHUB_TOKEN above).
+      V2_USE_MOCK_PROVIDERS: "${EXTRACTOR_USE_MOCK_PROVIDERS:-false}"
+    ports:
+      - "${EXTRACTOR_PORT:-1234}:1234"
+    volumes:
+      - extractor_cache:/app/data
+    healthcheck:
+      # The extractor doesn't expose a dedicated /healthz; GET / returns the API
+      # root and is the only system-level endpoint defined in src/api.py.
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:1234/', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  selenium:
+    image: selenium/standalone-chromium:latest
+    container_name: open-pulse-selenium
+    profiles:
+      - extractor
+    restart: unless-stopped
+    shm_size: "2gb"
+    expose:
+      - "4444"
+    environment:
+      SE_NODE_MAX_SESSIONS: "${EXTRACTOR_MAX_SELENIUM_SESSIONS:-1}"
+      SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
+    healthcheck:
+      test: ["CMD", "/opt/bin/check-grid.sh", "--host", "0.0.0.0", "--port", "4444"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   oxigraph:
     image: ghcr.io/oxigraph/oxigraph:0.4.7
     container_name: oxigraph-open-pulse
@@ -169,3 +229,4 @@ volumes:
   oxigraph_data:
   sparql_proxy_data:
   sparql_proxy_config:
+  extractor_cache:

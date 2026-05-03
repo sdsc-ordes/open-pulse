@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 from open_pulse.services.config import DEFAULT_CRAWLER_API_TOKEN_ENV
 from open_pulse.services.crawler import CrawlerService
 from open_pulse.services.neo4j import Neo4jService
-from open_pulse.services.tentris import TentrisService
+from open_pulse.services.sparql_store import SparqlStoreService
 
 _CONNECT_TIMEOUT = 5
 
@@ -49,7 +49,7 @@ def parse_host_port(address: str, default_port: int) -> tuple[str, int]:
 def probe_endpoints(
     neo4j_http: str,
     neo4j_bolt: str,
-    tentris: str,
+    sparql: str,
     grimoirelab_db: str,
     crawler: str,
 ) -> list[tuple[str, str, bool, str]]:
@@ -63,9 +63,9 @@ def probe_endpoints(
     ok, detail = neo4j_service.check_bolt()
     results.append(("Neo4j (Bolt)", neo4j_bolt, ok, detail))
 
-    tentris_service = TentrisService(tentris)
-    ok, detail = tentris_service.check_sparql()
-    results.append(("Tentris (SPARQL)", tentris, ok, detail))
+    sparql_service = SparqlStoreService(sparql)
+    ok, detail = sparql_service.check_sparql()
+    results.append(("SPARQL store", sparql, ok, detail))
 
     db_host, db_port = parse_host_port(grimoirelab_db, 5432)
     ok, detail = probe_tcp(db_host, db_port)
