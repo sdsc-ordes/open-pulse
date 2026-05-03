@@ -34,7 +34,6 @@ _BODY_FIELDS = (
     "min_stars",
     "max_dependents",
     "batch_size",
-    "epfl_entities",
 )
 
 

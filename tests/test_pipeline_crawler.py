@@ -16,14 +16,17 @@ from open_pulse.services.crawler import (
     CrawlerService,
 )
 from open_pulse.services.neo4j import Neo4jService
-from open_pulse.services.tentris import TentrisService
+from open_pulse.services.sparql_store import SparqlStoreService
 
 
 def _make_container(crawler: CrawlerService) -> ServiceContainer:
+    from open_pulse.services.metadata_extractor import MetadataExtractorService
+
     return ServiceContainer(
         neo4j=Neo4jService(endpoint="bolt://localhost:7687"),
-        tentris=TentrisService(endpoint="http://localhost:7502/sparql"),
+        sparql_store=SparqlStoreService(endpoint="http://localhost:7878"),
         crawler=crawler,
+        metadata_extractor=MetadataExtractorService(endpoint="http://localhost:1234"),
     )
 
 
@@ -36,7 +39,6 @@ def _step_config(tmp_path: Path, **overrides: Any) -> dict[str, Any]:
         "min_stars": 0,
         "max_dependents": None,
         "batch_size": None,
-        "epfl_entities": [],
         "output_dir": str(tmp_path / "crawler-json"),
         "output_filename": "crawler-graph.json",
         "poll_interval_seconds": 0.0,

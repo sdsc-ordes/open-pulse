@@ -15,7 +15,7 @@ from open_pulse.services.config import (
     DEFAULT_CRAWLER_ENDPOINT,
     DEFAULT_NEO4J_BOLT_ENDPOINT,
     DEFAULT_NEO4J_HTTP_ENDPOINT,
-    DEFAULT_TENTRIS_SPARQL_ENDPOINT,
+    DEFAULT_SPARQL_ENDPOINT,
 )
 
 runner = CliRunner()
@@ -51,7 +51,7 @@ def test_health_all_ok(tmp_path: Path) -> None:
     endpoints = [
         ("Neo4j (HTTP)", "http://localhost:7474", True, "HTTP 200"),
         ("Neo4j (Bolt)", "bolt://localhost:7687", True, "connection established"),
-        ("Tentris (SPARQL)", "http://localhost:7502/sparql", True, "HTTP 200"),
+        ("SPARQL store", "http://localhost:7878", True, "HTTP 200"),
         ("GrimoireLab DB", "localhost:5432", True, "connection established"),
         ("Crawler API", "http://localhost:8000/api/v1/health", True, "HTTP 200"),
     ]
@@ -77,7 +77,7 @@ def test_health_failing_endpoint_exits_1(tmp_path: Path) -> None:
     endpoints = [
         ("Neo4j (HTTP)", "http://localhost:7474", False, "Connection refused"),
         ("Neo4j (Bolt)", "bolt://localhost:7687", True, "connection established"),
-        ("Tentris (SPARQL)", "http://localhost:7502/sparql", True, "HTTP 200"),
+        ("SPARQL store", "http://localhost:7878", True, "HTTP 200"),
         ("GrimoireLab DB", "localhost:5432", True, "connection established"),
         ("Crawler API", "http://localhost:8000/api/v1/health", True, "HTTP 200"),
     ]
@@ -134,7 +134,7 @@ def test_health_custom_endpoints() -> None:
                 "http://db:7474",
                 "--neo4j-bolt",
                 "bolt://db:7687",
-                "--tentris",
+                "--sparql",
                 "http://sparql:9000/sparql",
                 "--grimoirelab-db",
                 "pghost:5433",
@@ -164,7 +164,7 @@ def test_health_default_endpoints_come_from_service_config() -> None:
     mock_probe.assert_called_once_with(
         DEFAULT_NEO4J_HTTP_ENDPOINT,
         DEFAULT_NEO4J_BOLT_ENDPOINT,
-        DEFAULT_TENTRIS_SPARQL_ENDPOINT,
+        DEFAULT_SPARQL_ENDPOINT,
         "localhost:5432",
         DEFAULT_CRAWLER_ENDPOINT,
     )
@@ -193,8 +193,8 @@ def test_health_multiple_containers_mixed_states(tmp_path: Path) -> None:
             "Ports": "7474/tcp",
         },
         {
-            "Name": "tentris-open-pulse",
-            "Service": "tentris",
+            "Name": "sparql-store-open-pulse",
+            "Service": "sparql_store",
             "State": "exited",
             "Status": "Exited (1) 1 minute ago",
             "Ports": "",
@@ -277,13 +277,13 @@ def test_probe_endpoints_uses_service_clients() -> None:
         patch("open_pulse.services.health.probe_http", return_value=(True, "HTTP 200")),
         patch("open_pulse.services.health.probe_tcp", return_value=(True, "connection established")),
         patch("open_pulse.services.health.Neo4jService.check_bolt", return_value=(True, "connection established")),
-        patch("open_pulse.services.health.TentrisService.check_sparql", return_value=(True, "HTTP 200")),
+        patch("open_pulse.services.health.SparqlStoreService.check_sparql", return_value=(True, "HTTP 200")),
         patch("open_pulse.services.health.CrawlerService.check_health", return_value=(True, "HTTP 200")),
     ):
         result = svc_health.probe_endpoints(
             "http://localhost:7474",
             "bolt://localhost:7687",
-            "http://localhost:7502/sparql",
+            "http://localhost:7878",
             "localhost:5432",
             "http://localhost:8000",
         )
@@ -291,7 +291,7 @@ def test_probe_endpoints_uses_service_clients() -> None:
     assert len(result) == 5
     assert result[0][0] == "Neo4j (HTTP)"
     assert result[1][0] == "Neo4j (Bolt)"
-    assert result[2][0] == "Tentris (SPARQL)"
+    assert result[2][0] == "SPARQL store"
     assert result[3][0] == "GrimoireLab DB"
     assert result[4][0] == "Crawler API"
     assert result[4][1] == "http://localhost:8000/api/v1/health"

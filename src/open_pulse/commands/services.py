@@ -21,13 +21,13 @@ def prepare_config(
             help="Neo4j Bolt endpoint.",
         ),
     ] = "bolt://localhost:7687",
-    tentris_endpoint: Annotated[
+    sparql_endpoint: Annotated[
         str,
         typer.Option(
-            "--tentris",
-            help="Tentris SPARQL endpoint.",
+            "--sparql",
+            help="SPARQL store base URL.",
         ),
-    ] = "http://localhost:7502/sparql",
+    ] = "http://localhost:7878",
     output: Annotated[
         Path,
         typer.Option(
@@ -42,7 +42,7 @@ def prepare_config(
 
     generate_config(
         neo4j_endpoint=neo4j_endpoint,
-        tentris_endpoint=tentris_endpoint,
+        sparql_endpoint=sparql_endpoint,
         output=output,
     )
 
