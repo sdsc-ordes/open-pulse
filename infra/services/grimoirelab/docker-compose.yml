@@ -1,0 +1,193 @@
+services:
+    mariadb:
+      image: mariadb:11.8
+      expose:
+        - "3306"
+      env_file:
+        - ./.env
+      healthcheck:
+        test: [ "CMD", "/usr/local/bin/healthcheck.sh", "--su=root", "--connect", "--innodb_initialized" ]
+        retries: 5
+      volumes:
+        - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/mariadb:/var/lib/mysql
+
+    valkey:
+      image: valkey/valkey:8
+      expose:
+        - "6379"
+      healthcheck:
+        test: [ "CMD", "valkey-cli", "--raw", "incr", "ping" ]
+        retries: 5
+      volumes:
+        - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/valkey:/data
+
+    opensearch-node1:
+      image: opensearchproject/opensearch:3
+      env_file:
+        - ./.env
+      environment:
+        - cluster.name=opensearch-cluster
+        - node.name=opensearch-node1
+        - discovery.type=single-node
+        - bootstrap.memory_lock=true # along with the memlock settings below, disables swapping
+        - OPENSEARCH_JAVA_OPTS=${OPENSEARCH_JAVA_OPTS} # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
+      ulimits:
+        memlock:
+          soft: -1
+          hard: -1
+        nofile:
+          soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
+          hard: 65536
+      ports:
+        - 9200:9200
+        - 9600:9600 # required for Performance Analyzer
+      volumes:
+        - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/opensearch-data:/usr/share/opensearch/data
+
+    opensearch-dashboards:
+      image: opensearchproject/opensearch-dashboards:3
+      env_file:
+        - ./.env
+      ports:
+        - 5601:5601
+
+    prepare-grimoire-config:
+      image: python:3.11-alpine
+      restart: "no"
+      working_dir: /workspace
+      command:
+        - python
+        - /workspace/python-scripts/render_setup_cfg.py
+      env_file:
+        - ./.env
+      environment:
+        - SETUP_CFG_TEMPLATE_PATH=/workspace/templates/setup.cfg.template
+        - PROJECTS_JSON_PATH=/workspace/input/projects.json
+        - RENDERED_CONFIG_DIR=/workspace/output
+      volumes:
+        - ./infra/services/grimoirelab/python-scripts:/workspace/python-scripts:ro
+        - ./infra/services/grimoirelab/config/setup.cfg.template:/workspace/templates/setup.cfg.template:ro
+        - ./infra/services/grimoirelab/config/projects.json:/workspace/input/projects.json:ro
+        - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/projects-conf:/workspace/output
+
+    prepare-opensearch:
+      image: alpine:3.21
+      restart: on-failure:3
+      working_dir: /workspace
+      command:
+        - /bin/sh
+        - -c
+        - apk add --no-cache bash curl >/dev/null && bash /workspace/scripts/prepare-opensearch.sh
+      volumes:
+        - ./infra/services/grimoirelab/scripts:/workspace/scripts:ro
+        - ./infra/services/grimoirelab/config/sigils:/workspace/config/sigils:ro
+      env_file:
+        - ./.env
+      environment:
+        - SCRIPTS_DIR=/workspace/scripts
+        - SIGILS_DIR=/workspace/config/sigils
+      depends_on:
+        - opensearch-node1
+        - opensearch-dashboards
+
+    mordred:
+      restart: on-failure:5
+      image: grimoirelab/grimoirelab:latest
+      # Override the upstream healthcheck — its `healthcheck.py` scans the log
+      # file synchronously and routinely takes >6s, so docker keeps reporting
+      # `unhealthy` even when collection / enrichment is running fine. We
+      # check that the sirmordred process is still alive instead; restarts on
+      # crashloop catch the actual failure mode.
+      healthcheck:
+        test: ["CMD-SHELL", "pgrep -af sirmordred >/dev/null || exit 1"]
+        interval: 30s
+        timeout: 5s
+        retries: 3
+        start_period: 60s
+      env_file:
+        - ./.env
+      environment:
+      - TMPDIR=/home/grimoire/tmp
+      volumes:
+      - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/projects-conf:/home/grimoire/conf:ro
+      - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/mordred/logs:/home/grimoire/logs
+      - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/mordred/perceval:/home/grimoire/.perceval
+      - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/mordred/cache:/home/grimoire/.cache
+      - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/mordred/tmp:/home/grimoire/tmp
+      depends_on:
+        prepare-grimoire-config:
+          condition: service_completed_successfully
+        nginx:
+          condition: service_healthy
+      mem_limit: 4g
+
+    sortinghat:
+      restart: on-failure:3
+      image: grimoirelab/sortinghat
+      env_file:
+        - ./.env
+      expose:
+        - "9314"
+      volumes:
+        - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/sortinghat/static:/opt/venv/lib/python3.12/site-packages/sortinghat/static/
+      depends_on:
+        mariadb:
+          condition: service_healthy
+        valkey:
+          condition: service_healthy
+
+    sortinghat_worker:
+      image: grimoirelab/sortinghat-worker
+      env_file:
+        - ./.env
+      depends_on:
+        mariadb:
+          condition: service_healthy
+        valkey:
+          condition: service_healthy
+
+    nginx:
+      restart: on-failure:3
+      image: nginx:latest
+      env_file:
+        - ./.env
+      volumes:
+        - ./infra/services/grimoirelab/config/nginx.conf.template:/etc/nginx/templates/default.conf.template
+        - ./infra/services/grimoirelab/config/uwsgi_params:/etc/nginx/uwsgi_params
+        - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/sortinghat/static:/sortinghat:ro
+      ports:
+        - 7508:8000 # PORT EDIT needs to be here to expose on a different port.
+      depends_on:
+        - sortinghat
+      healthcheck:
+        test: "curl -s --head http://localhost:8000/identities/api/ | grep Set-Cookie || exit 1"
+        retries: 5
+
+    # ── projects.json applier sidecar ─────────────────────────────────────
+    # Backend for the dashboard UI. Receives projects.json from the browser,
+    # writes it to the shared projects-conf bind dir (read by mordred), then
+    # calls `docker restart` on the mordred container so the new config picks up.
+    projects-applier:
+      restart: unless-stopped
+      # Image-only ref — build the applier from this repo's source with:
+      #   docker build -t open-pulse-applier:local infra/services/grimoirelab/applier
+      # then set OPEN_PULSE_APPLIER_IMAGE in .env, otherwise the published
+      # GHCR tag is pulled. (Source still lives at ./applier/ for the build.)
+      image: "${OPEN_PULSE_APPLIER_IMAGE:-ghcr.io/sdsc-ordes/open-pulse/projects-applier:latest}"
+      env_file:
+        - ./.env
+      environment:
+        - APPLIER_AUTH=${APPLIER_AUTH:?APPLIER_AUTH must be set in .env}
+        - MORDRED_CONTAINER_NAME=${MORDRED_CONTAINER_NAME:-open-pulse-mordred}
+        - CONF_DIR=/conf
+      volumes:
+        - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/projects-conf:/conf
+        - /var/run/docker.sock:/var/run/docker.sock
+      ports:
+        - "${APPLIER_PORT:-1235}:8000"
+      healthcheck:
+        test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+        interval: 15s
+        timeout: 5s
+        retries: 5
+        start_period: 5s

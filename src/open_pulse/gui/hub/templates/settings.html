@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block heading %}Settings{% endblock %}
+{% block subheading %}Browser-local secrets. Stored in <code>localStorage</code> on this device only — the hub never persists or proxies these unless a request explicitly sends them.{% endblock %}
+
+{% block content %}
+<div x-data="settingsPanel()" x-init="reload()" class="space-y-4">
+
+  <div class="card tone-info">
+    <div class="card-title">How this works</div>
+    <p class="card-meta mt-1">
+      Every key you save here lives in your browser only, under
+      <span class="kbd">localStorage["op:hub:secrets:v1"]</span>.
+      The Projects / Databases pages read these at page load and include them
+      in the request body when the hub needs to call an upstream that requires
+      auth (the applier sidecar, a Basic-auth SPARQL endpoint, …).
+      Nothing gets written to the hub's SQLite or DuckDB.
+      Clearing your browser data (or hitting <em>Clear all</em>) wipes them.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="flex items-baseline">
+      <div class="card-title">Keys</div>
+      <span class="ml-auto card-meta" x-text="meta"></span>
+      <button class="btn btn-ghost ml-3" @click="show = !show">
+        <span x-text="show ? 'Hide' : 'Show'"></span> values
+      </button>
+    </div>
+
+    <template x-for="k in keys" :key="k.id">
+      <div class="key-row">
+        <div class="key-meta">
+          <div class="key-name" x-text="k.label"></div>
+          <div class="key-help" x-text="k.help"></div>
+        </div>
+        <input class="mono key-input"
+               :type="show ? 'text' : 'password'"
+               :placeholder="k.placeholder || 'unset'"
+               :value="values[k.id] || ''"
+               @input="values[k.id] = $event.target.value; markDirty()">
+        <button class="btn btn-ghost"
+                @click="values[k.id] = ''; markDirty()"
+                title="Clear this key">×</button>
+      </div>
+    </template>
+
+    <div style="display: flex; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border);">
+      <button class="btn btn-primary" @click="save()" :disabled="!dirty">Save</button>
+      <button class="btn btn-ghost" @click="reload()" :disabled="!dirty">Discard</button>
+      <button class="btn btn-danger ml-auto" @click="confirmClear()">Clear all</button>
+    </div>
+    <p class="card-meta" style="margin-top: 8px;" x-text="status"></p>
+  </div>
+
+  <!-- Export / import / wipe everything browser-local -->
+  <div class="card tone-info" x-data="localSync()" x-init="refresh()">
+    <div class="flex items-baseline">
+      <div class="card-title">Browser-local backup</div>
+      <span class="ml-auto card-meta" x-text="summary"></span>
+    </div>
+    <p class="card-meta mt-1">
+      Everything the hub keeps in your browser — saved keys, query tabs, theme — under
+      <span class="kbd">localStorage["op:hub:*"]</span> and <span class="kbd">op-hub-theme</span>.
+      Download a JSON snapshot to move to another machine, restore from one, or wipe the lot.
+    </p>
+
+    <div class="flex gap-2" style="margin-top: 12px;">
+      <button class="btn btn-primary" @click="downloadSnapshot()">↓ Download snapshot</button>
+      <label class="btn">
+        ↑ Upload snapshot
+        <input type="file" accept="application/json,.json"
+               style="display: none;"
+               @change="onUpload($event)">
+      </label>
+      <button class="btn btn-danger ml-auto" @click="confirmWipe()">Wipe everything local</button>
+    </div>
+
+    <p class="card-meta" style="margin-top: 8px;" x-text="status"></p>
+
+    <details style="margin-top: 12px;">
+      <summary style="cursor: pointer; font-size: 12px; color: var(--fg-muted);">Show snapshot preview</summary>
+      <pre class="console mt-2" x-text="preview"></pre>
+    </details>
+  </div>
+
+  <details class="card">
+    <summary style="cursor: pointer; font-weight: 600;">Raw stored payload (current keys map)</summary>
+    <pre class="console mt-3" x-text="rawJson()"></pre>
+  </details>
+
+</div>
+
+<style>
+  .key-row {
+    display: grid;
+    grid-template-columns: 1fr 2fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 0;
+    border-top: 1px solid var(--border);
+  }
+  .key-row:first-of-type { border-top: 0; }
+  .key-name { font-weight: 600; font-size: 13px; }
+  .key-help { font-size: 11px; color: var(--fg-faint); margin-top: 2px; }
+  .key-input { width: 100%; }
+</style>
+
+<script>
+function settingsPanel() {
+  return {
+    keys: [
+      { id: 'applier_auth', label: 'GrimoireLab projects key',
+        help: 'Bearer that authorises pushing a projects.json into GrimoireLab. The Projects page sends this whenever you click "Apply →" so the change is written to disk and mordred restarts. Matches the APPLIER_AUTH value from your .env.',
+        placeholder: 'paste APPLIER_AUTH from your .env' },
+      { id: 'sparql_user', label: 'SPARQL Basic-auth user',
+        help: 'Optional — only set if your SPARQL endpoint requires Basic auth (Tentris with creds, locked-down Oxigraph, …).',
+        placeholder: 'pipeline' },
+      { id: 'sparql_password', label: 'SPARQL Basic-auth password',
+        help: 'Pairs with the SPARQL user above. The hub passes it through on a per-request basis.',
+        placeholder: '' },
+      { id: 'opensearch_user', label: 'OpenSearch user',
+        help: 'Username the Databases > OpenSearch console uses. Defaults to "admin"; the hub container ships with the value from OPENSEARCH_USERNAME so you only need this if you want a different account per browser.',
+        placeholder: 'admin' },
+      { id: 'opensearch_password', label: 'OpenSearch password',
+        help: 'Bearer for the SQL plugin and Search DSL endpoints. Same value as OPENSEARCH_PASSWORD in your .env. Stored only in this browser.',
+        placeholder: 'OPENSEARCH_PASSWORD' },
+      { id: 'github_pat', label: 'GitHub PAT (BYOK extractor / crawler)',
+        help: 'Personal Access Token used when an upstream service expects you to bring your own GitHub creds. Read-only public_repo + read:org scopes are usually enough.',
+        placeholder: 'ghp_…' },
+      { id: 'crawler_api_token', label: 'Crawler API token',
+        help: 'Bearer for the open-pulse-crawler API when running an instance with auth enabled.',
+        placeholder: 'matches CRAWLER_API_TOKEN' },
+    ],
+    values: {},
+    show: false,
+    dirty: false,
+    status: '',
+
+    reload() {
+      this.values = window.opSecrets.all();
+      this.dirty = false;
+      this.status = 'loaded ' + Object.keys(this.values).length + ' value' + (Object.keys(this.values).length === 1 ? '' : 's') + ' from this browser.';
+    },
+
+    markDirty() { this.dirty = true; this.status = 'unsaved changes.'; },
+
+    save() {
+      // Replace the whole stored object with the form's current values, so
+      // a value cleared here is also cleared in localStorage.
+      const out = {};
+      for (const k of this.keys) {
+        const v = this.values[k.id];
+        if (v) out[k.id] = v;
+      }
+      // Round-trip via opSecrets so the change event fires too.
+      window.opSecrets.clear();
+      for (const [k, v] of Object.entries(out)) window.opSecrets.set(k, v);
+      this.values = window.opSecrets.all();
+      this.dirty = false;
+      this.status = 'saved at ' + new Date().toLocaleTimeString() + '.';
+    },
+
+    confirmClear() {
+      if (!confirm('Wipe every key from this browser? This cannot be undone.')) return;
+      window.opSecrets.clear();
+      this.values = {};
+      this.dirty = false;
+      this.status = 'cleared at ' + new Date().toLocaleTimeString() + '.';
+    },
+
+    rawJson() {
+      return JSON.stringify(this.values, null, 2);
+    },
+
+    get meta() {
+      const n = Object.keys(this.values).filter(k => this.values[k]).length;
+      return n + ' key' + (n === 1 ? '' : 's') + ' set';
+    },
+  };
+}
+
+/* ── Snapshot: backup / restore / wipe everything under localStorage that
+   the hub owns. We capture every key starting with "op:hub:" or "op-hub-"
+   so additions in the future (new feature using its own key) are picked
+   up automatically. */
+function localSync() {
+  const PREFIXES = ['op:hub:', 'op-hub'];
+  const SNAPSHOT_VERSION = 1;
+  const matches = (k) => PREFIXES.some(p => k.startsWith(p));
+
+  const collect = () => {
+    const out = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (matches(k)) out[k] = localStorage.getItem(k);
+    }
+    return out;
+  };
+
+  return {
+    summary: '',
+    status: '',
+    preview: '',
+
+    refresh() {
+      const snap = collect();
+      const n = Object.keys(snap).length;
+      this.summary = n + ' key' + (n === 1 ? '' : 's') + ' tracked';
+      this.preview = JSON.stringify(this.envelope(snap), null, 2);
+    },
+
+    envelope(snap) {
+      return {
+        version: SNAPSHOT_VERSION,
+        kind: 'open-pulse-hub-local-snapshot',
+        exported_at: new Date().toISOString(),
+        origin: location.origin,
+        data: snap,
+      };
+    },
+
+    downloadSnapshot() {
+      const blob = new Blob(
+        [JSON.stringify(this.envelope(collect()), null, 2)],
+        { type: 'application/json' },
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'open-pulse-hub-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      this.status = 'snapshot downloaded.';
+    },
+
+    onUpload(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const doc = JSON.parse(reader.result);
+          if (!doc || doc.kind !== 'open-pulse-hub-local-snapshot' || !doc.data) {
+            this.status = '⚠ not an open-pulse-hub snapshot file.';
+            return;
+          }
+          if (!confirm('Restore ' + Object.keys(doc.data).length + ' key(s) from snapshot? '
+                     + 'This overwrites any matching key already stored in this browser.')) {
+            this.status = 'restore cancelled.';
+            return;
+          }
+          for (const [k, v] of Object.entries(doc.data)) {
+            if (matches(k) && typeof v === 'string') {
+              localStorage.setItem(k, v);
+            }
+          }
+          this.status = 'restored at ' + new Date().toLocaleTimeString() + '. Reloading…';
+          // Notify other components and reload to pick up theme / tabs.
+          window.dispatchEvent(new Event('op-secrets-changed'));
+          setTimeout(() => location.reload(), 600);
+        } catch (e) { this.status = '⚠ ' + e.message; }
+      };
+      reader.readAsText(file);
+      // Allow re-uploading the same file by clearing the input value.
+      event.target.value = '';
+    },
+
+    confirmWipe() {
+      const snap = collect();
+      const n = Object.keys(snap).length;
+      if (!confirm('Wipe ' + n + ' key(s) from this browser? '
+                 + 'This removes saved API keys, query tabs, theme preference — '
+                 + 'everything the hub stored locally. Cannot be undone.')) {
+        return;
+      }
+      for (const k of Object.keys(snap)) localStorage.removeItem(k);
+      this.status = 'wiped at ' + new Date().toLocaleTimeString() + '. Reloading…';
+      window.dispatchEvent(new Event('op-secrets-changed'));
+      setTimeout(() => location.reload(), 600);
+    },
+  };
+}
+</script>
+{% endblock %}

@@ -1,0 +1,136 @@
+[general]
+short_name = GrimoireLab
+update = true
+min_update_delay = 60
+debug = false
+logs_dir = /home/grimoire/logs
+bulk_size = 100
+scroll_size = 100
+aliases_file = /home/grimoire/aliases.json
+
+[projects]
+projects_file = /home/grimoire/conf/projects.json
+
+[es_collection]
+url = ${ES_COLLECTION_URL}
+
+[es_enrichment]
+url = ${ES_ENRICHMENT_URL}
+autorefresh = true
+
+[sortinghat]
+host = ${SORTINGHAT_HOST}
+user = ${SORTINGHAT_SUPERUSER_USERNAME}
+password = ${SORTINGHAT_SUPERUSER_PASSWORD}
+port = ${SORTINGHAT_PORT}
+path = /identities/api/
+ssl = false
+database = ${SORTINGHAT_DB_DATABASE}
+autoprofile = [github, git]
+matching = [email,name,username]
+sleep_for = 100
+unaffiliated_group = Unknown
+affiliate = true
+
+[panels]
+kibiter_time_from =
+kibiter_default_index =
+kibiter_url =
+kibiter_version =
+
+[phases]
+collection = true
+identities = true
+enrichment = true
+panels = false
+
+[git]
+raw_index = git_demo_raw
+enriched_index = git_demo_enriched
+latest-items = true
+studies = [enrich_demography:git, enrich_areas_of_code:git, enrich_onion:git]
+
+[github]
+api-token = ${GITHUB_API_TOKEN}
+#enterprise-url = <YOUR_GITHUB_ENTERPRISE_URL>
+raw_index = github_demo_raw
+sleep-for-rate = true
+#sleep-time = "300"
+enriched_index = github_demo_enriched
+
+# ENRICHED INDEXES
+
+## Git
+
+[enrich_demography:git]
+
+[enrich_areas_of_code:git]
+in_index = git_demo_raw
+out_index = git-aoc_demo_enriched
+
+[enrich_onion:git]
+in_index = git
+out_index = git-onion_demo_enriched
+contribs_field = hash
+
+## GitHub
+
+[github:issue]
+raw_index = github_raw
+enriched_index = github_enriched
+api-token = ${GITHUB_API_TOKEN}
+category = issue
+#sleep-for-rate = true
+no-archive = true
+studies = [enrich_onion:github,
+           enrich_geolocation:user,
+           enrich_geolocation:assignee,
+           enrich_extra_data:github,
+           enrich_backlog_analysis,
+           enrich_demography:github]
+
+[github:repo]
+raw_index = github-repo_raw
+enriched_index = github-repo_enriched
+api-token = ${GITHUB_API_TOKEN}
+category = repository
+#sleep-for-rate = true
+no-archive = true
+studies = [enrich_extra_data:github, enrich_demography:github]
+
+[github:pull]
+raw_index = github-pull_raw
+enriched_index = github-pull_enriched
+api-token = ${GITHUB_API_TOKEN}
+category = pull_request
+#sleep-for-rate = true
+no-archive = true
+studies = [enrich_geolocation:user,
+           enrich_geolocation:assignee,
+           enrich_extra_data:github,
+           enrich_demography:github]
+
+[enrich_onion:github]
+in_index_iss = github_issues_onion-src
+in_index_prs = github_prs_onion-src
+out_index_iss = github-issues-onion_enriched
+out_index_prs = github-prs-onion_enriched
+
+[enrich_geolocation:user]
+location_field = user_location
+geolocation_field = user_geolocation
+
+[enrich_geolocation:assignee]
+location_field = assignee_location
+geolocation_field = assignee_geolocation
+
+[enrich_extra_data:github]
+json_url = https://gist.githubusercontent.com/zhquan/bb48654bed8a835ab2ba9a149230b11a/raw/5eef38de508e0a99fa9772db8aef114042e82e47/bitergia-example.txt
+
+[enrich_backlog_analysis]
+out_index = github_enrich_backlog
+interval_days = 7
+reduced_labels = [bug,enhancement]
+map_label = [others, bugs, enhancements]
+
+[enrich_demography:github]

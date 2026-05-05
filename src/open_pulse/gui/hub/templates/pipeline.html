@@ -1,0 +1,939 @@
+{% extends "base.html" %}
+{% block heading %}Quests{% endblock %}
+{% block subheading %}Pick (or create) a quest YAML to launch a pipeline, and watch ongoing runs.{% endblock %}
+
+{% block content %}
+<div x-data="pipelineRunner()" x-init="loadQuests(); loadRecentRuns()" class="space-y-4">
+
+  <!-- ── Tabs: Launch (templates + new) | Ongoing (live + recent) ───────── -->
+  <nav class="quest-tabs">
+    <button class="quest-tab" :class="tab==='launch' ? 'is-active' : ''" @click="tab='launch'">Launch a quest</button>
+    <button class="quest-tab" :class="tab==='ongoing' ? 'is-active' : ''" @click="tab='ongoing'; loadRecentRuns()">
+      Ongoing quests
+      <span class="pill pill-warn quest-tab-badge" x-show="ongoingCount > 0" x-text="ongoingCount"></span>
+    </button>
+  </nav>
+
+  <!-- ╔══════════════ Ongoing tab ══════════════════════════════════════ ╗ -->
+  <div x-show="tab==='ongoing'" x-cloak class="space-y-4">
+
+  <!-- ── Recent pipeline runs (with full runner log tail) ────────────────── -->
+  <section>
+    <div class="flex items-baseline mb-2">
+      <h2 class="card-title">Pipeline runs</h2>
+      <span class="ml-auto card-meta" x-text="recentRuns.length + ' total'"></span>
+      <button class="btn btn-ghost ml-3" @click="loadRecentRuns()">↻</button>
+    </div>
+
+    <p class="card-meta" x-show="!recentRuns.length" style="font-style: italic;">
+      No detached runs yet. Launch a quest from the Launch tab — its runner log will land here.
+    </p>
+
+    <div class="card" style="padding: 0; overflow: hidden;" x-show="recentRuns.length">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Quest</th><th>Status</th><th>Step</th><th>Started</th><th>Run ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="r in recentRuns" :key="r.run_id">
+            <tr class="row-clickable"
+                @click="selectRecentRun(r.run_id)"
+                :class="selectedRunId === r.run_id ? 'is-selected' : ''">
+              <td x-text="r.quest_name || r.quest_base"></td>
+              <td><span class="pill" :class="runPillClass(r)" x-text="runPillLabel(r)"></span></td>
+              <td class="card-meta" x-text="r.current_step || '—'"></td>
+              <td class="card-meta" x-text="r.started_at ? new Date(r.started_at).toLocaleString() : '—'"></td>
+              <td class="mono" style="font-size: 11px;" x-text="r.run_id"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Selected run detail: progress + tail. Re-uses the same /run-status
+         payload + render shape as the launch-time detached panel. -->
+    <div x-show="selectedRunStatus" x-cloak class="card tone-info" style="margin-top: 12px; padding: 12px;">
+      <div class="flex items-baseline gap-2">
+        <span class="card-title">Run</span>
+        <span class="pill" :class="runPillClass(selectedRunStatus)" x-text="runPillLabel(selectedRunStatus)"></span>
+        <span class="card-meta">·</span>
+        <span class="card-meta">id <span class="kbd" x-text="selectedRunId"></span></span>
+        <span class="card-meta" x-show="selectedRunStatus && selectedRunStatus.started_at"
+              x-text="'started ' + (selectedRunStatus && new Date(selectedRunStatus.started_at).toLocaleString())"></span>
+        <label class="card-meta ml-auto" style="display: flex; align-items: center; gap: 6px;">
+          <input type="checkbox" x-model="selectedRunAutoRefresh"> auto-refresh 5s
+        </label>
+        <button class="btn btn-ghost" @click="refreshSelectedRun()">↻</button>
+        <button class="btn btn-danger"
+                @click="stopSelectedRun(false)"
+                :disabled="!selectedRunStatus || stopping || selectedRunStatus.overall !== 'running'"
+                title="Send SIGTERM to the runner"><span x-text="stopping ? 'Stopping…' : '■ Stop'"></span></button>
+      </div>
+
+      <div class="run-steps" style="margin-top: 8px;">
+        <template x-for="s in pipelineSteps" :key="s">
+          <span class="pill"
+                :class="stepPillClass(selectedRunStatus, s)"
+                x-text="s + ' · ' + (selectedRunStatus && selectedRunStatus.statuses ? (selectedRunStatus.statuses[s] || 'pending') : 'pending')"></span>
+        </template>
+      </div>
+
+      <!-- Crawler sub-panel: live stats + cooperative pause/resume/cancel.
+           Only visible when the run logged a crawler job_id, i.e. the
+           crawler step actually started. The crawler API drives the data;
+           the runner log only carries the job_id. -->
+      <div x-show="selectedCrawlerJob" x-cloak
+           class="card" style="margin-top: 10px; padding: 10px; background: var(--surface-soft);">
+        <div class="flex items-baseline gap-2">
+          <span class="card-title" style="font-size: 13px;">Crawler</span>
+          <span class="pill" :class="crawlerPillClass(selectedCrawlerJob && selectedCrawlerJob.status)"
+                x-text="(selectedCrawlerJob && selectedCrawlerJob.status) || ''"></span>
+          <span class="card-meta mono" style="font-size: 10px;"
+                x-text="(selectedCrawlerJob && selectedCrawlerJob.job_id) ? selectedCrawlerJob.job_id.slice(0,12)+'…' : ''"></span>
+          <button class="btn ml-auto"
+                  @click="crawlerAct('pause')"
+                  :disabled="!selectedCrawlerJob || crawlerBusy || selectedCrawlerJob.status !== 'running'"
+                  title="Pause">⏸ Pause</button>
+          <button class="btn"
+                  @click="crawlerAct('resume')"
+                  :disabled="!selectedCrawlerJob || crawlerBusy || selectedCrawlerJob.status !== 'paused'"
+                  title="Resume">▶ Resume</button>
+          <button class="btn btn-danger"
+                  @click="crawlerAct('cancel')"
+                  :disabled="!selectedCrawlerJob || crawlerBusy || (selectedCrawlerJob.status !== 'running' && selectedCrawlerJob.status !== 'paused')"
+                  title="Cancel — exits at the next round boundary">■ Cancel</button>
+        </div>
+        <div style="display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 4px 16px; margin-top: 8px; font-size: 12px;">
+          <span class="card-meta">round</span>
+          <span x-text="(selectedCrawlerJob && selectedCrawlerJob.current_round != null) ? selectedCrawlerJob.current_round : '—'"></span>
+          <span class="card-meta">queue</span>
+          <span x-text="(selectedCrawlerJob && selectedCrawlerJob.nodes_in_queue) || 0"></span>
+
+          <span class="card-meta">processed</span>
+          <span x-text="(selectedCrawlerJob && selectedCrawlerJob.nodes_processed) || 0"></span>
+          <span class="card-meta">graph</span>
+          <span class="mono"
+                x-text="selectedCrawlerJob ? ((selectedCrawlerJob.repos||0)+' repos · '+(selectedCrawlerJob.orgs||0)+' orgs · '+(selectedCrawlerJob.users||0)+' users') : ''"></span>
+
+          <span class="card-meta">elapsed</span>
+          <span x-text="elapsed(selectedCrawlerJob)"></span>
+          <span class="card-meta">eta</span>
+          <span x-text="formatIso(selectedCrawlerJob && selectedCrawlerJob.estimated_completion_at)"></span>
+        </div>
+        <p x-show="selectedCrawlerJob && selectedCrawlerJob.detail" class="card-meta"
+           style="margin-top: 6px; white-space: pre-wrap;"
+           x-text="selectedCrawlerJob && selectedCrawlerJob.detail"></p>
+      </div>
+
+      <div class="flex items-baseline gap-2" style="margin-top: 10px;">
+        <span class="card-meta">tail</span>
+        <span class="card-meta" x-text="selectedRunStatus && selectedRunStatus.line_count !== undefined ? selectedRunStatus.line_count + ' lines · ' + formatBytes(selectedRunStatus.size_bytes) : ''"></span>
+      </div>
+      <pre class="console" style="height: 320px; margin-top: 4px;" x-text="selectedRunStatus && selectedRunStatus.tail ? selectedRunStatus.tail : '(no output yet)'"></pre>
+    </div>
+  </section>
+
+  </div><!-- /tab Ongoing -->
+
+  <!-- ╔══════════════ Launch tab ══════════════════════════════════════ ╗ -->
+  <div x-show="tab==='launch'" x-cloak class="space-y-4">
+
+  <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 16px;">
+
+    <!-- Quest list -->
+    <div class="card">
+      <div class="flex items-baseline">
+        <div class="card-title">Quests</div>
+        <button class="btn btn-primary ml-auto" @click="showCreate = !showCreate">
+          <span x-text="showCreate ? '× Cancel' : '+ New'"></span>
+        </button>
+        <button class="btn btn-ghost" @click="loadQuests()">↻</button>
+      </div>
+      <p class="card-meta mt-1">YAMLs under <code>data/quests/</code>.</p>
+
+      <!-- Create form (toggled via the + New button) -->
+      <div class="create-form" x-show="showCreate" x-cloak style="margin-top: 12px;">
+        <label class="card-meta">Name</label>
+        <input style="width: 100%;" x-model="newQuest.name" placeholder="e.g. epfl-rust-only" />
+
+        <label class="card-meta" style="margin-top: 8px;">Description</label>
+        <textarea rows="3" style="width: 100%;" x-model="newQuest.description" placeholder="What this quest does, in a sentence or two."></textarea>
+
+        <div class="seeds-block">
+          <div class="seeds-header">
+            <span class="seeds-title">Seeds</span>
+            <span class="seeds-hint">GitHub orgs or <code>org/repo</code>. Separate by commas, newlines, or spaces.</span>
+            <span class="seeds-count" x-show="parsedSeeds.length"
+                  x-text="parsedSeeds.length + ' seed' + (parsedSeeds.length === 1 ? '' : 's')"></span>
+          </div>
+          <textarea class="seeds-textarea mono"
+                    rows="5"
+                    spellcheck="false"
+                    x-model="newQuest.seeds"
+                    placeholder="sdsc-ordes&#10;epfl-lts2&#10;DeepLabCut/DeepLabCut, pyxu-org/pyxu"></textarea>
+          <div class="seeds-preview" x-show="parsedSeeds.length">
+            <template x-for="s in parsedSeeds" :key="s">
+              <span class="pill pill-info" x-text="s"></span>
+            </template>
+            <button class="btn btn-ghost seeds-clear" type="button" @click="newQuest.seeds = ''" title="Clear all seeds">×</button>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
+          <label>
+            <span class="card-meta">max_rounds</span>
+            <input type="number" min="1" max="10" style="width: 100%;" x-model.number="newQuest.maxRounds" />
+          </label>
+          <label>
+            <span class="card-meta">max_repos (0 = no limit)</span>
+            <input type="number" min="0" style="width: 100%;" x-model.number="newQuest.maxRepos" />
+          </label>
+        </div>
+
+        <div style="margin-top: 10px;">
+          <span class="card-meta">Enabled steps</span>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
+            <template x-for="s in stepIds" :key="s">
+              <label style="display: flex; align-items: center; gap: 4px; font-size: 12px;">
+                <input type="checkbox" x-model="newQuest.steps[s]"> <span x-text="s"></span>
+              </label>
+            </template>
+          </div>
+        </div>
+
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--fg-muted);">
+          <input type="checkbox" x-model="newQuest.forceRefresh"> bypass extractor cache (force_refresh)
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--fg-muted);">
+          <input type="checkbox" x-model="newQuest.overwrite"> overwrite if a file with this name already exists
+        </label>
+
+        <div class="flex gap-2" style="margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border);">
+          <button class="btn btn-primary" @click="createQuest()" :disabled="creating || !newQuest.name">
+            <span x-text="creating ? 'Creating…' : 'Create + select'"></span>
+          </button>
+          <span class="ml-auto card-meta" x-text="createStatus"></span>
+        </div>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <template x-for="q in quests" :key="q.path">
+          <button @click="select(q)"
+                  class="card quest-tile"
+                  :class="selected && selected.path === q.path ? 'tone-info' : ''">
+            <div class="quest-name-row">
+              <span class="quest-name" x-text="q.quest_name || q.name"></span>
+              <span class="pill ml-auto"
+                    x-show="q.last_run"
+                    :class="runPillClass(q.last_run)"
+                    x-text="runPillLabel(q.last_run)"></span>
+            </div>
+            <div class="quest-path mono" x-text="q.path"></div>
+            <p class="quest-desc" x-show="q.description" x-text="q.description"></p>
+            <div class="quest-steps" x-show="q.enabled_steps && q.enabled_steps.length">
+              <template x-for="s in (q.enabled_steps || [])" :key="s">
+                <span class="pill" :class="stepPillClass(q.last_run, s)" x-text="s"></span>
+              </template>
+            </div>
+          </button>
+        </template>
+        <template x-if="quests.length === 0">
+          <p class="card-meta" style="font-style: italic;">No quest YAMLs found. Click <strong>+ New</strong> to create one.</p>
+        </template>
+      </div>
+    </div>
+
+    <!-- Selected quest viewer + run -->
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+
+      <div class="card" :class="selected ? 'tone-info' : ''">
+        <div class="flex items-baseline">
+          <div class="card-title">Selected quest</div>
+          <span class="ml-auto card-meta" x-text="selectedMeta()"></span>
+        </div>
+
+        <template x-if="!selected">
+          <p class="card-meta mt-2" style="font-style: italic;">Pick a quest from the list to read its config.</p>
+        </template>
+
+        <template x-if="selected">
+          <div style="margin-top: 12px;">
+            <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13px;">
+              <span class="card-meta">name</span>            <span x-text="(selected.summary && selected.summary.name) || '—'"></span>
+              <span class="card-meta">file</span>            <span class="mono" x-text="selected.path"></span>
+              <span class="card-meta">enabled steps</span>
+              <span>
+                <template x-for="s in ((selected.summary && selected.summary.enabled_steps) || [])" :key="s">
+                  <span class="pill pill-info" style="margin-right: 4px;" x-text="s"></span>
+                </template>
+                <span x-show="!(selected.summary && selected.summary.enabled_steps && selected.summary.enabled_steps.length)" class="card-meta">none</span>
+              </span>
+            </div>
+            <p x-show="selected.summary && selected.summary.description"
+               class="card-meta" style="margin-top: 8px; padding: 8px 10px; background: var(--surface-soft); border: 1px solid var(--border); border-radius: 6px; white-space: pre-wrap;"
+               x-text="selected.summary && selected.summary.description"></p>
+          </div>
+        </template>
+      </div>
+
+      <div class="card" x-show="selected">
+        <div class="flex items-baseline gap-2">
+          <div class="card-title">YAML</div>
+          <span class="ml-auto card-meta" x-text="copyStatus"></span>
+          <button class="btn" @click="copyContent()">📋 Copy</button>
+          <button class="btn btn-ghost" @click="downloadContent()" title="Download as a .yml">↓ Download</button>
+          <button class="btn btn-danger" @click="deleteSelected()" title="Delete this quest file">🗑 Delete</button>
+        </div>
+        <pre class="console" style="margin-top: 8px; max-height: 360px;" x-text="selected ? selected.content : ''"></pre>
+      </div>
+
+      <div class="card" x-show="selected">
+        <div class="flex items-baseline gap-2">
+          <div class="card-title">Run</div>
+          <label class="card-meta ml-auto" style="display: flex; align-items: center; gap: 6px;">
+            <input type="checkbox" x-model="detach">
+            <span>detach (don't wait)</span>
+          </label>
+          <button class="btn btn-primary" @click="run()" :disabled="!selected || running">
+            <span x-text="running ? 'Running…' : 'Run quest →'"></span>
+          </button>
+        </div>
+
+        <!-- Detached-run dashboard: shown only after a detach kicks off -->
+        <div x-show="activeRun" class="card tone-info" style="margin-top: 12px; padding: 12px;">
+          <div class="flex items-baseline gap-2">
+            <span class="card-title">Detached run</span>
+            <span class="pill"
+                  :class="runPillClass(activeRun)"
+                  x-text="runPillLabel(activeRun)"></span>
+            <span class="card-meta">·</span>
+            <span class="card-meta">id <span class="kbd" x-text="activeRun && activeRun.run_id"></span></span>
+            <span class="card-meta" x-show="activeRun && activeRun.started_at"
+                  x-text="'started ' + formatTime(activeRun && activeRun.started_at)"></span>
+            <label class="card-meta ml-auto" style="display: flex; align-items: center; gap: 6px;">
+              <input type="checkbox" x-model="autoRefresh"> auto-refresh 5s
+            </label>
+            <button class="btn btn-ghost" @click="refreshRun()">↻ Refresh</button>
+            <button class="btn btn-danger"
+                    @click="stopRun(false)"
+                    :disabled="!activeRun || stopping || (activeRun.overall !== 'running')"
+                    title="Send SIGTERM to the runner">
+              <span x-text="stopping ? 'Stopping…' : '■ Stop'"></span>
+            </button>
+            <button class="btn btn-ghost"
+                    @click="stopRun(true)"
+                    :disabled="!activeRun || stopping || (activeRun.overall !== 'running')"
+                    title="Send SIGKILL — only if a normal Stop didn't take">!Force</button>
+          </div>
+
+          <div class="run-steps" style="margin-top: 8px;">
+            <template x-for="s in pipelineSteps" :key="s">
+              <span class="pill"
+                    :class="stepPillClass(activeRun, s)"
+                    x-text="s + ' · ' + (activeRun && activeRun.statuses ? (activeRun.statuses[s] || 'pending') : 'pending')"></span>
+            </template>
+          </div>
+
+          <div class="flex items-baseline gap-2" style="margin-top: 10px;">
+            <span class="card-meta">tail</span>
+            <span class="card-meta" x-text="activeRun && activeRun.line_count !== undefined ? activeRun.line_count + ' lines · ' + formatBytes(activeRun.size_bytes) : ''"></span>
+          </div>
+          <pre class="console" style="height: 220px; margin-top: 4px;" x-text="activeRun && activeRun.tail ? activeRun.tail : '(no output yet)'"></pre>
+        </div>
+
+        <!-- Synchronous run (no detach): plain output below -->
+        <div x-show="!activeRun" style="margin-top: 8px;">
+          <div class="flex items-baseline gap-2">
+            <span class="card-meta">Output</span>
+            <span class="pill" :class="exit === 0 ? 'pill-ok' : exit > 0 ? 'pill-bad' : 'pill-neutral'" x-show="exit !== null" x-text="outputMeta()"></span>
+          </div>
+          <pre class="console mt-2" style="height: 220px;" x-text="output || '(nothing run yet)'"></pre>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  </div><!-- /tab Launch -->
+</div>
+
+<style>
+  /* Tabs that split the page into "Launch" and "Ongoing". */
+  .quest-tabs {
+    display: flex; gap: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .quest-tab {
+    background: transparent; border: 0;
+    padding: 10px 14px;
+    font-size: 13px; color: var(--fg-muted);
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .quest-tab:hover { color: var(--fg); }
+  .quest-tab.is-active {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .quest-tab-badge { font-size: 10px; padding: 1px 6px; }
+  /* Highlight the row corresponding to the currently-loaded run. */
+  tr.row-clickable.is-selected td { background: var(--surface-sunk); }
+
+  .quest-tile {
+    display: block;
+    width: 100%;
+    text-align: left;
+    margin-bottom: 8px;
+    cursor: pointer;
+    padding: 12px;
+  }
+  .quest-tile:hover { border-color: var(--border-strong); }
+  .quest-name-row { display: flex; align-items: center; gap: 8px; }
+  .quest-name { font-weight: 600; font-size: 13px; }
+  .quest-name-row .pill { font-size: 9px; padding: 1px 8px; }
+  .quest-path { font-size: 11px; color: var(--fg-faint); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-steps { display: flex; flex-wrap: wrap; gap: 4px; }
+  .run-steps .pill { font-size: 11px; padding: 2px 8px; }
+
+  .row-clickable { cursor: pointer; }
+  .row-clickable:hover td { background: var(--surface-sunk); }
+  .quest-desc {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: var(--fg-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: pre-wrap;
+  }
+  .quest-steps { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 3px; }
+  .quest-steps .pill { font-size: 10px; padding: 1px 6px; }
+
+  .seeds-block {
+    margin-top: 12px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-soft);
+  }
+  .seeds-header {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 6px;
+  }
+  .seeds-title { font-weight: 600; font-size: 13px; }
+  .seeds-hint  { font-size: 11px; color: var(--fg-faint); }
+  .seeds-hint code {
+    background: var(--code-bg);
+    padding: 0 4px;
+    border-radius: 3px;
+    font-size: 10px;
+  }
+  .seeds-count {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .seeds-textarea {
+    width: 100%;
+    min-height: 92px;
+    resize: vertical;
+    line-height: 1.5;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  .seeds-preview {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+  }
+  .seeds-preview .pill { font-size: 11px; padding: 2px 8px; }
+  .seeds-clear {
+    margin-left: auto;
+    padding: 2px 8px;
+    font-size: 11px;
+    line-height: 1;
+  }
+</style>
+
+<script>
+function pipelineRunner() {
+  return {
+    // Tab state — "launch" (templates + new) or "ongoing" (live runs + recent).
+    tab: 'launch',
+
+    // ── Recent pipeline runs (Ongoing tab) ────────────────────────────
+    recentRuns: [],
+    selectedRunId: null,
+    selectedRunStatus: null,
+    selectedRunAutoRefresh: true,
+    _recentRunsHandle: null,
+    _selectedRunHandle: null,
+    // Crawler-side stats for the currently-selected run, when its
+    // crawler step has logged a job_id. The runner log only knows the
+    // id; the live stats come from the crawler API itself.
+    selectedCrawlerJob: null,
+    crawlerBusy: false,
+
+    quests: [],
+    selected: null,
+    running: false,
+    detach: true,             // default to detach — most quests are long-running
+    output: '',
+    exit: null,
+    copyStatus: '',
+
+    // Detached-run state. activeRun is the most recent run-status payload.
+    pipelineSteps: ['crawler', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects'],
+    activeRun: null,
+    autoRefresh: true,
+    stopping: false,
+    _pollHandle: null,
+    _listPollHandle: null,
+
+    showCreate: false,
+    creating: false,
+    createStatus: '',
+    stepIds: ['crawler', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects'],
+    newQuest: {
+      name: '',
+      description: '',
+      seeds: 'sdsc-ordes',
+      maxRounds: 2,
+      maxRepos: 8,
+      forceRefresh: false,
+      overwrite: false,
+      steps: { crawler: true, neo4j_upload: true, metadata_extractor: true, sparql_upload: true, apply_grimoire_projects: false },
+    },
+
+    // Tokenise seeds on commas, newlines, or whitespace, dedupe in order.
+    get parsedSeeds() {
+      const seen = new Set();
+      const out = [];
+      for (const raw of (this.newQuest.seeds || '').split(/[\s,]+/)) {
+        const s = raw.trim();
+        if (!s || seen.has(s)) continue;
+        seen.add(s);
+        out.push(s);
+      }
+      return out;
+    },
+
+    async createQuest() {
+      this.creating = true; this.createStatus = 'creating…';
+      try {
+        const r = await fetch('/api/pipeline/create', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: this.newQuest.name,
+            description: this.newQuest.description,
+            seeds: this.parsedSeeds,
+            max_rounds: this.newQuest.maxRounds,
+            max_repos: this.newQuest.maxRepos,
+            force_refresh: this.newQuest.forceRefresh,
+            steps: this.newQuest.steps,
+            overwrite: this.newQuest.overwrite,
+          }),
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          throw new Error(j.detail || 'HTTP ' + r.status);
+        }
+        const j = await r.json();
+        this.createStatus = (j.overwritten ? 'overwrote ' : 'created ') + j.path.split('/').pop();
+        await this.loadQuests();
+        this.selected = j;
+        this.showCreate = false;
+      } catch (e) {
+        this.createStatus = '⚠ ' + e.message;
+      } finally {
+        this.creating = false;
+      }
+    },
+
+    async deleteSelected() {
+      if (!this.selected) return;
+      if (!confirm('Delete ' + this.selected.path.split('/').pop() + '?')) return;
+      const r = await fetch('/api/pipeline/quest?path=' + encodeURIComponent(this.selected.path), { method: 'DELETE' });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        this.copyStatus = '⚠ ' + (j.detail || 'HTTP ' + r.status);
+        return;
+      }
+      this.selected = null;
+      await this.loadQuests();
+    },
+
+    async loadQuests() {
+      try {
+        const r = await fetch('/api/pipeline/quests');
+        const j = await r.json();
+        this.quests = j.quests || [];
+      } catch (e) { this.output = '⚠ ' + e.message; }
+      // Keep the list badges fresh so a running quest shows progress
+      // without manual refresh — every 8s is plenty.
+      if (!this._listPollHandle) {
+        this._listPollHandle = setInterval(async () => {
+          try {
+            const r = await fetch('/api/pipeline/quests');
+            const j = await r.json();
+            this.quests = j.quests || [];
+          } catch (_) { /* keep last */ }
+        }, 8000);
+      }
+      this.$watch('autoRefresh', (on) => on ? this._startPolling() : this._stopPolling());
+      // Rehydrate the detached run panel from the previous tab session.
+      // We persisted the run_id when the user clicked Run; if it's still
+      // alive on the server (not finished/cleaned up), restore the panel.
+      await this._rehydrateActiveRun();
+    },
+
+    // Pull the most-recent run_id from localStorage and check if it's
+    // still meaningful. Three outcomes:
+    //   * server says exists=false  → user ran a quest, the log was wiped
+    //                                 (data/hub/runs/ cleaned up); drop.
+    //   * overall=running|paused    → panel rehydrates, polling resumes.
+    //   * overall=completed|failed  → keep the panel as a "last run"
+    //                                 reminder; no polling.
+    async _rehydrateActiveRun() {
+      const raw = localStorage.getItem('op:hub:active-run:v1');
+      if (!raw) return;
+      let saved;
+      try { saved = JSON.parse(raw); } catch (_) { return; }
+      if (!saved || !saved.run_id) return;
+      try {
+        const r = await fetch('/api/pipeline/run-status?run_id=' + encodeURIComponent(saved.run_id));
+        const j = await r.json();
+        if (!j.exists) {
+          localStorage.removeItem('op:hub:active-run:v1');
+          return;
+        }
+        this.activeRun = Object.assign({
+          run_id: saved.run_id,
+          log_filename: saved.log_filename,
+        }, j);
+        // Pre-select the source quest if we still know about it.
+        if (saved.quest_path) {
+          const found = this.quests.find(q => q.path === saved.quest_path);
+          if (found) await this.select(found);
+        }
+        if (j.overall === 'running') this._startPolling();
+      } catch (_) { /* keep silent — UI will show a generic "no run" state */ }
+    },
+
+    // ── Recent pipeline runs (Ongoing tab) ──────────────────────────
+    get ongoingCount() {
+      return (this.recentRuns || []).filter(r => r.overall === 'running').length;
+    },
+    async loadRecentRuns() {
+      try {
+        const r = await fetch('/api/pipeline/runs?limit=50');
+        if (!r.ok) return;
+        const j = await r.json();
+        this.recentRuns = j.runs || [];
+      } catch (_) { /* keep last */ }
+      // Refresh the runs list every 8s while the Ongoing tab is mounted.
+      if (!this._recentRunsHandle) {
+        this._recentRunsHandle = setInterval(async () => {
+          try {
+            const r = await fetch('/api/pipeline/runs?limit=50');
+            if (!r.ok) return;
+            const j = await r.json();
+            this.recentRuns = j.runs || [];
+          } catch (_) {}
+        }, 8000);
+      }
+    },
+    async selectRecentRun(runId) {
+      // Toggle off if the user clicks the already-selected row.
+      if (this.selectedRunId === runId) {
+        this._stopSelectedRunPolling();
+        this.selectedRunId = null;
+        this.selectedRunStatus = null;
+        this.selectedCrawlerJob = null;
+        return;
+      }
+      this.selectedRunId = runId;
+      this.selectedCrawlerJob = null;
+      await this.refreshSelectedRun();
+      this._startSelectedRunPolling();
+    },
+    async refreshSelectedRun() {
+      if (!this.selectedRunId) return;
+      try {
+        const r = await fetch('/api/pipeline/run-status?run_id=' + encodeURIComponent(this.selectedRunId) + '&tail=200');
+        if (!r.ok) return;
+        this.selectedRunStatus = await r.json();
+        await this.refreshSelectedCrawlerJob();
+      } catch (_) {}
+    },
+    async refreshSelectedCrawlerJob() {
+      const id = this.selectedRunStatus && this.selectedRunStatus.crawler_job_id;
+      if (!id) { this.selectedCrawlerJob = null; return; }
+      try {
+        const r = await fetch('/api/crawler/jobs/' + encodeURIComponent(id));
+        if (!r.ok) return;
+        this.selectedCrawlerJob = await r.json();
+      } catch (_) { /* keep last */ }
+    },
+    async crawlerAct(action) {
+      const job = this.selectedCrawlerJob;
+      if (!job) return;
+      if (action === 'cancel' && !confirm('Cancel crawler job ' + job.job_id.slice(0, 8) + '? It exits at the next round boundary; partial graph is preserved.')) return;
+      this.crawlerBusy = true;
+      try {
+        const r = await fetch('/api/crawler/jobs/' + encodeURIComponent(job.job_id) + '/' + action, { method: 'POST' });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          alert('⚠ ' + (e.detail || ('HTTP ' + r.status)));
+        }
+      } finally {
+        this.crawlerBusy = false;
+        await this.refreshSelectedCrawlerJob();
+      }
+    },
+    crawlerPillClass(s) {
+      switch (s) {
+        case 'running':   return 'pill-warn';
+        case 'paused':    return 'pill-info';
+        case 'completed': return 'pill-ok';
+        case 'failed':    return 'pill-bad';
+        case 'cancelled': return 'pill-bad';
+        default:          return 'pill-neutral';
+      }
+    },
+    formatIso(s) {
+      if (!s) return '—';
+      try { return new Date(s).toLocaleString(); } catch (_) { return s; }
+    },
+    elapsed(j) {
+      if (!j || !j.started_at) return '—';
+      const start = new Date(j.started_at).getTime();
+      const end   = j.completed_at ? new Date(j.completed_at).getTime() : Date.now();
+      const sec = Math.max(0, Math.round((end - start) / 1000));
+      if (sec < 60) return sec + 's';
+      if (sec < 3600) return Math.floor(sec/60) + 'm' + String(sec%60).padStart(2,'0') + 's';
+      return Math.floor(sec/3600) + 'h' + String(Math.floor((sec%3600)/60)).padStart(2,'0') + 'm';
+    },
+    _startSelectedRunPolling() {
+      this._stopSelectedRunPolling();
+      this._selectedRunHandle = setInterval(() => {
+        if (!this.selectedRunAutoRefresh) return;
+        if (!this.selectedRunStatus || this.selectedRunStatus.overall !== 'running') return;
+        this.refreshSelectedRun();
+      }, 5000);
+    },
+    _stopSelectedRunPolling() {
+      if (this._selectedRunHandle) {
+        clearInterval(this._selectedRunHandle);
+        this._selectedRunHandle = null;
+      }
+    },
+    async stopSelectedRun(force) {
+      if (!this.selectedRunId) return;
+      if (!confirm(`Send ${force ? 'SIGKILL' : 'SIGTERM'} to run ${this.selectedRunId}?`)) return;
+      this.stopping = true;
+      try {
+        const url = '/api/pipeline/run-stop?run_id=' + encodeURIComponent(this.selectedRunId)
+                  + (force ? '&force=true' : '');
+        const r = await fetch(url, { method: 'POST' });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          alert('⚠ ' + (j.detail || ('HTTP ' + r.status)));
+        }
+      } finally {
+        this.stopping = false;
+        await this.refreshSelectedRun();
+        await this.loadRecentRuns();
+      }
+    },
+
+    // ── status pill helpers (used by list + detached panel) ──────
+    runPillClass(run) {
+      if (!run) return 'pill-neutral';
+      switch (run.overall) {
+        case 'running':   return 'pill-warn';
+        case 'completed': return 'pill-ok';
+        case 'failed':    return 'pill-bad';
+        default:          return 'pill-neutral';
+      }
+    },
+    runPillLabel(run) {
+      if (!run) return 'never run';
+      if (run.overall === 'running' && run.current_step) {
+        return 'running · ' + run.current_step;
+      }
+      return run.overall;
+    },
+    stepPillClass(run, step) {
+      if (!run || !run.statuses) return 'pill-neutral';
+      switch (run.statuses[step]) {
+        case 'running': return 'pill-warn';
+        case 'done':    return 'pill-ok';
+        case 'skipped': return 'pill-neutral';
+        case 'failed':  return 'pill-bad';
+        default:        return 'pill-neutral';
+      }
+    },
+    formatTime(iso) {
+      if (!iso) return '';
+      try { return new Date(iso).toLocaleTimeString(); }
+      catch (_) { return iso; }
+    },
+    formatBytes(n) {
+      if (n == null) return '';
+      if (n < 1024) return n + 'B';
+      if (n < 1024*1024) return (n/1024).toFixed(1) + 'KB';
+      return (n/(1024*1024)).toFixed(1) + 'MB';
+    },
+
+    selectedMeta() {
+      if (!this.selected) return '';
+      const s = this.selected.summary || {};
+      const n = s.step_count;
+      return n != null ? n + ' step' + (n === 1 ? '' : 's') + ' defined' : '';
+    },
+
+    async select(q) {
+      try {
+        const r = await fetch('/api/pipeline/quest?path=' + encodeURIComponent(q.path));
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          this.copyStatus = '⚠ ' + (j.detail || ('HTTP ' + r.status));
+          return;
+        }
+        this.selected = await r.json();
+        this.output = ''; this.exit = null; this.copyStatus = '';
+      } catch (e) { this.copyStatus = '⚠ ' + e.message; }
+    },
+
+    async copyContent() {
+      if (!this.selected) return;
+      try {
+        await navigator.clipboard.writeText(this.selected.content || '');
+        this.copyStatus = 'copied at ' + new Date().toLocaleTimeString();
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = this.selected.content || '';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); this.copyStatus = 'copied (fallback).'; }
+        catch (_) { this.copyStatus = '⚠ copy unavailable: ' + e.message; }
+        document.body.removeChild(ta);
+      }
+    },
+
+    downloadContent() {
+      if (!this.selected) return;
+      const blob = new Blob([this.selected.content || ''], { type: 'text/yaml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const name = (this.selected.path || 'quest.yml').split('/').pop();
+      a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    },
+
+    async run() {
+      if (!this.selected) return;
+      this.running = true; this.output = ''; this.exit = null;
+      this.activeRun = null;
+      this._stopPolling();
+      try {
+        const r = await fetch('/api/pipeline/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: this.selected.path, detach: this.detach }),
+        });
+        const j = await r.json();
+        if (j.detached) {
+          // Seed the detached panel with the run id; first poll fills the rest.
+          this.activeRun = {
+            run_id: j.run_id,
+            log_filename: j.log_filename,
+            overall: 'running',
+            statuses: Object.fromEntries(this.pipelineSteps.map(s => [s, 'pending'])),
+            current_step: null,
+            tail: '',
+          };
+          // Persist so reopening the tab rehydrates the panel.
+          localStorage.setItem('op:hub:active-run:v1', JSON.stringify({
+            run_id: j.run_id,
+            log_filename: j.log_filename,
+            quest_path: this.selected ? this.selected.path : null,
+            started_at: new Date().toISOString(),
+          }));
+          await this.refreshRun();
+          this._startPolling();
+        } else {
+          this.exit = j.exit_code;
+          this.output = j.output || '(no output)';
+        }
+      } catch (e) { this.output = '⚠ ' + e.message; }
+      finally   { this.running = false; }
+    },
+
+    async refreshRun() {
+      if (!this.activeRun) return;
+      try {
+        const r = await fetch('/api/pipeline/run-status?run_id=' + encodeURIComponent(this.activeRun.run_id));
+        const j = await r.json();
+        this.activeRun = Object.assign({}, this.activeRun, j);
+        if (j.overall === 'completed' || j.overall === 'failed') {
+          this._stopPolling();
+        }
+        // Refresh the quest list too — its badge for this quest will update.
+        try {
+          const qr = await fetch('/api/pipeline/quests');
+          const qj = await qr.json();
+          this.quests = qj.quests || [];
+        } catch (_) { /* tolerate */ }
+      } catch (e) { /* keep last; user can hit Refresh */ }
+    },
+
+    _startPolling() {
+      this._stopPolling();
+      if (!this.autoRefresh) return;
+      this._pollHandle = setInterval(() => this.refreshRun(), 5000);
+    },
+    _stopPolling() {
+      if (this._pollHandle) clearInterval(this._pollHandle);
+      this._pollHandle = null;
+    },
+
+    async stopRun(force) {
+      if (!this.activeRun) return;
+      const verb = force ? 'force-kill' : 'stop';
+      if (!confirm(`Send ${force ? 'SIGKILL' : 'SIGTERM'} to run ${this.activeRun.run_id}?`)) return;
+      this.stopping = true;
+      try {
+        const url = '/api/pipeline/run-stop?run_id=' + encodeURIComponent(this.activeRun.run_id)
+                    + (force ? '&force=true' : '');
+        const r = await fetch(url, { method: 'POST' });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+        // Give the runner a moment to wind down before re-tailing.
+        setTimeout(() => this.refreshRun(), 1500);
+      } catch (e) {
+        alert('⚠ stop failed: ' + e.message);
+      } finally {
+        this.stopping = false;
+      }
+    },
+
+    outputMeta() {
+      if (this.running) return 'running…';
+      if (this.exit === null) return '';
+      return this.exit === 0 ? 'exit 0 (success)' : `exit ${this.exit}`;
+    },
+  };
+}
+</script>
+{% endblock %}

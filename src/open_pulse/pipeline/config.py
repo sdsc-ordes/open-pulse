@@ -97,6 +97,28 @@ class SparqlUploadStepConfig(StepConfig):
     named_graph: str | None = None
 
 
+class ApplyGrimoireProjectsStepConfig(StepConfig):
+    """``apply_grimoire_projects`` step configuration.
+
+    Builds an owner-grouped ``projects.json`` from the Neo4j graph and
+    posts it to the GrimoireLab applier sidecar. Off by default so
+    existing quests don't suddenly start writing to GrimoireLab.
+    """
+
+    enabled: bool = False
+    include_unexplored: bool = False
+    """Include Repo nodes the BFS discovered but didn't actually visit."""
+    min_repos_per_owner: int = 1
+    """Drop owners with fewer than this many repos. Default 1 keeps all."""
+    title_prefix: str = ""
+    """Prepended to each group's display title; useful for tagging the
+    cohort (e.g. ``"c4dt: "``) when running multiple imports side-by-side."""
+    applier_url: str = "http://projects-applier:8000"
+    """Base URL of the projects-applier sidecar. The compose-network DNS
+    is the right default; override for a remote GrimoireLab."""
+    applier_auth_env: str = "APPLIER_AUTH"
+
+
 class StepsConfig(BaseModel):
     """Ordered collection of all pipeline step configs."""
 
@@ -108,12 +130,18 @@ class StepsConfig(BaseModel):
     sparql_upload: SparqlUploadStepConfig = Field(
         default_factory=SparqlUploadStepConfig,
     )
+    apply_grimoire_projects: ApplyGrimoireProjectsStepConfig = Field(
+        default_factory=ApplyGrimoireProjectsStepConfig,
+    )
 
 
 class QuestConfig(BaseModel):
     """Top-level quest configuration."""
 
     name: str = "default-quest"
+    description: str | None = None
+    """Free-form human-readable summary. Optional; surfaced by the hub
+    Pipeline page next to the quest's name."""
     retry: RetryConfig = Field(default_factory=RetryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     services: ServicesConfig = Field(default_factory=ServicesConfig)
