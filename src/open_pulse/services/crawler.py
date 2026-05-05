@@ -133,6 +133,15 @@ class CrawlerService:
                 raise CrawlerJobFailedError(
                     f"crawler job {job_id} failed: {detail}"
                 )
+            if state == "cancelled":
+                # A cancel from the crawler-side (Pause/Stop button or
+                # API call) is an authoritative stop signal. Surface it
+                # like a failure so the runner doesn't poll the dead job
+                # for the rest of the timeout window.
+                detail = status.get("detail") or "cancelled by operator"
+                raise CrawlerJobFailedError(
+                    f"crawler job {job_id} cancelled: {detail}"
+                )
             if time.monotonic() >= deadline:
                 raise CrawlerJobTimeoutError(
                     f"crawler job {job_id} did not complete within {timeout:.0f}s "

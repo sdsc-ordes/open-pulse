@@ -27,6 +27,16 @@ dependencies = [
 grimoire-ui = [
   "streamlit>=1.41",
 ]
+hub = [
+  # FastAPI surface for `open-pulse gui hub serve`. Heavy enough that we
+  # don't want it pulled into a CLI-only install.
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.20",
+  "docker>=7.1",
+  "duckdb>=1.1",
+]
 
 [project.scripts]
 open-pulse = "open_pulse.cli:main"

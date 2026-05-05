@@ -16,6 +16,7 @@ infra/services/airflow/src/env_variables.json
 **/airflow/logs/
 
 # Docker/database runtime data
+/data/
 infra/services/graphdb/data/
 infra/services/graphdb/graphdb-data/
 infra/services/neo4j/data/

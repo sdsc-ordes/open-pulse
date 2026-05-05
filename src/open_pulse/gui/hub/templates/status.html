@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block heading %}Status{% endblock %}
+{% block subheading %}Live snapshot of the stack — service tiles, current totals, and quick links. For trends over time, see Overview.{% endblock %}
+
+{% block content %}
+<div x-data="dashHome()" x-init="refresh(); setInterval(refresh, 8000)" class="space-y-6">
+
+  <!-- Stat row -->
+  <section class="grid-stats">
+    <div class="card tone-info">
+      <div class="card-title">Services</div>
+      <div class="flex items-baseline gap-2 mt-1">
+        <div class="stat-value" x-text="stats.services.healthy + '/' + stats.services.total"></div>
+        <span class="stat-trend">healthy</span>
+      </div>
+      <div class="card-meta mt-1">
+        <span x-text="stats.services.running + ' running'"></span>
+      </div>
+    </div>
+
+    <div class="card tone-ok">
+      <div class="card-title">Longest uptime</div>
+      <div class="stat-value mt-1" x-text="stats.services.uptime_max_human"></div>
+      <div class="card-meta mt-1">across all containers</div>
+    </div>
+
+    <div class="card tone-info">
+      <div class="card-title">SPARQL repos</div>
+      <div class="stat-value mt-1"
+           :class="stats.sparql.repos === null ? 'muted' : ''"
+           x-text="stats.sparql.repos === null ? '—' : stats.sparql.repos"></div>
+      <div class="card-meta mt-1" x-text="stats.sparql.repos === null ? 'store unreachable' : 'schema:SoftwareSourceCode'"></div>
+    </div>
+
+    <div class="card tone-info">
+      <div class="card-title">Neo4j</div>
+      <div class="flex items-baseline gap-3 mt-1">
+        <div>
+          <div class="stat-value" :class="stats.neo4j.nodes === null ? 'muted' : ''" x-text="stats.neo4j.nodes === null ? '—' : stats.neo4j.nodes"></div>
+          <div class="card-meta">nodes</div>
+        </div>
+        <div>
+          <div class="stat-value" :class="stats.neo4j.rels === null ? 'muted' : ''" x-text="stats.neo4j.rels === null ? '—' : stats.neo4j.rels"></div>
+          <div class="card-meta">relationships</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Service tiles -->
+  <section>
+    <div class="flex items-baseline mb-3">
+      <h2 class="card-title">Stack health</h2>
+      <span class="ml-auto card-meta" x-text="lastRefreshed ? 'updated ' + lastRefreshed : ''"></span>
+      <button @click="refresh()" class="btn btn-ghost ml-3">↻ Refresh</button>
+    </div>
+    <div class="grid-tiles">
+      <template x-for="s in services" :key="s.name">
+        <div class="card" :class="toneClass(s)">
+          <div class="flex items-center gap-2">
+            <span class="dot" :class="dotClass(s)"></span>
+            <span class="font-semibold" x-text="s.name"></span>
+            <span class="ml-auto pill" :class="pillClass(s)" x-text="pillLabel(s)"></span>
+          </div>
+          <div class="card-meta mt-1 mono" x-text="s.image"></div>
+          <div class="flex items-center gap-3 mt-3 text-xs" style="color: var(--fg-muted);">
+            <span>↑ <span class="mono" x-text="humanizeUptime(s.uptime_seconds)"></span></span>
+            <span x-show="s.compose_service">· <span x-text="s.compose_service"></span></span>
+            <span x-show="s.health" class="ml-auto" x-text="s.health"></span>
+          </div>
+          <div class="flex flex-wrap gap-1 mt-3">
+            <template x-for="p in s.ports" :key="p"><span class="kbd" x-text="p"></span></template>
+          </div>
+        </div>
+      </template>
+      <template x-if="services.length === 0">
+        <div class="card text-center" style="grid-column: 1 / -1; color: var(--fg-muted); font-style: italic;">
+          No open-pulse containers running yet — go to <a href="/stack" style="color: var(--accent);">Stack</a> to spin them up.
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <!-- Quick links -->
+  <section>
+    <h2 class="card-title mb-3">Quick links</h2>
+    <div class="grid-tiles">
+      {% set links = [
+        ('Neo4j Browser', 'http://localhost:7474', 'graph database', 'tone-info'),
+        ('SPARQL store',  'http://localhost:7878', 'oxigraph + caddy', 'tone-info'),
+        ('Crawler API',   'http://localhost:8000/docs', 'github crawler swagger', 'tone-info'),
+        ('GME extractor', 'http://localhost:1234/docs', 'metadata extractor swagger', 'tone-info'),
+        ('Kibiter',       kibiter_url, 'grimoirelab dashboards', 'tone-info'),
+        ('Hub API',       '/healthz', 'control-plane healthz', 'tone-ok'),
+      ] %}
+      {% for label, url, sub, tone in links %}
+        <a href="{{ url }}" target="_blank" rel="noopener" class="card {{ tone }}" style="text-decoration:none; color: inherit; display: block;">
+          <div class="flex items-center gap-2">
+            <span class="font-semibold">{{ label }}</span>
+            <span class="ml-auto" style="color: var(--fg-faint);">↗</span>
+          </div>
+          <div class="card-meta mt-1">{{ sub }}</div>
+        </a>
+      {% endfor %}
+    </div>
+  </section>
+
+</div>
+
+<script>
+function dashHome() {
+  return {
+    services: [],
+    stats: {
+      services: { total: 0, running: 0, healthy: 0, uptime_max_human: '—' },
+      sparql:   { repos: null },
+      neo4j:    { nodes: null, rels: null },
+    },
+    lastRefreshed: '',
+    async refresh() {
+      try {
+        const [s, st] = await Promise.all([
+          fetch('/api/services/').then(r => r.json()),
+          fetch('/api/stats/').then(r => r.json()),
+        ]);
+        this.services = s.services || [];
+        this.stats = st;
+        this.lastRefreshed = new Date().toLocaleTimeString();
+      } catch (e) { console.error(e); }
+    },
+    isUp(s) {
+      return s.status === 'running' && (s.health === 'healthy' || s.health === null);
+    },
+    dotClass(s) {
+      if (s.health === 'healthy') return 'healthy';
+      if (s.health === 'unhealthy') return 'unhealthy';
+      if (s.health === 'starting') return 'starting';
+      if (s.status === 'running') return 'healthy';
+      return 'unknown';
+    },
+    toneClass(s) {
+      if (s.health === 'unhealthy' || s.status === 'exited') return 'tone-bad';
+      if (s.health === 'starting') return 'tone-warn';
+      if (this.isUp(s)) return 'tone-ok';
+      return '';
+    },
+    pillClass(s) {
+      if (s.health === 'unhealthy' || s.status === 'exited') return 'pill-bad';
+      if (s.health === 'starting') return 'pill-warn';
+      if (this.isUp(s)) return 'pill-ok';
+      return 'pill-neutral';
+    },
+    pillLabel(s) {
+      if (s.health) return s.health;
+      return s.status;
+    },
+    humanizeUptime(sec) {
+      if (sec === null || sec === undefined) return '—';
+      if (sec < 60)        return `${sec}s`;
+      if (sec < 3600)      return `${Math.floor(sec/60)}m`;
+      if (sec < 86400)     return `${Math.floor(sec/3600)}h${String(Math.floor((sec%3600)/60)).padStart(2,'0')}m`;
+      return `${Math.floor(sec/86400)}d${String(Math.floor((sec%86400)/3600)).padStart(2,'0')}h`;
+    },
+  };
+}
+</script>
+{% endblock %}

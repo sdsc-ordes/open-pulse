@@ -1,0 +1,388 @@
+{% extends "base.html" %}
+{% block heading %}Overview{% endblock %}
+{% block subheading %}Time-series of every metric the marquee tracks. Sampled every minute, retained for 30 days. For the live snapshot, see Status.{% endblock %}
+
+{% block content %}
+<!-- Chart.js, loaded only on this page -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+
+<div x-data="overview()" x-init="init()" class="space-y-6">
+
+  <!-- ── Range picker + meta ──────────────────────────────────────── -->
+  <div class="card" style="display: flex; align-items: center; gap: 12px;">
+    <span class="card-title">Window</span>
+    <div class="range-buttons">
+      <template x-for="r in ranges" :key="r">
+        <button class="btn"
+                :class="range === r ? 'btn-primary' : 'btn-ghost'"
+                @click="setRange(r)" x-text="r"></button>
+      </template>
+    </div>
+    <span class="card-meta ml-auto" x-text="metaLine"></span>
+    <button class="btn btn-ghost" @click="reload()">↻</button>
+  </div>
+
+  <!-- ── Big-number row (current values) ──────────────────────────── -->
+  <section class="grid-stats">
+    <div class="card tone-info">
+      <div class="card-title">Services healthy</div>
+      <div class="flex items-baseline gap-2 mt-1">
+        <div class="stat-value" x-text="latest.services_healthy + '/' + latest.services_total"></div>
+        <span class="stat-trend" x-show="delta('services_healthy') !== null"
+              x-text="formatDelta(delta('services_healthy')) + ' over window'"></span>
+      </div>
+    </div>
+    <div class="card tone-info">
+      <div class="card-title">SPARQL repos</div>
+      <div class="flex items-baseline gap-2 mt-1">
+        <div class="stat-value" x-text="formatVal(latest.sparql_repos)"></div>
+        <span class="stat-trend" x-show="delta('sparql_repos') !== null"
+              x-text="formatDelta(delta('sparql_repos'))"></span>
+      </div>
+    </div>
+    <div class="card tone-info">
+      <div class="card-title">Neo4j nodes</div>
+      <div class="flex items-baseline gap-2 mt-1">
+        <div class="stat-value" x-text="formatVal(latest.neo4j_nodes)"></div>
+        <span class="stat-trend" x-show="delta('neo4j_nodes') !== null"
+              x-text="formatDelta(delta('neo4j_nodes'))"></span>
+      </div>
+    </div>
+    <div class="card tone-info">
+      <div class="card-title">Neo4j relationships</div>
+      <div class="flex items-baseline gap-2 mt-1">
+        <div class="stat-value" x-text="formatVal(latest.neo4j_rels)"></div>
+        <span class="stat-trend" x-show="delta('neo4j_rels') !== null"
+              x-text="formatDelta(delta('neo4j_rels'))"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Charts ───────────────────────────────────────────────────── -->
+  <div class="grid-charts">
+    <div class="card chart-card">
+      <div class="card-title">Services (healthy / running / total)</div>
+      <div class="chart-wrap"><canvas x-ref="cServices"></canvas></div>
+    </div>
+    <div class="card chart-card">
+      <div class="card-title">SPARQL repos</div>
+      <div class="chart-wrap"><canvas x-ref="cSparql"></canvas></div>
+    </div>
+    <div class="card chart-card">
+      <div class="card-title">Neo4j nodes</div>
+      <div class="chart-wrap"><canvas x-ref="cNodes"></canvas></div>
+    </div>
+    <div class="card chart-card">
+      <div class="card-title">Neo4j relationships</div>
+      <div class="chart-wrap"><canvas x-ref="cRels"></canvas></div>
+    </div>
+  </div>
+
+  <p x-show="!loading && samples.length === 0" class="card-meta" style="font-style: italic;">
+    No samples yet — the metrics sampler runs every minute, give it a moment after first boot.
+  </p>
+
+  <!-- ── Top-N facets across the whole store ──────────────────────────── -->
+  <section x-data="topStats()" x-init="load()">
+    <div class="flex items-baseline mb-3">
+      <h2 class="card-title">Top across the store</h2>
+      <span class="ml-auto card-meta" x-text="metaTop"></span>
+      <button class="btn btn-ghost ml-3" @click="load(true)">↻</button>
+    </div>
+
+    <div class="grid-tops">
+      <template x-for="f in facets" :key="f.key">
+        <div class="card top-card">
+          <div class="top-head">
+            <span class="card-title" x-text="f.label"></span>
+            <span class="pill pill-info" x-show="(f.values || []).length"
+                  x-text="(f.values || []).length + ' values'"></span>
+          </div>
+          <p class="card-meta top-desc" x-text="f.description"></p>
+
+          <template x-if="f.error">
+            <p class="card-meta" style="color: var(--bad);" x-text="'⚠ ' + f.error"></p>
+          </template>
+          <template x-if="!f.error && (f.values || []).length === 0">
+            <p class="card-meta" style="font-style: italic;">no values yet</p>
+          </template>
+
+          <ul class="top-list">
+            <template x-for="(v, i) in (f.values || []).slice(0, 6)" :key="v.value">
+              <li class="top-row">
+                <span class="top-rank" x-text="i + 1"></span>
+                <span class="top-bar-cell">
+                  <span class="top-bar"
+                        :style="'width:' + (Math.max(8, (v.count / topMax(f)) * 100)) + '%'"></span>
+                  <span class="top-label" :title="v.value" x-text="shortLabel(v.value)"></span>
+                </span>
+                <span class="top-count" x-text="v.count"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
+      </template>
+    </div>
+  </section>
+
+</div>
+
+<style>
+  .range-buttons { display: flex; gap: 4px; }
+  .grid-charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 16px;
+  }
+  .chart-card { padding: 16px; }
+  .chart-wrap { height: 240px; margin-top: 8px; position: relative; }
+
+  /* ── Top-N facet cards ─────────────────────────────────────────── */
+  .grid-tops {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .top-card { padding: 16px; }
+  .top-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .top-desc { margin-bottom: 10px; }
+  .top-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; }
+  .top-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .top-rank {
+    width: 16px; text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-faint);
+  }
+  .top-bar-cell {
+    flex: 1;
+    position: relative;
+    height: 22px;
+    border-radius: 4px;
+    background: var(--surface-sunk);
+    overflow: hidden;
+    display: flex; align-items: center;
+  }
+  .top-bar {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+    border-right: 2px solid var(--accent);
+  }
+  .top-label {
+    position: relative;
+    z-index: 1;
+    padding: 0 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fg);
+  }
+  .top-count {
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-muted);
+    min-width: 36px;
+    text-align: right;
+  }
+</style>
+
+<script>
+function overview() {
+  return {
+    ranges: ['1h', '6h', '24h', '7d', '30d'],
+    range: localStorage.getItem('op:hub:overview-range') || '6h',
+    samples: [],
+    loading: false,
+    metaLine: '',
+    latest: { services_healthy: 0, services_running: 0, services_total: 0,
+              sparql_repos: 0, neo4j_nodes: 0, neo4j_rels: 0,
+              uptime_max_seconds: 0 },
+    charts: {},
+    pollHandle: null,
+
+    async init() {
+      // Wait for Chart.js + the luxon adapter to land — they're CDN'd.
+      await this._waitForChartJs();
+      await this.reload();
+      // Refresh every minute (the sampler interval) so the page is live.
+      this.pollHandle = setInterval(() => this.reload(/*silent=*/true), 60_000);
+    },
+
+    async _waitForChartJs() {
+      let tries = 0;
+      while (typeof Chart === 'undefined' && tries < 60) {
+        await new Promise(r => setTimeout(r, 50)); tries++;
+      }
+    },
+
+    setRange(r) {
+      this.range = r;
+      localStorage.setItem('op:hub:overview-range', r);
+      this.reload();
+    },
+
+    bucketFor(range) {
+      // Match approximate point density: aim for ~120 points per chart.
+      return ({ '1h': 0, '6h': 60, '24h': 300, '7d': 1800, '30d': 7200 })[range] || 0;
+    },
+
+    async reload(silent) {
+      if (!silent) this.loading = true;
+      try {
+        const bucket = this.bucketFor(this.range);
+        const r = await fetch(`/api/stats/history?range=${this.range}&bucket_seconds=${bucket}`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        this.samples = j.samples || [];
+        const last = this.samples[this.samples.length - 1] || {};
+        this.latest = Object.assign(this.latest, last);
+        this.metaLine = (j.count || 0) + ' point' + (j.count === 1 ? '' : 's')
+                      + ' · last sample '
+                      + (last.ts ? new Date(last.ts).toLocaleTimeString() : '—');
+        this._renderCharts();
+      } catch (e) {
+        this.metaLine = '⚠ ' + e.message;
+      } finally { this.loading = false; }
+    },
+
+    _renderCharts() {
+      if (typeof Chart === 'undefined') return;
+      // Theme-aware colors: pull live from CSS so dark/light just works.
+      const css = getComputedStyle(document.documentElement);
+      const fg     = css.getPropertyValue('--fg-muted').trim()    || '#6a6a73';
+      const grid   = css.getPropertyValue('--border').trim()      || '#e3e3e8';
+      const accent = css.getPropertyValue('--accent').trim()      || '#335bff';
+      const ok     = css.getPropertyValue('--ok').trim()          || '#1c7c4f';
+      const warn   = css.getPropertyValue('--warn').trim()        || '#b6700b';
+
+      const labels = this.samples.map(s => s.ts);
+      const baseline = (color, fill = false) => ({
+        borderColor: color,
+        backgroundColor: fill ? color + '33' : color,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        tension: 0.25,
+        fill,
+      });
+      const baseOpts = {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: fg, boxWidth: 12 } },
+          tooltip: { mode: 'index', intersect: false },
+        },
+        scales: {
+          x: {
+            type: 'time',
+            ticks: { color: fg, maxTicksLimit: 6 },
+            grid:  { color: grid + '66' },
+            time: { tooltipFormat: 'yyyy-LL-dd HH:mm' },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { color: fg, precision: 0 },
+            grid:  { color: grid + '66' },
+          },
+        },
+      };
+
+      const datasets = {
+        services: [
+          { label: 'healthy', data: this.samples.map(s => s.services_healthy ?? null), ...baseline(ok, true) },
+          { label: 'running', data: this.samples.map(s => s.services_running ?? null), ...baseline(accent) },
+          { label: 'total',   data: this.samples.map(s => s.services_total   ?? null), ...baseline(warn) },
+        ],
+        sparql: [
+          { label: 'repos', data: this.samples.map(s => s.sparql_repos ?? null), ...baseline(accent, true) },
+        ],
+        nodes: [
+          { label: 'nodes', data: this.samples.map(s => s.neo4j_nodes ?? null), ...baseline(accent, true) },
+        ],
+        rels: [
+          { label: 'relationships', data: this.samples.map(s => s.neo4j_rels ?? null), ...baseline(accent, true) },
+        ],
+      };
+
+      const refs = {
+        services: this.$refs.cServices,
+        sparql:   this.$refs.cSparql,
+        nodes:    this.$refs.cNodes,
+        rels:     this.$refs.cRels,
+      };
+      for (const key of Object.keys(refs)) {
+        const ctx = refs[key];
+        if (!ctx) continue;
+        if (this.charts[key]) {
+          this.charts[key].data.labels = labels;
+          this.charts[key].data.datasets = datasets[key];
+          this.charts[key].update('none');
+        } else {
+          this.charts[key] = new Chart(ctx, {
+            type: 'line',
+            data: { labels, datasets: datasets[key] },
+            options: baseOpts,
+          });
+        }
+      }
+    },
+
+    delta(key) {
+      if (this.samples.length < 2) return null;
+      const first = this.samples[0][key];
+      const last  = this.samples[this.samples.length - 1][key];
+      if (first === null || last === null || first === undefined || last === undefined) return null;
+      return last - first;
+    },
+
+    formatDelta(d) {
+      if (d === null || d === undefined) return '';
+      if (d === 0) return 'no change';
+      const sign = d > 0 ? '+' : '';
+      return sign + d;
+    },
+
+    formatVal(v) {
+      if (v === null || v === undefined) return '—';
+      return String(v);
+    },
+  };
+}
+
+/* Top-N facet cards — reuses /api/projects/facets so the same list that
+   drives the Projects filter panel feeds the overview "what's hot" view. */
+function topStats() {
+  return {
+    facets: [],
+    metaTop: '',
+
+    async load(refresh) {
+      this.metaTop = 'loading…';
+      try {
+        const url = '/api/projects/facets' + (refresh ? '?refresh=true' : '');
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        this.facets = j.facets || [];
+        this.metaTop = (j.endpoint ? 'from ' + j.endpoint + ' · ' : '')
+                     + this.facets.length + ' facets';
+      } catch (e) { this.metaTop = '⚠ ' + e.message; }
+    },
+
+    topMax(f) {
+      return Math.max(1, ...((f.values || []).slice(0, 6).map(v => v.count || 0)));
+    },
+
+    shortLabel(v) {
+      if (!v) return '';
+      try {
+        const u = new URL(v);
+        return u.pathname.split('/').filter(Boolean).pop() || u.hostname;
+      } catch (_) { return v; }
+    },
+  };
+}
+</script>
+{% endblock %}
