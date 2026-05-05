@@ -93,10 +93,15 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     success = 0
     skipped = 0
     failed: list[str] = []
+    # `max_repos = 0` is an explicit "no limit" sentinel: it would be silly
+    # for the runner to extract zero repos. Anything > 0 is a hard cap.
+    cap: int | None = int(max_repos) if max_repos is not None else None
+    if cap is not None and cap <= 0:
+        cap = None
     for i, full_name in enumerate(repos.keys()):
-        if max_repos is not None and i >= int(max_repos):
+        if cap is not None and i >= cap:
             logger.info(
-                "metadata_extractor: hit max_repos=%s, stopping early", max_repos
+                "metadata_extractor: hit max_repos=%s, stopping early", cap
             )
             break
         out_path = output_dir / _safe_filename(full_name)

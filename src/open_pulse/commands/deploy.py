@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -10,12 +11,24 @@ from typing import Annotated, Optional
 import typer
 from rich.console import Console
 
-_PROFILES = ("default", "analysis", "grimoirelab", "crawler", "orchestration")
+_PROFILES = (
+    "default",
+    "analysis",
+    "grimoirelab",
+    "crawler",
+    "extractor",
+    "sparql",
+    "hub",
+    "orchestration",
+)
 _PROFILE_DESCRIPTIONS = {
     "default": "Core services only (Neo4j)",
     "analysis": "Core + analysis notebook",
     "grimoirelab": "Core + GrimoireLab DB & worker",
     "crawler": "Core + Open Pulse Crawler API",
+    "extractor": "Core + GME metadata extractor + Selenium",
+    "sparql": "Core + Oxigraph SPARQL store + sparql-proxy",
+    "hub": "Core + Open Pulse Hub dashboard (port 9090)",
     "orchestration": "Core + Portainer management UI",
 }
 
@@ -25,17 +38,45 @@ app = typer.Typer(help="Deploy Docker infrastructure.")
 _COMPOSE_DIR = Path("infra/compose")
 _BASE_COMPOSE_FILE = _COMPOSE_DIR / "docker-compose.yml"
 _CLI_COMPOSE_FILE = _COMPOSE_DIR / "docker-compose.cli.yml"
+_GRIMOIRE_COMPOSE_FILE = Path("infra/services/grimoirelab/docker-compose.yml")
 
 
 def _find_project_root() -> Path:
-    """Walk up from this file to find the repo root (contains infra compose files)."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / _BASE_COMPOSE_FILE).is_file():
-            return candidate
-        candidate = candidate.parent
+    """Locate the repo root (the directory containing the compose files).
+
+    Resolution order:
+      1. ``$OPEN_PULSE_PROJECT_ROOT`` if set and valid (explicit override).
+      2. ``$OPEN_PULSE_HOST_PATH`` if set and valid (the cli container's bind
+         mount points here, identity-mapped from the host).
+      3. The current working directory and its ancestors.
+      4. Ancestors of this source file (the develop/editable install case).
+    """
+    candidates: list[Path] = []
+
+    for var in ("OPEN_PULSE_PROJECT_ROOT", "OPEN_PULSE_HOST_PATH"):
+        env_val = os.environ.get(var)
+        if env_val:
+            candidates.append(Path(env_val))
+
+    cwd = Path.cwd()
+    candidates.extend([cwd, *cwd.parents])
+    candidates.extend(Path(__file__).resolve().parents)
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if (resolved / _BASE_COMPOSE_FILE).is_file():
+            return resolved
+
     typer.echo(
-        f"Error: cannot locate project root (no {_BASE_COMPOSE_FILE} found).",
+        f"Error: cannot locate project root (no {_BASE_COMPOSE_FILE} found "
+        f"under cwd, OPEN_PULSE_HOST_PATH, or this package's parent dirs).",
         err=True,
     )
     raise typer.Exit(code=1)
@@ -55,6 +96,42 @@ def _docker_available() -> bool:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
     return True
+
+
+def _running_inside_cli_container() -> bool:
+    """Detect whether the CLI is running inside the open-pulse-cli container.
+
+    The compose overlay sets ``OPEN_PULSE_RUNNING_IN_CLI_CONTAINER=1`` so nested
+    invocations auto-include ``docker-compose.cli.yml`` and avoid the spurious
+    "orphan container" warning compose otherwise prints.
+    """
+    return os.environ.get("OPEN_PULSE_RUNNING_IN_CLI_CONTAINER") == "1"
+
+
+def _assemble_compose_files(
+    project_root: Path,
+    *,
+    with_cli: bool,
+    with_grimoire: bool,
+    extra: list[Path] | None,
+) -> list[Path]:
+    """Build the ordered list of ``-f`` files for a docker compose invocation.
+
+    The base file is always included. ``--with-cli`` adds the CLI overlay; the
+    overlay is also added implicitly when running *inside* the CLI container.
+    ``--with-grimoire`` adds the standalone grimoirelab compose so the whole
+    behemoth (main stack + grimoirelab) can be brought up in one go.
+    """
+    files: list[Path] = [project_root / _BASE_COMPOSE_FILE]
+    if with_cli or _running_inside_cli_container():
+        cli_path = project_root / _CLI_COMPOSE_FILE
+        if cli_path not in files:
+            files.append(cli_path)
+    if with_grimoire:
+        files.append(project_root / _GRIMOIRE_COMPOSE_FILE)
+    if extra:
+        files.extend(extra)
+    return files
 
 
 def _ensure_env_file(project_root: Path, env_file: Path | None) -> Path:
@@ -119,7 +196,11 @@ def _compose_up(
     extra_args: list[str],
 ) -> None:
     """Run ``docker compose up -d`` with the given profiles and overrides."""
-    cmd: list[str] = ["docker", "compose"]
+    cmd: list[str] = [
+        "docker", "compose",
+        "--project-name", "open-pulse",
+        "--project-directory", str(project_root),
+    ]
 
     for cf in compose_files:
         cmd.extend(["-f", str(cf)])
@@ -170,7 +251,14 @@ def up(
         bool,
         typer.Option(
             "--with-cli",
-            help=f"Include {_CLI_COMPOSE_FILE} to run the CLI container from registry image.",
+            help=f"Include {_CLI_COMPOSE_FILE} to run the CLI container.",
+        ),
+    ] = False,
+    with_grimoire: Annotated[
+        bool,
+        typer.Option(
+            "--with-grimoire",
+            help=f"Also bring up the grimoirelab stack ({_GRIMOIRE_COMPOSE_FILE}).",
         ),
     ] = False,
 ) -> None:
@@ -192,12 +280,12 @@ def up(
 
     env_path = _ensure_env_file(project_root, env_file)
 
-    root_compose = project_root / _BASE_COMPOSE_FILE
-    compose_files: list[Path] = [root_compose]
-    if with_cli:
-        compose_files.append(project_root / _CLI_COMPOSE_FILE)
-    if compose_file:
-        compose_files.extend(compose_file)
+    compose_files = _assemble_compose_files(
+        project_root,
+        with_cli=with_cli,
+        with_grimoire=with_grimoire,
+        extra=compose_file,
+    )
 
     if profile is not None:
         profiles = [p for p in profile if p != "default"]
@@ -230,6 +318,13 @@ def down(
             help=f"Include {_CLI_COMPOSE_FILE} when tearing down the stack.",
         ),
     ] = False,
+    with_grimoire: Annotated[
+        bool,
+        typer.Option(
+            "--with-grimoire",
+            help=f"Also tear down the grimoirelab stack ({_GRIMOIRE_COMPOSE_FILE}).",
+        ),
+    ] = False,
 ) -> None:
     """Tear down deployed services."""
     if not _docker_available():
@@ -240,16 +335,23 @@ def down(
 
     project_root = _find_project_root()
 
-    root_compose = project_root / _BASE_COMPOSE_FILE
-    files: list[Path] = [root_compose]
-    if with_cli:
-        files.append(project_root / _CLI_COMPOSE_FILE)
-    if compose_file:
-        files.extend(compose_file)
+    files = _assemble_compose_files(
+        project_root,
+        with_cli=with_cli,
+        with_grimoire=with_grimoire,
+        extra=compose_file,
+    )
 
-    cmd: list[str] = ["docker", "compose"]
+    cmd: list[str] = [
+        "docker", "compose",
+        "--project-name", "open-pulse",
+        "--project-directory", str(project_root),
+    ]
     for cf in files:
         cmd.extend(["-f", str(cf)])
+    default_env = project_root / ".env"
+    if default_env.is_file():
+        cmd.extend(["--env-file", str(default_env)])
     cmd.append("down")
     if volumes:
         cmd.append("--volumes")
@@ -268,6 +370,13 @@ def ps(
             help=f"Include {_CLI_COMPOSE_FILE} when listing containers.",
         ),
     ] = False,
+    with_grimoire: Annotated[
+        bool,
+        typer.Option(
+            "--with-grimoire",
+            help=f"Also list grimoirelab containers ({_GRIMOIRE_COMPOSE_FILE}).",
+        ),
+    ] = False,
 ) -> None:
     """Show the status of deployed containers."""
     if not _docker_available():
@@ -278,9 +387,23 @@ def ps(
 
     project_root = _find_project_root()
 
-    cmd = ["docker", "compose", "-f", str(project_root / _BASE_COMPOSE_FILE)]
-    if with_cli:
-        cmd.extend(["-f", str(project_root / _CLI_COMPOSE_FILE)])
+    files = _assemble_compose_files(
+        project_root,
+        with_cli=with_cli,
+        with_grimoire=with_grimoire,
+        extra=None,
+    )
+
+    cmd: list[str] = [
+        "docker", "compose",
+        "--project-name", "open-pulse",
+        "--project-directory", str(project_root),
+    ]
+    for cf in files:
+        cmd.extend(["-f", str(cf)])
+    default_env = project_root / ".env"
+    if default_env.is_file():
+        cmd.extend(["--env-file", str(default_env)])
     cmd.extend(["ps", "-a"])
     result = subprocess.run(cmd, cwd=str(project_root))
     raise typer.Exit(code=result.returncode)

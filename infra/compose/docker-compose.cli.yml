@@ -1,9 +1,35 @@
 services:
   open-pulse-cli:
-    image: "${OPEN_PULSE_CLI_IMAGE:-ghcr.io/open-pulse/open-pulse:latest}"
+    # Single open-pulse image, idled with `sleep infinity`. The hub talks to
+    # the host docker daemon via /var/run/docker.sock and `docker exec`s into
+    # this container to run `open-pulse deploy …`. For local dev, build the
+    # image with:
+    #   docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
+    # then set OPEN_PULSE_IMAGE=open-pulse:local in your .env.
+    image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest}"
     container_name: open-pulse-cli
     restart: unless-stopped
     depends_on:
       neo4j:
         condition: service_healthy
-    command: ["sh", "-c", "sleep infinity"]
+    # Bind-mount the repo at the *same absolute path* as on the host so paths
+    # in nested `docker compose` calls resolve identically inside and outside
+    # the container. OPEN_PULSE_HOST_PATH must be set to the host repo root.
+    working_dir: "${OPEN_PULSE_HOST_PATH:?OPEN_PULSE_HOST_PATH must be set to the absolute host path of the repo}"
+    # Pull the project's .env into the container's environment so quests can
+    # see CRAWLER_API_TOKEN, NEO4J_AUTH, SPARQL_AUTH, etc. without per-step
+    # plumbing.
+    env_file:
+      - ./.env
+    environment:
+      WORKSPACE_DIR: "${OPEN_PULSE_HOST_PATH}"
+      # Marker the CLI uses to detect it's running inside this container so
+      # nested `docker compose` calls auto-include this overlay (avoids
+      # spurious "orphan container" warnings).
+      OPEN_PULSE_RUNNING_IN_CLI_CONTAINER: "1"
+    volumes:
+      - "${OPEN_PULSE_HOST_PATH}:${OPEN_PULSE_HOST_PATH}"
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Override the image's default ENTRYPOINT (which runs `open-pulse`) so
+    # the container idles and accepts `docker exec`.
+    entrypoint: ["sleep", "infinity"]
