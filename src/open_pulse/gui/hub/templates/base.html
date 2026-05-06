@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en" x-data="{ theme: localStorage.getItem('op-hub-theme') || 'dark' }"
+      :data-theme="theme"
+      x-init="$watch('theme', v => { localStorage.setItem('op-hub-theme', v); document.documentElement.dataset.theme = v; })">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Open Pulse Hub{% endblock %}</title>
+    {# Hydrogen-atom favicon: outer ring = electron orbit, centre dot =
+       nucleus. Inline SVG data URI so nothing extra has to ship. The
+       brand-blue stroke (#38bdf8) sits well on both the light and dark
+       theme tab backgrounds. #}
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%2338bdf8' stroke-width='2.4'/%3E%3Ccircle cx='16' cy='16' r='3.4' fill='%2338bdf8'/%3E%3C/svg%3E" />
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <script>
+      tailwind.config = { darkMode: ['selector', '[data-theme="dark"]'] };
+    </script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script>
+    /* Browser-local key store for BYOK secrets (applier token, SPARQL creds,
+       GitHub PAT, …). Lives only in localStorage; the hub never persists
+       these values. Pages read on init via opSecrets.get(...) and pass them
+       in request bodies that need them (POST /api/projects/apply, etc.). */
+    window.opSecrets = (function () {
+      const KEY = 'op:hub:secrets:v1';
+      const load = () => {
+        try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; }
+        catch (_) { return {}; }
+      };
+      const save = (obj) => localStorage.setItem(KEY, JSON.stringify(obj));
+      return {
+        all: () => load(),
+        get: (k) => load()[k] || '',
+        set: (k, v) => {
+          const o = load();
+          if (v === '' || v === null || v === undefined) delete o[k];
+          else o[k] = v;
+          save(o);
+          window.dispatchEvent(new CustomEvent('op-secrets-changed', { detail: { key: k } }));
+        },
+        clear: () => { localStorage.removeItem(KEY); window.dispatchEvent(new Event('op-secrets-changed')); },
+      };
+    })();
+    </script>
+  </head>
+  <body class="antialiased min-h-screen flex flex-col">
+
+    <!-- ── Marquee strip ─────────────────────────────────────────────────── -->
+    <!-- Two identical .marquee-list copies sit side-by-side inside the track.
+         Each list uses the same `gap` between items as its trailing padding,
+         so the seam between copies has the same spacing as any inter-item
+         gap. Translating the track by -50% (= one copy width) makes the wrap
+         visually continuous instead of snapping. -->
+    <div class="marquee" x-data="marqueeBar()" x-init="refresh(); setInterval(refresh, 10000)">
+      <div class="marquee-track">
+        <template x-for="copy in 6" :key="copy">
+          <div class="marquee-list" :aria-hidden="copy === 1 ? 'false' : 'true'">
+            <template x-for="item in items" :key="item.label + '-' + copy">
+              <span class="marquee-item">
+                <span class="marquee-dot" :class="item.tone"></span>
+                <span class="marquee-label" x-text="item.label"></span>
+                <span class="marquee-value" x-text="item.value"></span>
+              </span>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <div class="flex flex-1">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <span class="brand-pulse"></span>
+          <span class="brand-name">open-pulse</span>
+          <span class="brand-tag">hub</span>
+        </div>
+        <nav class="sidebar-nav">
+          {# User-facing surfaces — what people open day-to-day. Overview here
+             is the trends view (charts over time); the live snapshot moved
+             to Admin → Status. The Ontology link goes off-host to the
+             open-pulse-ontology docs (configurable via HUB_ONTOLOGY_URL). #}
+          {% set nav_explore = [
+            ('/', 'overview', 'Overview', 'M3 17l4-6 5 4 4-7 5 9'),
+            ('/databases', 'databases', 'Query', 'M4 7c0-2 4-3 8-3s8 1 8 3v10c0 2-4 3-8 3s-8-1-8-3z M4 7c0 2 4 3 8 3s8-1 8-3 M4 12c0 2 4 3 8 3s8-1 8-3'),
+          ] %}
+          {# Admin / operations — orchestration, observability, configuration.
+             Status leads the admin block (was the old Overview tile view).
+             GrimoireLab Projects sits with admin tools because it builds
+             the projects.json that the GrimoireLab applier reloads. #}
+          {% set nav_admin = [
+            ('/status', 'status', 'Status', 'M3 12l9-9 9 9M5 10v10h14V10'),
+            ('/stack', 'stack', 'Stack', 'M3 5l9-3 9 3-9 3-9-3z M3 12l9 3 9-3 M3 19l9 3 9-3'),
+            ('/services', 'services', 'Services', 'M4 6h16M4 12h16M4 18h16'),
+            ('/pipeline', 'pipeline', 'Quests', 'M4 6h6M4 12h12M4 18h8 M14 6l4 4-4 4'),
+            ('/projects', 'projects', 'GrimoireLab Projects', 'M3 7l9-4 9 4-9 4-9-4z M3 12l9 4 9-4 M3 17l9 4 9-4'),
+            ('/logs', 'logs', 'Logs', 'M4 6h16M4 10h16M4 14h12M4 18h8'),
+            ('/settings', 'settings', 'Settings', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'),
+          ] %}
+
+          <div class="sidebar-group">
+            <div class="sidebar-group-label">Explore</div>
+            {% for href, key, label, icon in nav_explore %}
+              <a href="{{ href }}" class="sidebar-link {% if page == key %}is-active{% endif %}">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="{{ icon }}" />
+                </svg>
+                <span>{{ label }}</span>
+              </a>
+            {% endfor %}
+            <a href="{{ ontology_url }}" target="_blank" rel="noopener" class="sidebar-link sidebar-link-ext">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v6 M5 12l-2 9h18l-2-9 M5 12h14 M9 12V8a3 3 0 0 1 6 0v4" />
+              </svg>
+              <span>Ontology</span>
+              <span class="ext-arrow">↗</span>
+            </a>
+          </div>
+
+          <div class="sidebar-group">
+            <div class="sidebar-group-label">Dashboards</div>
+            {% for d in dashboards %}
+              <a href="{{ d.url }}" target="_blank" rel="noopener" class="sidebar-link sidebar-link-ext sidebar-link-dash">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h7v7H3z M14 4h7v4h-7z M14 10h7v10h-7z M3 14h7v6H3z" />
+                </svg>
+                <div class="dash-meta">
+                  <div class="dash-head">
+                    <span x-cloak class="dash-name">{{ d.name }}</span>
+                    <span class="dash-tech">{{ d.tech }}</span>
+                  </div>
+                  <div class="dash-summary">{{ d.summary }}</div>
+                </div>
+                <span class="ext-arrow">↗</span>
+              </a>
+            {% endfor %}
+          </div>
+
+          <div class="sidebar-group sidebar-group-admin">
+            <div class="sidebar-group-label">Admin</div>
+            {% for href, key, label, icon in nav_admin %}
+              <a href="{{ href }}" class="sidebar-link {% if page == key %}is-active{% endif %}">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="{{ icon }}" />
+                </svg>
+                <span>{{ label }}</span>
+              </a>
+            {% endfor %}
+          </div>
+        </nav>
+        <div class="sidebar-foot">
+          <button class="theme-toggle" @click="theme = theme === 'dark' ? 'light' : 'dark'" :title="theme + ' theme'">
+            <svg x-show="theme === 'dark'" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36-1.42 1.42M6.06 17.94l-1.42 1.42m0-13.72 1.42 1.42m11.3 11.3 1.42 1.42"/><circle cx="12" cy="12" r="4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg x-show="theme === 'light'" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+            <span class="text-xs" x-text="theme === 'dark' ? 'Light' : 'Dark'"></span>
+          </button>
+          <form method="post" action="/logout">
+            <button type="submit" class="logout-btn">Sign out</button>
+          </form>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="page-header">
+          <div class="page-heading">
+            <h1>{% block heading %}{% endblock %}</h1>
+            <p>{% block subheading %}{% endblock %}</p>
+          </div>
+          <div class="page-actions">
+            {% block headeractions %}{% endblock %}
+          </div>
+        </header>
+        <div class="page-body">
+          {% block content %}{% endblock %}
+        </div>
+      </main>
+    </div>
+
+    <script>
+    function marqueeBar() {
+      return {
+        items: [
+          {label:'loading…', value:'', tone:'neutral'},
+        ],
+        async refresh() {
+          try {
+            const r = await fetch('/api/stats/');
+            if (!r.ok) return;
+            const j = await r.json();
+            const items = [
+              { label: 'services',       value: `${j.services.healthy}/${j.services.total} healthy`, tone: j.services.healthy === j.services.total ? 'ok' : 'warn' },
+              { label: 'running',        value: String(j.services.running), tone: 'ok' },
+              { label: 'longest uptime', value: j.services.uptime_max_human || '—', tone: 'neutral' },
+              { label: 'sparql repos',   value: j.sparql.repos === null ? '—' : String(j.sparql.repos), tone: j.sparql.repos === null ? 'warn' : 'ok' },
+              { label: 'neo4j nodes',    value: j.neo4j.nodes === null ? '—' : String(j.neo4j.nodes), tone: j.neo4j.nodes === null ? 'warn' : 'ok' },
+              { label: 'neo4j rels',     value: j.neo4j.rels  === null ? '—' : String(j.neo4j.rels),  tone: j.neo4j.rels  === null ? 'warn' : 'ok' },
+              { label: 'updated',        value: new Date(j.generated_at).toLocaleTimeString(), tone: 'neutral' },
+            ];
+            this.items = items;
+          } catch (e) { /* keep last */ }
+        },
+      };
+    }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Open Pulse — Dashboard</title>
+<style>
+  :root {
+    --fg: #1d1d1f;
+    --muted: #6a6a73;
+    --bg: #fafafa;
+    --card: #ffffff;
+    --accent: #335bff;
+    --accent-fg: #ffffff;
+    --border: #e3e3e8;
+    --code-bg: #f3f3f5;
+    --ok: #1c7c4f;
+    --err: #b3261e;
+    --tabs-bg: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--fg); background: var(--bg); }
+  header { padding: 18px 28px 0; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 700; }
+  header .lede { color: var(--muted); margin: 4px 0 16px; }
+
+  /* Tabs */
+  nav.tabs { display: flex; gap: 4px; padding: 0 28px; border-bottom: 1px solid var(--border); background: var(--tabs-bg); }
+  nav.tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; margin: 0; }
+  nav.tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
+  nav.tabs button[disabled] { color: #c0c0c8; cursor: not-allowed; }
+
+  /* Tab body */
+  main { padding: 24px 28px; }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  /* Cards / shared form styles */
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  label { display: block; font-weight: 600; font-size: 13px; margin-top: 12px; margin-bottom: 4px; }
+  input, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font: 13px/1.4 ui-monospace, "SF Mono", Consolas, monospace; background: var(--code-bg); }
+  textarea { min-height: 120px; resize: vertical; }
+  button.primary { background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; margin-right: 8px; margin-top: 12px; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; margin-right: 8px; margin-top: 12px; }
+  button:disabled { opacity: 0.4; cursor: wait; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; max-height: 400px; overflow: auto; font: 12px/1.5 ui-monospace, "SF Mono", Consolas, monospace; margin: 0; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .status { padding: 8px 12px; border-radius: 6px; margin-top: 12px; font-size: 13px; display: none; }
+  .status.show { display: block; }
+  .status.ok  { background: #e8f5ee; color: var(--ok); border: 1px solid #b6e0c7; }
+  .status.err { background: #fbe8e8; color: var(--err); border: 1px solid #f0b9b6; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); }
+  .small { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Open Pulse Dashboard</h1>
+  <p class="lede">Bring-your-own-key tools for the Open Pulse stack. Credentials are kept in your browser only.</p>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="projects">Projects.json builder</button>
+  <button class="tab" data-tab="about">About</button>
+  <!-- Future tabs slot in here, e.g. data-tab="crawler" or data-tab="sparql-explorer". -->
+</nav>
+
+<main>
+
+  <!-- ── Projects.json builder ──────────────────────────── -->
+  <section id="tab-projects" class="tab-pane active">
+
+    <div class="grid">
+
+      <!-- ── Inputs ───────────────────────────────────── -->
+      <div class="card">
+        <h2>1. Source query</h2>
+
+        <label for="sparqlUrl">SPARQL endpoint</label>
+        <input id="sparqlUrl" placeholder="http://localhost:7878/query" />
+
+        <div class="row">
+          <div>
+            <label for="sparqlUser">SPARQL user</label>
+            <input id="sparqlUser" placeholder="optional for public reads" />
+          </div>
+          <div>
+            <label for="sparqlPass">SPARQL password</label>
+            <input id="sparqlPass" type="password" placeholder="leave empty if anon" />
+          </div>
+        </div>
+
+        <label for="query">Query
+          <span class="small">(must return <code>?repo</code>)</span>
+        </label>
+        <textarea id="query"></textarea>
+
+        <label for="groupTitle">Group title</label>
+        <input id="groupTitle" value="Open Pulse SPARQL" />
+
+        <button id="btnPreview" class="primary">Preview</button>
+        <button id="btnApply" class="secondary">Apply &amp; restart Mordred</button>
+        <details>
+          <summary>Applier settings</summary>
+          <label for="applierUrl">Applier URL</label>
+          <input id="applierUrl" placeholder="http://localhost:1235" />
+          <label for="applierToken">Applier bearer token (APPLIER_AUTH)</label>
+          <input id="applierToken" type="password" />
+        </details>
+        <div id="status" class="status"></div>
+      </div>
+
+      <!-- ── Generated preview ────────────────────────── -->
+      <div class="card">
+        <h2>2. Generated projects.json</h2>
+        <pre id="generated">(click Preview to generate)</pre>
+      </div>
+
+      <!-- ── Currently applied ──────────────────────────── -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <h2>3. Currently applied (live in Mordred)</h2>
+        <button id="btnRefresh" class="secondary">Refresh</button>
+        <pre id="current">(click Refresh)</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── About / placeholder ───────────────────────────── -->
+  <section id="tab-about" class="tab-pane">
+    <div class="card">
+      <h2>About this dashboard</h2>
+      <p>This is the entry-point UI for the Open Pulse stack. Every tab is a self-contained tool that talks to a service over HTTP — credentials are entered in the browser and cached in <code>localStorage</code>. The server only sees the <em>output</em> of the tool, never the user's keys.</p>
+      <p class="small">Planned tabs: SPARQL explorer (ad-hoc queries against the same store), crawler runner (submit + poll BFS jobs), pipeline status (last quest run + artifact links).</p>
+    </div>
+  </section>
+
+</main>
+
+<script>
+// ── Tab switching ─────────────────────────────────────────
+document.querySelectorAll("nav.tabs .tab").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.disabled) return;
+    document.querySelectorAll("nav.tabs .tab").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+  });
+});
+
+// ── Projects.json builder ─────────────────────────────────
+const DEFAULTS = {
+  sparqlUrl: "http://localhost:7878/query",
+  applierUrl: "http://localhost:1235",
+  query: `# Repos discovered by the open-pulse pipeline.
+PREFIX schema: <http://schema.org/>
+SELECT ?repo ?name WHERE {
+  ?repo a schema:SoftwareSourceCode ;
+        schema:name ?name .
+}
+ORDER BY ?repo`,
+};
+
+const $ = (id) => document.getElementById(id);
+
+// localStorage namespaced per-tab so future tabs don't collide.
+const STORAGE_KEY = "op:projects:v1";
+const STORAGE_FIELDS = ["sparqlUrl","sparqlUser","sparqlPass","query","groupTitle","applierUrl","applierToken"];
+function loadState() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); }
+  catch (_) { return {}; }
+}
+function saveState() {
+  const out = {};
+  for (const k of STORAGE_FIELDS) out[k] = $(k).value;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(out));
+}
+function applyState() {
+  const s = loadState();
+  for (const k of STORAGE_FIELDS) if (s[k] !== undefined) $(k).value = s[k];
+  if (!$("sparqlUrl").value) $("sparqlUrl").value = DEFAULTS.sparqlUrl;
+  if (!$("applierUrl").value) $("applierUrl").value = DEFAULTS.applierUrl;
+  if (!$("query").value) $("query").value = DEFAULTS.query;
+}
+applyState();
+for (const k of STORAGE_FIELDS) $(k).addEventListener("input", saveState);
+
+function setStatus(text, kind) {
+  const el = $("status");
+  el.textContent = text;
+  el.classList.remove("ok","err","show");
+  if (text) el.classList.add("show", kind || "");
+}
+function basicAuthHeader(user, pass) {
+  if (!user) return null;
+  return "Basic " + btoa(user + ":" + (pass || ""));
+}
+
+// SPARQL JSON results → projects.json
+function buildProjectsJson(rows, groupTitle) {
+  const slug = (groupTitle || "open_pulse_sparql").replace(/\s+/g, "_").toLowerCase().replace(/[^a-z0-9_]/g, "");
+  const repos = [];
+  for (const row of rows) {
+    const repoVal = row.repo && row.repo.value;
+    if (!repoVal || !repoVal.startsWith("http")) continue;
+    repos.push(repoVal);
+  }
+  repos.sort();
+  return { [slug || "open_pulse_sparql"]: { meta: { title: groupTitle }, git: repos } };
+}
+
+// Preview
+$("btnPreview").addEventListener("click", async () => {
+  setStatus("");
+  const url = $("sparqlUrl").value.trim();
+  const user = $("sparqlUser").value.trim();
+  const pass = $("sparqlPass").value;
+  const query = $("query").value;
+  const title = $("groupTitle").value.trim() || "Open Pulse SPARQL";
+  if (!url || !query) { setStatus("Endpoint URL and query are required.", "err"); return; }
+
+  const headers = { "Accept": "application/sparql-results+json" };
+  const auth = basicAuthHeader(user, pass);
+  if (auth) headers["Authorization"] = auth;
+  const fetchUrl = url + (url.includes("?") ? "&" : "?") + "query=" + encodeURIComponent(query);
+
+  $("btnPreview").disabled = true;
+  try {
+    const resp = await fetch(fetchUrl, { headers });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error("HTTP " + resp.status + " — " + text.slice(0, 200));
+    }
+    const body = await resp.json();
+    const rows = (body.results && body.results.bindings) || [];
+    const projects = buildProjectsJson(rows, title);
+    $("generated").textContent = JSON.stringify(projects, null, 2);
+    setStatus("Preview OK — " + rows.length + " repo(s) in result.", "ok");
+  } catch (e) {
+    setStatus("Query failed: " + e.message, "err");
+  } finally {
+    $("btnPreview").disabled = false;
+  }
+});
+
+// Apply
+$("btnApply").addEventListener("click", async () => {
+  setStatus("");
+  const generated = $("generated").textContent.trim();
+  if (!generated || generated.startsWith("(")) { setStatus("Click Preview first.", "err"); return; }
+  const applierUrl = $("applierUrl").value.trim().replace(/\/$/, "");
+  const token = $("applierToken").value.trim();
+  if (!applierUrl || !token) { setStatus("Applier URL and bearer token are required to apply.", "err"); return; }
+
+  $("btnApply").disabled = true;
+  try {
+    const resp = await fetch(applierUrl + "/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: generated,
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error("HTTP " + resp.status + " — " + text.slice(0, 200));
+    }
+    const body = await resp.json();
+    setStatus("Applied. Mordred restart triggered (" + (body.detail || "OK") + ").", "ok");
+    refreshCurrent();
+  } catch (e) {
+    setStatus("Apply failed: " + e.message, "err");
+  } finally {
+    $("btnApply").disabled = false;
+  }
+});
+
+// Currently applied
+async function refreshCurrent() {
+  const applierUrl = $("applierUrl").value.trim().replace(/\/$/, "");
+  const token = $("applierToken").value.trim();
+  if (!applierUrl) { $("current").textContent = "(set Applier URL)"; return; }
+  const headers = {};
+  if (token) headers["Authorization"] = "Bearer " + token;
+  $("btnRefresh").disabled = true;
+  try {
+    const resp = await fetch(applierUrl + "/current", { headers });
+    if (resp.status === 404) { $("current").textContent = "(no projects.json yet)"; return; }
+    if (!resp.ok) {
+      const text = await resp.text();
+      $("current").textContent = "(fetch failed: HTTP " + resp.status + " — " + text.slice(0, 200) + ")";
+      return;
+    }
+    const body = await resp.json();
+    $("current").textContent = JSON.stringify(body, null, 2);
+  } catch (e) {
+    $("current").textContent = "(fetch failed: " + e.message + ")";
+  } finally {
+    $("btnRefresh").disabled = false;
+  }
+}
+$("btnRefresh").addEventListener("click", refreshCurrent);
+if ($("applierUrl").value && $("applierToken").value) refreshCurrent();
+</script>
+
+</body>
+</html>

@@ -20,6 +20,7 @@ from open_pulse.orchestrator import run_sequential
 from open_pulse.services.container import ServiceContainer
 from open_pulse.tasks import FunctionTask
 
+from .apply_grimoire_projects import run_apply_grimoire_projects
 from .config import QuestFileConfig, RetryConfig, StepConfig
 from .crawler import run_crawler
 from .metadata_extractor import run_metadata_extractor
@@ -35,6 +36,7 @@ STEP_REGISTRY: dict[str, StepFunc] = {
     "neo4j_upload": run_neo4j_upload,
     "metadata_extractor": run_metadata_extractor,
     "sparql_upload": run_sparql_upload,
+    "apply_grimoire_projects": run_apply_grimoire_projects,
 }
 
 STEP_NAMES: tuple[str, ...] = tuple(STEP_REGISTRY)
@@ -125,6 +127,7 @@ def build_tasks(config: QuestFileConfig) -> tuple[FunctionTask, ...]:
         "neo4j_upload": quest.steps.neo4j_upload,
         "metadata_extractor": quest.steps.metadata_extractor,
         "sparql_upload": quest.steps.sparql_upload,
+        "apply_grimoire_projects": quest.steps.apply_grimoire_projects,
     }
 
     tasks: list[FunctionTask] = []
@@ -233,6 +236,7 @@ def run_single_step(
         "neo4j_upload": quest.steps.neo4j_upload,
         "metadata_extractor": quest.steps.metadata_extractor,
         "sparql_upload": quest.steps.sparql_upload,
+        "apply_grimoire_projects": quest.steps.apply_grimoire_projects,
     }
     services = ServiceContainer.from_quest_config(quest)
     func = STEP_REGISTRY[step_name]

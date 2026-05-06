@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block heading %}Stack{% endblock %}
+{% block subheading %}Bring profiles up or down by exec'ing the deploy CLI inside <code>open-pulse-cli</code>.{% endblock %}
+
+{% block content %}
+<div x-data="stackControl()" x-init="loadProfiles(); refreshPs();" class="space-y-6">
+
+  <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;" class="lg:gap-4">
+
+    <div class="card">
+      <div class="card-title">Profiles</div>
+      <p class="card-meta mt-1">Each profile maps to a docker-compose <code>--profile</code> flag.</p>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 12px;">
+        <template x-for="p in profiles" :key="p.name">
+          <label class="card" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer;"
+                 :class="selected.includes(p.name) ? 'tone-info' : ''">
+            <input type="checkbox" :value="p.name" x-model="selected">
+            <div>
+              <div class="font-semibold" x-text="p.name"></div>
+              <div class="card-meta" x-text="p.label"></div>
+            </div>
+          </label>
+        </template>
+      </div>
+
+      <label style="display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--fg-muted);">
+        <input type="checkbox" x-model="withGrimoire">
+        <span>Also include the grimoirelab stack (<code>--with-grimoire</code>)</span>
+      </label>
+
+      <div class="flex gap-2" style="padding-top: 12px; border-top: 1px solid var(--border); margin-top: 12px;">
+        <button class="btn btn-primary" @click="up()" :disabled="busy || (!selected.length && !withGrimoire)">
+          <span x-text="busy ? 'Working…' : 'Up'"></span>
+        </button>
+        <button class="btn btn-danger" @click="confirmDown()" :disabled="busy">Down</button>
+        <label style="margin-left: auto; font-size: 12px; color: var(--fg-muted); display: flex; align-items: center; gap: 6px;">
+          <input type="checkbox" x-model="removeVolumes">
+          <span>also remove volumes on down</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="flex items-baseline gap-2">
+        <div class="card-title">deploy ps</div>
+        <button class="btn btn-ghost ml-auto" @click="refreshPs()">↻</button>
+      </div>
+      <pre class="console mt-2" style="height: 320px; font-size: 11px;" x-text="psOutput || '(loading…)'"></pre>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <div class="card-title">Last command output</div>
+    <pre class="console mt-2" style="height: 320px;" x-text="output || '(no command run yet)'"></pre>
+  </div>
+
+</div>
+
+<script>
+function stackControl() {
+  return {
+    profiles: [],
+    selected: [],
+    withGrimoire: false,
+    removeVolumes: false,
+    busy: false,
+    output: '',
+    psOutput: '',
+    async loadProfiles() {
+      const r = await fetch('/api/stack/profiles');
+      const j = await r.json();
+      this.profiles = j.profiles || [];
+    },
+    async up() {
+      this.busy = true; this.output = 'launching…';
+      try {
+        const r = await fetch('/api/stack/up', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ profiles: this.selected, with_grimoire: this.withGrimoire }),
+        });
+        const j = await r.json();
+        this.output = `$ ${(j.command || []).join(' ')}\nexit ${j.exit_code}\n\n${j.output || ''}`;
+        await this.refreshPs();
+      } catch (e) { this.output = '⚠ ' + e.message; }
+      finally   { this.busy = false; }
+    },
+    async confirmDown() {
+      if (!confirm('Tear down the deployed stack?' + (this.removeVolumes ? '\n\nALSO removing volumes — data will be lost.' : ''))) return;
+      this.busy = true; this.output = 'tearing down…';
+      try {
+        const r = await fetch('/api/stack/down', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ with_grimoire: this.withGrimoire, remove_volumes: this.removeVolumes }),
+        });
+        const j = await r.json();
+        this.output = `$ ${(j.command || []).join(' ')}\nexit ${j.exit_code}\n\n${j.output || ''}`;
+        await this.refreshPs();
+      } catch (e) { this.output = '⚠ ' + e.message; }
+      finally   { this.busy = false; }
+    },
+    async refreshPs() {
+      const u = '/api/stack/ps' + (this.withGrimoire ? '?with_grimoire=true' : '');
+      const r = await fetch(u);
+      const j = await r.json();
+      this.psOutput = j.output || '';
+    },
+  };
+}
+</script>
+{% endblock %}

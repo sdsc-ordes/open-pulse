@@ -1,18 +1,45 @@
-"""Shared service configuration defaults and models."""
+"""Shared service configuration defaults and models.
+
+The default endpoints adapt to where the CLI is running:
+
+* When the marker env var ``OPEN_PULSE_RUNNING_IN_CLI_CONTAINER=1`` is set
+  (the case inside the ``open-pulse-cli`` container), defaults point at the
+  compose-network service names (``crawler``, ``neo4j``, ``sparql-proxy``,
+  ``extractor``). Quests written for in-container execution can therefore
+  omit the ``services:`` block entirely.
+
+* Otherwise, defaults point at ``localhost`` with the host-published ports.
+  This is the right value for ``open-pulse health`` invoked directly on
+  the host.
+
+A quest YAML always wins: any explicit ``services.<svc>.endpoint`` value in
+the file overrides these defaults.
+"""
 
 from __future__ import annotations
 
+import os
+
 from pydantic import BaseModel, Field
 
-DEFAULT_NEO4J_HTTP_ENDPOINT = "http://localhost:7474"
-DEFAULT_NEO4J_BOLT_ENDPOINT = "bolt://localhost:7687"
-DEFAULT_SPARQL_ENDPOINT = "http://localhost:7878"
+_IN_CLI_CONTAINER = os.environ.get("OPEN_PULSE_RUNNING_IN_CLI_CONTAINER") == "1"
+
+
+def _default(in_cli: str, host: str) -> str:
+    return in_cli if _IN_CLI_CONTAINER else host
+
+
+DEFAULT_NEO4J_HTTP_ENDPOINT = _default("http://neo4j:7474", "http://localhost:7474")
+DEFAULT_NEO4J_BOLT_ENDPOINT = _default("bolt://neo4j:7687", "bolt://localhost:7687")
+DEFAULT_SPARQL_ENDPOINT = _default("http://sparql-proxy:7878", "http://localhost:7878")
 DEFAULT_SPARQL_AUTH_ENV = "SPARQL_AUTH"
-DEFAULT_GRIMOIRELAB_DB = "localhost:5432"
-DEFAULT_CRAWLER_ENDPOINT = "http://localhost:8000"
+DEFAULT_GRIMOIRELAB_DB = _default("mariadb:3306", "localhost:5432")
+DEFAULT_CRAWLER_ENDPOINT = _default("http://crawler:8000", "http://localhost:8000")
 DEFAULT_CRAWLER_API_TOKEN_ENV = "CRAWLER_API_TOKEN"
 DEFAULT_NEO4J_AUTH_ENV = "NEO4J_AUTH"
-DEFAULT_METADATA_EXTRACTOR_ENDPOINT = "http://localhost:1234"
+DEFAULT_METADATA_EXTRACTOR_ENDPOINT = _default(
+    "http://extractor:1234", "http://localhost:1234"
+)
 
 
 class Neo4jServiceConfig(BaseModel):

@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+{% block heading %}GrimoireLab Projects{% endblock %}
+{% block subheading %}Filter the SPARQL store by facet, pick a template, or write SPARQL by hand — then push the result to the GrimoireLab applier.{% endblock %}
+
+{% block content %}
+<div x-data="projectsBuilder()" x-init="init()" class="space-y-4">
+
+  <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 16px;">
+
+    <!-- ── Facets / filters ────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="flex items-baseline gap-2">
+        <div class="card-title">Filters</div>
+        <span class="card-meta" x-text="facetMeta()"></span>
+        <button class="btn btn-ghost ml-auto" @click="loadFacets(true)">↻</button>
+      </div>
+
+      <template x-if="facets.length === 0 && !loadingFacets">
+        <p class="card-meta" style="font-style: italic; margin-top: 8px;">
+          Store reachable but no facets returned. Either it's empty or none of the
+          tracked predicates appear yet.
+        </p>
+      </template>
+      <template x-if="loadingFacets">
+        <p class="card-meta" style="margin-top: 8px;">loading facets…</p>
+      </template>
+
+      <template x-for="f in facets" :key="f.key">
+        <details class="filter-facet" :open="(selections[f.key] || []).length > 0">
+          <summary>
+            <span class="facet-label" x-text="f.label"></span>
+            <span class="facet-count" x-text="(f.values || []).length + ' values'"></span>
+            <span class="facet-selected pill pill-info"
+                  x-show="(selections[f.key] || []).length"
+                  x-text="(selections[f.key] || []).length + ' selected'"></span>
+          </summary>
+          <div class="facet-help" x-text="f.description"></div>
+
+          <!-- Per-facet bulk actions: tick every value at once, or clear. -->
+          <div class="facet-bulk" x-show="(f.values || []).length">
+            <button type="button" class="btn btn-ghost"
+                    @click="selectAllInFacet(f)"
+                    :disabled="(selections[f.key] || []).length === (f.values || []).length"
+                    title="Select every value in this facet">
+              ☑ Add all (<span x-text="(f.values || []).length"></span>)
+            </button>
+            <button type="button" class="btn btn-ghost"
+                    @click="clearFacet(f.key)"
+                    :disabled="!(selections[f.key] || []).length">
+              ☐ None
+            </button>
+          </div>
+
+          <div class="facet-values">
+            <template x-if="(f.values || []).length === 0 && !f.error">
+              <p class="card-meta" style="font-style: italic; padding: 4px 0;">no values yet</p>
+            </template>
+            <template x-if="f.error">
+              <p class="card-meta" style="color: var(--bad); padding: 4px 0;" x-text="'⚠ ' + f.error"></p>
+            </template>
+            <template x-for="v in f.values" :key="v.value">
+              <label class="facet-row">
+                <input type="checkbox"
+                       :checked="(selections[f.key] || []).includes(v.value)"
+                       @change="toggleSelection(f.key, v.value)">
+                <span class="facet-row-value" :title="v.value" x-text="shortLabel(v.value)"></span>
+                <span class="facet-row-count" x-text="v.count"></span>
+              </label>
+            </template>
+          </div>
+        </details>
+      </template>
+
+      <div style="display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+        <button class="btn btn-primary" @click="applyFilters()" :disabled="loading">Build query</button>
+        <button class="btn btn-ghost" @click="clearSelections()" :disabled="!hasAnySelection()">Clear</button>
+        <span class="ml-auto card-meta" x-text="filterStatus"></span>
+      </div>
+    </div>
+
+    <!-- ── Query editor + repos ───────────────────────────────────────── -->
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+
+      <div class="card">
+        <div class="flex items-baseline gap-2">
+          <div class="card-title">Query</div>
+          <select class="ml-auto" style="max-width: 260px;" @change="loadTemplate($event.target.value)">
+            <option value="">— pick a template —</option>
+            <template x-for="t in templates" :key="t.id">
+              <option :value="t.id" x-text="t.name"></option>
+            </template>
+          </select>
+        </div>
+
+        <p class="card-meta" x-show="activeTemplate" x-text="activeTemplate ? activeTemplate.description : ''" style="margin-top: 6px;"></p>
+
+        <div x-show="activeTemplate && activeTemplate.params.length"
+             style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 8px;">
+          <template x-for="p in (activeTemplate ? activeTemplate.params : [])" :key="p.name">
+            <label style="display: block;">
+              <span class="card-meta" x-text="p.name + (p.help ? ' — ' + p.help : '')" style="font-size: 11px;"></span>
+              <input class="mono" style="width: 100%; margin-top: 2px;"
+                     :value="paramValues[p.name] !== undefined ? paramValues[p.name] : p.default"
+                     @input="paramValues[p.name] = $event.target.value; renderTemplate()">
+            </label>
+          </template>
+        </div>
+
+        <label class="card-meta" style="display: block; margin-top: 12px;">SPARQL endpoint</label>
+        <input style="width: 100%;" x-model="endpoint" placeholder="http://sparql-proxy:7878" />
+        <p class="card-meta" style="margin-top: 4px; font-size: 11px;">
+          Credentials are read from the server (<code>SPARQL_AUTH</code>) by default —
+          override per-browser under <a href="/settings" style="color: var(--accent);">Settings</a> for a remote endpoint.
+        </p>
+
+        <label class="card-meta" style="display: block; margin-top: 12px;">SPARQL</label>
+        <textarea rows="9" class="mono" style="width: 100%;" x-model="query"></textarea>
+
+        <div class="flex gap-2 mt-3">
+          <button class="btn btn-primary" @click="runQuery()" :disabled="loading">Run query</button>
+          <button class="btn" @click="resetQuery()">Reset</button>
+          <span class="ml-auto card-meta" x-text="status"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="flex items-baseline">
+          <div class="card-title">Repos</div>
+          <span class="pill pill-info ml-2" x-text="repos.length"></span>
+          <span class="ml-auto card-meta" x-text="repos.length ? '' : 'run a query to populate'"></span>
+        </div>
+        <div style="border: 1px solid var(--border); border-radius: 8px; max-height: 320px; overflow: auto; background: var(--surface-soft); margin-top: 8px;">
+          <template x-for="r in repos" :key="r">
+            <div style="padding: 6px 12px; font: 12px ui-monospace, monospace; color: var(--fg); border-bottom: 1px solid var(--border);" x-text="r"></div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Group by owner shortcut ─────────────────────────────────────── -->
+  <div class="card">
+    <div class="flex items-baseline">
+      <div class="card-title">Group by owner</div>
+      <span class="ml-auto card-meta">
+        Builds a generic projects.json from every Repo node in Neo4j —
+        one group per owner, all repos under it.
+      </span>
+    </div>
+    <p class="card-meta mt-1">
+      Useful right after a multi-org crawl: skip the SPARQL filter and turn
+      whatever's in the graph into GrimoireLab projects in one click.
+    </p>
+    <div style="display: grid; grid-template-columns: auto auto auto auto 1fr; gap: 8px; align-items: center; margin-top: 10px;">
+      <label class="card-meta" style="display: flex; align-items: center; gap: 4px;">
+        <input type="checkbox" x-model="byOwnerIncludeUnexplored">
+        include unexplored
+      </label>
+      <label class="card-meta" style="display: flex; align-items: center; gap: 4px;">
+        min repos
+        <input type="number" min="1" max="10000" style="width: 70px;" x-model.number="byOwnerMinRepos">
+      </label>
+      <input style="width: 160px;" placeholder="title prefix (optional)" x-model="byOwnerTitlePrefix">
+      <button class="btn" @click="buildByOwner(false)" :disabled="byOwnerBusy">Preview</button>
+      <button class="btn btn-primary ml-auto" @click="buildByOwner(true)" :disabled="byOwnerBusy">
+        <span x-text="byOwnerBusy ? 'Working…' : 'Build & Apply →'"></span>
+      </button>
+    </div>
+    <div x-show="byOwnerResult" style="margin-top: 10px;">
+      <p class="card-meta" x-text="byOwnerResult"></p>
+      <details x-show="byOwnerPreview">
+        <summary style="cursor: pointer; font-size: 12px; color: var(--fg-muted);">Preview JSON</summary>
+        <pre class="console mt-2" style="max-height: 320px;" x-text="byOwnerPreview"></pre>
+      </details>
+    </div>
+  </div>
+
+  <!-- ── Apply ───────────────────────────────────────────────────────── -->
+  <div class="card tone-info">
+    <div class="card-title">Apply to GrimoireLab</div>
+    <p class="card-meta mt-1">
+      Wraps the repo list in a <code>projects.json</code> envelope and POSTs it to the applier sidecar,
+      which writes the file under the shared <span class="kbd">projects-conf</span> dir and restarts mordred.
+    </p>
+    <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 8px; align-items: center;">
+      <input x-model="title" placeholder="Group title (e.g. SDSC-ORDES Apache-2)" />
+      <details style="font-size: 12px; color: var(--fg-muted);">
+        <summary style="cursor: pointer;">Preview</summary>
+        <pre class="console" style="position: absolute; max-width: 70vw; max-height: 40vh; overflow: auto; margin-top: 4px;" x-text="previewJson()"></pre>
+      </details>
+      <button class="btn btn-primary"
+              @click="apply()"
+              :disabled="repos.length === 0 || applying">
+        <span x-text="applying ? 'Applying…' : 'Apply →'"></span>
+      </button>
+    </div>
+    <p class="card-meta" style="font-size: 11px; margin-top: 6px;">
+      Server-side <code>APPLIER_AUTH</code> is used by default. Override per-browser under
+      <a href="/settings" style="color: var(--accent);">Settings → GrimoireLab projects key</a> if you're
+      pointing at a remote GrimoireLab.
+    </p>
+    <div x-show="applyResult" style="margin-top: 8px;">
+      <pre class="console" x-text="applyResult"></pre>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .filter-facet { border-top: 1px solid var(--border); padding: 8px 0; }
+  .filter-facet:first-of-type { border-top: 0; }
+  .filter-facet > summary {
+    list-style: none; cursor: pointer; padding: 4px 0;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .filter-facet > summary::-webkit-details-marker { display: none; }
+  .filter-facet .facet-label { font-weight: 600; font-size: 13px; }
+  .filter-facet .facet-count { font-size: 11px; color: var(--fg-faint); }
+  .filter-facet .facet-help { font-size: 11px; color: var(--fg-faint); padding: 2px 0 6px; }
+  .facet-values { max-height: 220px; overflow-y: auto; padding-right: 4px; }
+  .facet-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 4px; border-radius: 4px;
+    font-size: 12px;
+  }
+  .facet-row:hover { background: var(--surface-sunk); }
+  .facet-row-value { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .facet-row-count { font-variant-numeric: tabular-nums; color: var(--fg-faint); font-size: 11px; }
+  .facet-selected { margin-left: auto; }
+  .facet-bulk { display: flex; gap: 4px; padding: 4px 0 6px; }
+  .facet-bulk .btn { padding: 2px 8px; font-size: 11px; }
+</style>
+
+<script>
+const DEFAULT_QUERY = `PREFIX schema: <http://schema.org/>
+SELECT ?repo WHERE {
+  ?repo a schema:SoftwareSourceCode .
+}
+ORDER BY ?repo`;
+
+function projectsBuilder() {
+  return {
+    endpoint: '{{ default_sparql }}',
+    user: '', password: '',
+    query: DEFAULT_QUERY,
+    repos: [],
+    title: 'Open Pulse SPARQL',
+    status: '',
+    loading: false,
+    applierToken: '',
+    applyResult: '',
+    applying: false,
+
+    facets: [],
+    facetEndpoint: '',
+    loadingFacets: false,
+    selections: {},
+    filterStatus: '',
+
+    templates: [],
+    activeTemplate: null,
+    paramValues: {},
+
+    byOwnerIncludeUnexplored: false,
+    byOwnerMinRepos: 1,
+    byOwnerTitlePrefix: '',
+    byOwnerBusy: false,
+    byOwnerResult: '',
+    byOwnerPreview: '',
+
+    async init() {
+      // Pull stored keys from the browser's localStorage (the Settings page
+      // is the canonical place to edit them). Empty strings just mean the
+      // user hasn't set them yet — they can still type in-place.
+      this.applierToken = window.opSecrets.get('applier_auth');
+      this.user = window.opSecrets.get('sparql_user');
+      this.password = window.opSecrets.get('sparql_password');
+      // React to changes from the Settings page in another tab.
+      window.addEventListener('op-secrets-changed', () => {
+        if (!this.applierToken) this.applierToken = window.opSecrets.get('applier_auth');
+        if (!this.user)         this.user         = window.opSecrets.get('sparql_user');
+        if (!this.password)     this.password     = window.opSecrets.get('sparql_password');
+      });
+      await Promise.all([this.loadFacets(false), this.loadTemplates()]);
+    },
+
+    facetMeta() {
+      if (this.loadingFacets) return 'loading…';
+      if (!this.facets.length) return '';
+      return this.facets.length + ' facet' + (this.facets.length === 1 ? '' : 's');
+    },
+
+    shortLabel(v) {
+      if (!v) return '';
+      try {
+        const u = new URL(v);
+        const last = u.pathname.split('/').filter(Boolean).pop() || u.hostname;
+        return last;
+      } catch (_) {
+        return v;
+      }
+    },
+
+    hasAnySelection() {
+      return Object.values(this.selections).some(v => v && v.length);
+    },
+
+    toggleSelection(key, val) {
+      const cur = new Set(this.selections[key] || []);
+      cur.has(val) ? cur.delete(val) : cur.add(val);
+      this.selections = {...this.selections, [key]: [...cur]};
+    },
+
+    async buildByOwner(apply) {
+      this.byOwnerBusy = true;
+      this.byOwnerResult = ''; this.byOwnerPreview = '';
+      try {
+        const r = await fetch('/api/projects/build-by-owner', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            include_unexplored: this.byOwnerIncludeUnexplored,
+            min_repos_per_owner: this.byOwnerMinRepos,
+            title_prefix: this.byOwnerTitlePrefix || '',
+            apply,
+          }),
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          this.byOwnerResult = '⚠ ' + (e.detail || ('HTTP ' + r.status));
+          return;
+        }
+        const j = await r.json();
+        const verb = j.applied ? 'applied' : 'previewed';
+        this.byOwnerResult = `${verb} · ${j.owners} owner${j.owners === 1 ? '' : 's'} · ${j.repos} repos`;
+        if (j.applied && j.applier_response) {
+          this.byOwnerResult += ' · ' + (j.applier_response.detail || '');
+        }
+        this.byOwnerPreview = JSON.stringify(j.projects_json, null, 2);
+      } catch (e) {
+        this.byOwnerResult = '⚠ ' + e.message;
+      } finally {
+        this.byOwnerBusy = false;
+      }
+    },
+
+    selectAllInFacet(f) {
+      const all = (f.values || []).map(v => v.value);
+      this.selections = {...this.selections, [f.key]: all};
+    },
+    clearFacet(key) {
+      const next = {...this.selections};
+      delete next[key];
+      this.selections = next;
+    },
+
+    clearSelections() {
+      this.selections = {};
+      this.filterStatus = '';
+    },
+
+    async loadFacets(refresh) {
+      this.loadingFacets = true;
+      try {
+        const url = '/api/projects/facets' + (refresh ? '?refresh=true' : '');
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        this.facets = j.facets || [];
+        this.facetEndpoint = j.endpoint || '';
+      } catch (e) { this.filterStatus = '⚠ facets: ' + e.message; }
+      finally { this.loadingFacets = false; }
+    },
+
+    async applyFilters() {
+      this.loading = true; this.filterStatus = 'building…';
+      try {
+        const r = await fetch('/api/projects/build-from-filters', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({selections: this.selections, endpoint: this.endpoint || null}),
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({detail: 'unknown error'}));
+          throw new Error(j.detail || 'HTTP ' + r.status);
+        }
+        const j = await r.json();
+        this.query = j.query;
+        this.repos = j.repos;
+        this.filterStatus = j.count + ' repo' + (j.count === 1 ? '' : 's');
+        this.status = this.filterStatus;
+        this.activeTemplate = null;
+      } catch (e) {
+        this.filterStatus = '⚠ ' + e.message;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async loadTemplates() {
+      const r = await fetch('/api/projects/templates');
+      const j = await r.json();
+      this.templates = j.templates || [];
+    },
+
+    loadTemplate(id) {
+      if (!id) { this.activeTemplate = null; return; }
+      const t = this.templates.find(x => x.id === id);
+      if (!t) return;
+      this.activeTemplate = t;
+      this.paramValues = {};
+      t.params.forEach(p => { this.paramValues[p.name] = p.default; });
+      this.renderTemplate();
+    },
+
+    renderTemplate() {
+      if (!this.activeTemplate) return;
+      let q = this.activeTemplate.template;
+      for (const p of this.activeTemplate.params) {
+        const v = this.paramValues[p.name] !== undefined ? this.paramValues[p.name] : p.default;
+        q = q.split('{' + p.name + '}').join(v);
+      }
+      this.query = q;
+    },
+
+    resetQuery() {
+      this.query = DEFAULT_QUERY;
+      this.activeTemplate = null;
+      this.paramValues = {};
+    },
+
+    previewJson() {
+      const slug = (this.title || 'open_pulse_sparql').toLowerCase()
+        .replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'') || 'open_pulse_sparql';
+      const out = {};
+      out[slug] = { meta: { title: this.title }, git: this.repos };
+      return JSON.stringify(out, null, 2);
+    },
+
+    async runQuery() {
+      this.loading = true; this.status = 'running…';
+      try {
+        const r = await fetch('/api/projects/sparql/query', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            endpoint: this.endpoint, query: this.query,
+            auth_user: this.user || null, auth_password: this.password || null,
+          }),
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          throw new Error('HTTP ' + r.status + ' — ' + t);
+        }
+        const j = await r.json();
+        this.repos = j.repos;
+        this.status = j.count + ' repo' + (j.count === 1 ? '' : 's');
+      } catch (e) {
+        this.status = '⚠ ' + e.message;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async apply() {
+      this.applying = true; this.applyResult = '';
+      try {
+        const slug = (this.title || 'open_pulse_sparql').toLowerCase()
+          .replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'') || 'open_pulse_sparql';
+        const projects_json = {};
+        projects_json[slug] = { meta: { title: this.title }, git: this.repos };
+        const r = await fetch('/api/projects/apply', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ projects_json, applier_token: this.applierToken }),
+        });
+        const j = await r.json();
+        this.applyResult = JSON.stringify(j, null, 2);
+      } catch (e) {
+        this.applyResult = '⚠ ' + e.message;
+      } finally {
+        this.applying = false;
+      }
+    },
+  };
+}
+</script>
+{% endblock %}
