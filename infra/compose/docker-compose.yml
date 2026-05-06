@@ -12,11 +12,17 @@ services:
       NEO4J_dbms_security_procedures_unrestricted: "${NEO4J_UNRESTRICTED:-apoc.*}"
       NEO4J_dbms_security_procedures_allowlist: "${NEO4J_ALLOWLIST:-apoc.*}"
       NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      # JVM heap + page cache. Production guidance: heap ≤ 50% of mem_limit so
+      # the rest is available for off-heap (page cache, GC overhead, native).
+      # Defaults below pair with `mem_limit: 2g`.
+      NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP:-1g}"
+      NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP:-1g}"
+      NEO4J_server_memory_pagecache_size: "${NEO4J_PAGECACHE:-512m}"
     volumes:
-      - neo4j_logs:/logs
-      - neo4j_config:/config
-      - neo4j_data:/data
-      - neo4j_plugins:/plugins
+      - ${OPEN_PULSE_DATA_DIR:-./data}/neo4j/logs:/logs
+      - ${OPEN_PULSE_DATA_DIR:-./data}/neo4j/config:/config
+      - ${OPEN_PULSE_DATA_DIR:-./data}/neo4j/data:/data
+      - ${OPEN_PULSE_DATA_DIR:-./data}/neo4j/plugins:/plugins
     healthcheck:
       test:
         [
@@ -27,6 +33,8 @@ services:
       timeout: 10s
       retries: 10
       start_period: 45s
+    mem_limit: ${NEO4J_MEM_LIMIT:-2g}
+    cpus: ${NEO4J_CPUS:-2.0}
 
   analysis-notebook:
     image: python:3.12-slim
@@ -45,6 +53,8 @@ services:
       timeout: 10s
       retries: 5
       start_period: 10s
+    mem_limit: ${ANALYSIS_NOTEBOOK_MEM_LIMIT:-512m}
+    cpus: ${ANALYSIS_NOTEBOOK_CPUS:-1.0}
 
   grimoirelab-db:
     image: postgres:16-alpine
@@ -57,7 +67,7 @@ services:
       POSTGRES_PASSWORD: "${GRIMOIRELAB_DB_PASSWORD:-grimoire}"
       POSTGRES_DB: "${GRIMOIRELAB_DB_NAME:-grimoirelab}"
     volumes:
-      - grimoirelab_db_data:/var/lib/postgresql/data
+      - ${OPEN_PULSE_DATA_DIR:-./data}/grimoirelab-db:/var/lib/postgresql/data
     healthcheck:
       test:
         [
@@ -68,6 +78,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+    mem_limit: ${GRIMOIRELAB_DB_MEM_LIMIT:-384m}
+    cpus: ${GRIMOIRELAB_DB_CPUS:-1.0}
 
   grimoirelab-worker:
     image: alpine:3.20
@@ -78,6 +90,8 @@ services:
       grimoirelab-db:
         condition: service_healthy
     command: ["sh", "-c", "echo GrimoireLab profile enabled; sleep infinity"]
+    mem_limit: ${GRIMOIRELAB_WORKER_MEM_LIMIT:-128m}
+    cpus: ${GRIMOIRELAB_WORKER_CPUS:-0.5}
 
   portainer:
     image: portainer/portainer-ce
@@ -89,8 +103,10 @@ services:
       - "${PORTAINER_PORT:-7508}:9000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
+      - ${OPEN_PULSE_DATA_DIR:-./data}/portainer:/data
     command: --admin-password "${PORTAINER_HASHED_PASSWORD:-$$2y$$10$$replace-with-bcrypt-hash}"
+    mem_limit: ${PORTAINER_MEM_LIMIT:-256m}
+    cpus: ${PORTAINER_CPUS:-0.5}
 
   crawler:
     image: ${CRAWLER_IMAGE:-ghcr.io/sdsc-ordes/open-pulse-crawler:latest}
@@ -115,6 +131,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    mem_limit: ${CRAWLER_MEM_LIMIT:-768m}
+    cpus: ${CRAWLER_CPUS:-1.0}
 
   extractor:
     image: ${EXTRACTOR_IMAGE:-ghcr.io/imaging-plaza/git-metadata-extractor:latest}
@@ -146,7 +164,7 @@ services:
     ports:
       - "${EXTRACTOR_PORT:-1234}:1234"
     volumes:
-      - extractor_cache:/app/data
+      - ${OPEN_PULSE_DATA_DIR:-./data}/extractor:/app/data
     healthcheck:
       # The extractor doesn't expose a dedicated /healthz; GET / returns the API
       # root and is the only system-level endpoint defined in src/api.py.
@@ -156,6 +174,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    mem_limit: ${EXTRACTOR_MEM_LIMIT:-1536m}
+    cpus: ${EXTRACTOR_CPUS:-2.0}
 
   selenium:
     image: selenium/standalone-chromium:latest
@@ -175,6 +195,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+    mem_limit: ${SELENIUM_MEM_LIMIT:-1g}
+    cpus: ${SELENIUM_CPUS:-1.0}
 
   oxigraph:
     image: ghcr.io/oxigraph/oxigraph:0.4.7
@@ -191,10 +213,12 @@ services:
       - "--location=/data"
       - "--bind=0.0.0.0:7878"
     volumes:
-      - oxigraph_data:/data
+      - ${OPEN_PULSE_DATA_DIR:-./data}/oxigraph:/data
     # No healthcheck — the official Oxigraph image is distroless (no /bin/sh,
     # no wget/curl). The sparql-proxy waits on `service_started` and Caddy
     # retries the upstream on its own until Oxigraph is accepting connections.
+    mem_limit: ${OXIGRAPH_MEM_LIMIT:-1g}
+    cpus: ${OXIGRAPH_CPUS:-1.0}
 
   sparql-proxy:
     image: caddy:2.8-alpine
@@ -208,25 +232,71 @@ services:
     ports:
       - "${SPARQL_PROXY_PORT:-7878}:7878"
     volumes:
-      - ../services/sparql-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../services/sparql-proxy/users:/etc/caddy/users:ro
-      - sparql_proxy_data:/data
-      - sparql_proxy_config:/config
+      - ./infra/services/sparql-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/services/sparql-proxy/users:/etc/caddy/users:ro
+      - ./infra/services/sparql-proxy/projects-ui:/etc/caddy/projects-ui:ro
+      - ${OPEN_PULSE_DATA_DIR:-./data}/sparql-proxy/data:/data
+      - ${OPEN_PULSE_DATA_DIR:-./data}/sparql-proxy/config:/config
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 5s
+    mem_limit: ${SPARQL_PROXY_MEM_LIMIT:-128m}
+    cpus: ${SPARQL_PROXY_CPUS:-0.5}
 
-volumes:
-  neo4j_logs:
-  neo4j_config:
-  neo4j_data:
-  neo4j_plugins:
-  grimoirelab_db_data:
-  portainer_data:
-  oxigraph_data:
-  sparql_proxy_data:
-  sparql_proxy_config:
-  extractor_cache:
+  # ── Open Pulse Hub: control-plane dashboard (opt-in via --profile hub) ──
+  # Same image as the CLI / orchestrator container — built from
+  # tools/images/Dockerfile-open-pulse. The hub role is selected by overriding
+  # `command:` to `gui hub serve …`. Pin a tag via OPEN_PULSE_IMAGE.
+  hub:
+    image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest}"
+    command: ["gui", "hub", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    container_name: open-pulse-hub
+    profiles:
+      - hub
+    restart: unless-stopped
+    ports:
+      - "${HUB_PORT:-9090}:8000"
+    environment:
+      HUB_AUTH: "${HUB_AUTH:?HUB_AUTH must be set in .env (e.g. python -c 'import secrets; print(secrets.token_urlsafe(32))')}"
+      HUB_DATA_DIR: /data/hub
+      HUB_APPLIER_URL: "${HUB_APPLIER_URL:-http://projects-applier:8000}"
+      HUB_SPARQL_URL: "${HUB_SPARQL_URL:-http://sparql-proxy:7878}"
+      HUB_NEO4J_URL: "${HUB_NEO4J_URL:-bolt://neo4j:7687}"
+      HUB_KIBITER_URL: "${HUB_KIBITER_URL:-http://localhost:7508}"
+      # OpenSearch (used by /api/databases/opensearch/* and the marquee stats)
+      HUB_OPENSEARCH_URL: "${HUB_OPENSEARCH_URL:-https://opensearch-node1:9200}"
+      HUB_OPENSEARCH_USERNAME: "${HUB_OPENSEARCH_USERNAME:-${OPENSEARCH_USERNAME:-admin}}"
+      HUB_OPENSEARCH_PASSWORD: "${HUB_OPENSEARCH_PASSWORD:-${OPENSEARCH_PASSWORD:-}}"
+      HUB_OPENSEARCH_VERIFY_TLS: "${HUB_OPENSEARCH_VERIFY_TLS:-false}"
+      # Crawler in-network URL + bearer token used by /api/crawler/* proxies
+      HUB_CRAWLER_URL: "${HUB_CRAWLER_URL:-http://crawler:8000}"
+      CRAWLER_API_TOKEN: "${CRAWLER_API_TOKEN:-}"
+      # Server-side defaults for the GrimoireLab applier + SPARQL store auth.
+      # The browser's Settings page can override these per-user (Settings
+      # localStorage wins on the request); for the local stack the user
+      # doesn't need to type anything.
+      APPLIER_AUTH: "${APPLIER_AUTH:-}"
+      SPARQL_AUTH: "${SPARQL_AUTH:-}"
+      # Used by /api/projects/build-by-owner to query Neo4j directly.
+      NEO4J_AUTH: "${NEO4J_AUTH:-}"
+      # User-facing dashboard URLs (host-published ports / external links)
+      HUB_NEO4J_BROWSER_URL: "${HUB_NEO4J_BROWSER_URL:-http://localhost:7474}"
+      HUB_SPARQL_BROWSER_URL: "${HUB_SPARQL_BROWSER_URL:-http://localhost:7878}"
+      HUB_OPENSEARCH_DASHBOARDS_URL: "${HUB_OPENSEARCH_DASHBOARDS_URL:-http://localhost:5601}"
+      HUB_ONTOLOGY_URL: "${HUB_ONTOLOGY_URL:-https://github.com/sdsc-ordes/open-pulse-ontology}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${OPEN_PULSE_DATA_DIR:-./data}/hub:/data/hub
+      - ${OPEN_PULSE_DATA_DIR:-./data}:/data:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: ${HUB_MEM_LIMIT:-512m}
+    cpus: ${HUB_CPUS:-1.0}
+
