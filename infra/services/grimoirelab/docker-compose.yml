@@ -1,6 +1,7 @@
 services:
     mariadb:
       image: mariadb:11.8
+      restart: unless-stopped
       expose:
         - "3306"
       env_file:
@@ -10,9 +11,12 @@ services:
         retries: 5
       volumes:
         - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/mariadb:/var/lib/mysql
+      mem_limit: ${MARIADB_MEM_LIMIT:-512m}
+      cpus: ${MARIADB_CPUS:-1.0}
 
     valkey:
       image: valkey/valkey:8
+      restart: unless-stopped
       expose:
         - "6379"
       healthcheck:
@@ -20,9 +24,12 @@ services:
         retries: 5
       volumes:
         - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/valkey:/data
+      mem_limit: ${VALKEY_MEM_LIMIT:-256m}
+      cpus: ${VALKEY_CPUS:-0.5}
 
     opensearch-node1:
       image: opensearchproject/opensearch:3
+      restart: unless-stopped
       env_file:
         - ./.env
       environment:
@@ -30,7 +37,10 @@ services:
         - node.name=opensearch-node1
         - discovery.type=single-node
         - bootstrap.memory_lock=true # along with the memlock settings below, disables swapping
-        - OPENSEARCH_JAVA_OPTS=${OPENSEARCH_JAVA_OPTS} # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
+        # JVM heap. Production guidance: set heap to ~50% of mem_limit, never above 31g.
+        # Default below pairs `-Xms1g -Xmx1g` (in .env) with `mem_limit: 2g` to leave
+        # ~1g for off-heap (Lucene buffers, native memory). Bump both together.
+        - OPENSEARCH_JAVA_OPTS=${OPENSEARCH_JAVA_OPTS}
       ulimits:
         memlock:
           soft: -1
@@ -43,13 +53,49 @@ services:
         - 9600:9600 # required for Performance Analyzer
       volumes:
         - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/opensearch-data:/usr/share/opensearch/data
+      healthcheck:
+        # Cluster `yellow` is fine for a single-node deploy (replicas can't be
+        # allocated without a 2nd node); only `red` is unhealthy.
+        test:
+          - CMD-SHELL
+          - >-
+            curl -sk -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD:-admin}"
+            'https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s'
+            | grep -E '"status":"(yellow|green)"' >/dev/null
+        interval: 30s
+        timeout: 10s
+        retries: 5
+        start_period: 60s
+      mem_limit: ${OPENSEARCH_MEM_LIMIT:-2g}
+      cpus: ${OPENSEARCH_CPUS:-2.0}
 
     opensearch-dashboards:
       image: opensearchproject/opensearch-dashboards:3
+      restart: unless-stopped
       env_file:
         - ./.env
       ports:
         - 5601:5601
+      depends_on:
+        opensearch-node1:
+          condition: service_healthy
+      healthcheck:
+        # OpenSearch Dashboards v3 requires auth on /api/status (returns 401),
+        # so we use a liveness probe instead: GET / returns 302 redirect when
+        # the server is up, which is enough to confirm the process is serving
+        # HTTP. Anything in the 2xx/3xx range is healthy; 4xx (apart from 401
+        # on /) or 5xx fails.
+        test:
+          - CMD-SHELL
+          - >-
+            code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5601/);
+            [ "$$code" -ge 200 ] && [ "$$code" -lt 400 ]
+        interval: 30s
+        timeout: 10s
+        retries: 5
+        start_period: 90s
+      mem_limit: ${DASHBOARDS_MEM_LIMIT:-768m}
+      cpus: ${DASHBOARDS_CPUS:-1.0}
 
     prepare-grimoire-config:
       image: python:3.11-alpine
@@ -119,7 +165,8 @@ services:
           condition: service_completed_successfully
         nginx:
           condition: service_healthy
-      mem_limit: 4g
+      mem_limit: ${MORDRED_MEM_LIMIT:-2g}
+      cpus: ${MORDRED_CPUS:-2.0}
 
     sortinghat:
       restart: on-failure:3
@@ -135,8 +182,11 @@ services:
           condition: service_healthy
         valkey:
           condition: service_healthy
+      mem_limit: ${SORTINGHAT_MEM_LIMIT:-512m}
+      cpus: ${SORTINGHAT_CPUS:-1.0}
 
     sortinghat_worker:
+      restart: unless-stopped
       image: grimoirelab/sortinghat-worker
       env_file:
         - ./.env
@@ -145,6 +195,8 @@ services:
           condition: service_healthy
         valkey:
           condition: service_healthy
+      mem_limit: ${SORTINGHAT_WORKER_MEM_LIMIT:-384m}
+      cpus: ${SORTINGHAT_WORKER_CPUS:-1.0}
 
     nginx:
       restart: on-failure:3
@@ -162,6 +214,8 @@ services:
       healthcheck:
         test: "curl -s --head http://localhost:8000/identities/api/ | grep Set-Cookie || exit 1"
         retries: 5
+      mem_limit: ${GRIMOIRE_NGINX_MEM_LIMIT:-128m}
+      cpus: ${GRIMOIRE_NGINX_CPUS:-0.5}
 
     # ── projects.json applier sidecar ─────────────────────────────────────
     # Backend for the dashboard UI. Receives projects.json from the browser,
@@ -191,3 +245,5 @@ services:
         timeout: 5s
         retries: 5
         start_period: 5s
+      mem_limit: ${APPLIER_MEM_LIMIT:-256m}
+      cpus: ${APPLIER_CPUS:-0.5}

@@ -326,9 +326,11 @@ def _shape_dsl_response(body: dict[str, Any]) -> dict[str, Any]:
         for k, v in src.items():
             if k not in seen:
                 cols.append(k); seen.add(k)
-            flat[k] = (
-                json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
-            )
+            # Pass nested dicts/lists through as-is; the hub UI's
+            # tree-view renderer expects real JSON values to expand into
+            # multi-column headers / sub-tables. Stringifying here would
+            # collapse them to opaque leaves on the client.
+            flat[k] = v
         flattened.append(flat)
     rows = [[r.get(c) for c in cols] for r in flattened]
     total = (hits_block.get("total") or {}).get("value", len(hits))
