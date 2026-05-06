@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Added explicit `mem_limit`, `cpus`, and `restart` policies to every service in `infra/compose/docker-compose.yml` and `infra/services/grimoirelab/docker-compose.yml`. Each cap reads from a per-service env var (e.g. `OPENSEARCH_MEM_LIMIT`, `NEO4J_MEM_LIMIT`, `MORDRED_MEM_LIMIT`, `EXTRACTOR_MEM_LIMIT`) so production deploys override the dev defaults without editing the compose. Neo4j heap and page cache are now explicit (`NEO4J_HEAP`, `NEO4J_PAGECACHE`) and sized to fit under the new cap. Mordred default cap dropped from 4g to 2g (it idled at 1.78 GiB; the previous 4g was generous and contributed to the host-OS pressure that OOM-killed opensearch). See `dev/advise/2026-05-05-resource-caps-and-oom-diagnosis.md` for the full diagnosis, budget math, and how to apply the new caps to running services without downtime.
+- Added healthchecks to `opensearch-node1` (`_cluster/health?wait_for_status=yellow` with auth — `yellow` is the success state on a single-node deploy because replicas can't be allocated) and `opensearch-dashboards` (liveness via `GET /` — *not* `/api/status`, which requires auth in v3 and would always report unhealthy).
 - Simplified Compose topology to a two-file model under `infra/compose/`: `docker-compose.yml` for infra services and `docker-compose.cli.yml` as an optional CLI overlay.
 - Updated `deploy` command with a `--with-cli` flag on `up`, `down`, and `ps` to include the CLI overlay file without requiring manual `--file` arguments.
 - Updated compose/deploy documentation (`README.md`, `infra/compose/README.md`, `AGENTS.md`) to reflect registry-based CLI container usage (no local build in compose flow).

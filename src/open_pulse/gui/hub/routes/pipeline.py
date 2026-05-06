@@ -110,7 +110,104 @@ _STEP_DONE_HINTS: dict[str, tuple[str, ...]] = {
     "neo4j_upload":       ("neo4j_upload: ingested ",),
     "metadata_extractor": ("metadata_extractor: success=", "metadata_extractor: hit max_repos"),
     "sparql_upload":      ("sparql_upload: success=",),
+    "apply_grimoire_projects": ("apply_grimoire_projects: applied ", "apply_grimoire_projects: no owners"),
 }
+
+
+# -- Per-step stat extraction -------------------------------------------------
+# Each step's modules log distinctive lines that the hub UI surfaces as
+# little progress cards (mirrors the Crawler card). For long-running steps
+# (metadata_extractor especially) we count partial events while the step is
+# still in flight, then prefer the authoritative final-summary line once it
+# lands.
+
+_RE_NEO4J_DONE = re.compile(
+    r"neo4j_upload: ingested users=(\d+) orgs=(\d+) repos=(\d+)"
+)
+_RE_METADATA_DONE = re.compile(
+    r"metadata_extractor: success=(\d+) skipped=(\d+) failed=(\d+)"
+)
+_RE_METADATA_OK = re.compile(r"metadata_extractor \[\w+\]: (\S+) ->")
+_RE_METADATA_FAIL = re.compile(r"metadata_extractor: (\S+) failed \(")
+_RE_METADATA_SUBMIT = re.compile(
+    r"metadata_extractor v\d+: submitted job \S+ for (\S+) "
+)
+_RE_SPARQL_DONE = re.compile(
+    r"sparql_upload: success=(\d+) failed=(\d+) triples=(\d+)"
+)
+_RE_SPARQL_FAIL = re.compile(r"sparql_upload: (\S+) failed \(")
+_RE_GRIMOIRE_DONE = re.compile(
+    r"apply_grimoire_projects: applied (\d+) owners · (\d+) repos"
+)
+_RE_GRIMOIRE_NOOP = re.compile(r"apply_grimoire_projects: no owners matched")
+
+
+def _parse_step_stats(text: str) -> dict[str, dict[str, Any]]:
+    """Extract per-step progress counters from the runner log."""
+    out: dict[str, dict[str, Any]] = {}
+
+    m = _RE_NEO4J_DONE.search(text)
+    if m:
+        out["neo4j_upload"] = {
+            "users": int(m.group(1)),
+            "orgs": int(m.group(2)),
+            "repos": int(m.group(3)),
+            "final": True,
+        }
+
+    submitted = _RE_METADATA_SUBMIT.findall(text)
+    successes = _RE_METADATA_OK.findall(text)
+    failures = _RE_METADATA_FAIL.findall(text)
+    m = _RE_METADATA_DONE.search(text)
+    if m:
+        out["metadata_extractor"] = {
+            "success": int(m.group(1)),
+            "skipped": int(m.group(2)),
+            "failed": int(m.group(3)),
+            "submitted": len(submitted),
+            "final": True,
+        }
+    elif submitted or successes or failures:
+        out["metadata_extractor"] = {
+            "submitted": len(submitted),
+            "success": len(successes),
+            "failed": len(failures),
+            "current": submitted[-1] if submitted else None,
+            "final": False,
+        }
+
+    m = _RE_SPARQL_DONE.search(text)
+    if m:
+        out["sparql_upload"] = {
+            "success": int(m.group(1)),
+            "failed": int(m.group(2)),
+            "triples": int(m.group(3)),
+            "final": True,
+        }
+    else:
+        sp_failed = _RE_SPARQL_FAIL.findall(text)
+        if sp_failed:
+            out["sparql_upload"] = {
+                "failed": len(sp_failed),
+                "final": False,
+            }
+
+    m = _RE_GRIMOIRE_DONE.search(text)
+    if m:
+        out["apply_grimoire_projects"] = {
+            "owners": int(m.group(1)),
+            "repos": int(m.group(2)),
+            "applied": True,
+            "final": True,
+        }
+    elif _RE_GRIMOIRE_NOOP.search(text):
+        out["apply_grimoire_projects"] = {
+            "owners": 0,
+            "applied": False,
+            "final": True,
+        }
+
+    return out
 
 
 def _parse_run_log(text: str, *, age_seconds: float | None = None) -> dict[str, Any]:
@@ -214,6 +311,7 @@ def _parse_run_log(text: str, *, age_seconds: float | None = None) -> dict[str, 
         "overall": overall,
         "current_step": current_step,
         "crawler_job_id": crawler_job_id,
+        "step_stats": _parse_step_stats(text),
     }
 
 
@@ -484,6 +582,7 @@ def run_status(
         "finished": parsed["finished"],
         "quest_name": parsed["quest_name"],
         "crawler_job_id": parsed["crawler_job_id"],
+        "step_stats": parsed["step_stats"],
         "tail": tailed,
     }
 
