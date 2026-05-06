@@ -127,6 +127,80 @@
            x-text="selectedCrawlerJob && selectedCrawlerJob.detail"></p>
       </div>
 
+      <!-- Per-step progress sub-cards. Each renders only when the runner
+           has logged enough for the parser to extract counters. Mirrors
+           the Crawler card so all steps share one visual language. -->
+      <div x-show="hasStepStats('neo4j_upload')" x-cloak class="card"
+           style="margin-top: 10px; padding: 10px; background: var(--surface-soft);">
+        <div class="flex items-baseline gap-2">
+          <span class="card-title" style="font-size: 13px;">Neo4j upload</span>
+          <span class="pill" :class="stepStatPillClass('neo4j_upload')" x-text="stepStatPillLabel('neo4j_upload')"></span>
+        </div>
+        <div style="display: grid; grid-template-columns: auto 1fr auto 1fr auto 1fr; gap: 4px 16px; margin-top: 8px; font-size: 12px;">
+          <span class="card-meta">users</span>   <span x-text="stepStat('neo4j_upload', 'users') || 0"></span>
+          <span class="card-meta">orgs</span>    <span x-text="stepStat('neo4j_upload', 'orgs') || 0"></span>
+          <span class="card-meta">repos</span>   <span x-text="stepStat('neo4j_upload', 'repos') || 0"></span>
+        </div>
+      </div>
+
+      <div x-show="hasStepStats('metadata_extractor')" x-cloak class="card"
+           style="margin-top: 10px; padding: 10px; background: var(--surface-soft);">
+        <div class="flex items-baseline gap-2">
+          <span class="card-title" style="font-size: 13px;">Metadata extractor</span>
+          <span class="pill" :class="stepStatPillClass('metadata_extractor')" x-text="stepStatPillLabel('metadata_extractor')"></span>
+          <span class="card-meta ml-auto"
+                x-show="stepStat('metadata_extractor', 'submitted')"
+                x-text="metadataProgressLabel()"></span>
+        </div>
+        <div style="display: grid; grid-template-columns: auto 1fr auto 1fr auto 1fr; gap: 4px 16px; margin-top: 8px; font-size: 12px;">
+          <span class="card-meta">submitted</span>
+          <span x-text="stepStat('metadata_extractor', 'submitted') || 0"></span>
+          <span class="card-meta">success</span>
+          <span x-text="stepStat('metadata_extractor', 'success') || 0"></span>
+          <span class="card-meta">failed</span>
+          <span x-text="stepStat('metadata_extractor', 'failed') || 0"></span>
+
+          <span class="card-meta" x-show="stepStat('metadata_extractor', 'skipped') !== undefined">skipped</span>
+          <span x-show="stepStat('metadata_extractor', 'skipped') !== undefined"
+                x-text="stepStat('metadata_extractor', 'skipped') || 0"></span>
+          <span class="card-meta" x-show="stepStat('metadata_extractor', 'current')">current</span>
+          <span class="mono" style="font-size: 11px; grid-column: span 3;"
+                x-show="stepStat('metadata_extractor', 'current')"
+                x-text="stepStat('metadata_extractor', 'current')"></span>
+        </div>
+      </div>
+
+      <div x-show="hasStepStats('sparql_upload')" x-cloak class="card"
+           style="margin-top: 10px; padding: 10px; background: var(--surface-soft);">
+        <div class="flex items-baseline gap-2">
+          <span class="card-title" style="font-size: 13px;">SPARQL upload</span>
+          <span class="pill" :class="stepStatPillClass('sparql_upload')" x-text="stepStatPillLabel('sparql_upload')"></span>
+        </div>
+        <div style="display: grid; grid-template-columns: auto 1fr auto 1fr auto 1fr; gap: 4px 16px; margin-top: 8px; font-size: 12px;">
+          <span class="card-meta">success</span>
+          <span x-text="stepStat('sparql_upload', 'success') || 0"></span>
+          <span class="card-meta">failed</span>
+          <span x-text="stepStat('sparql_upload', 'failed') || 0"></span>
+          <span class="card-meta" x-show="stepStat('sparql_upload', 'triples') !== undefined">triples</span>
+          <span x-show="stepStat('sparql_upload', 'triples') !== undefined"
+                x-text="stepStat('sparql_upload', 'triples') || 0"></span>
+        </div>
+      </div>
+
+      <div x-show="hasStepStats('apply_grimoire_projects')" x-cloak class="card"
+           style="margin-top: 10px; padding: 10px; background: var(--surface-soft);">
+        <div class="flex items-baseline gap-2">
+          <span class="card-title" style="font-size: 13px;">Apply Grimoire projects</span>
+          <span class="pill" :class="stepStatPillClass('apply_grimoire_projects')" x-text="stepStatPillLabel('apply_grimoire_projects')"></span>
+        </div>
+        <div style="display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 4px 16px; margin-top: 8px; font-size: 12px;">
+          <span class="card-meta">owners</span>
+          <span x-text="stepStat('apply_grimoire_projects', 'owners') || 0"></span>
+          <span class="card-meta">repos</span>
+          <span x-text="stepStat('apply_grimoire_projects', 'repos') || 0"></span>
+        </div>
+      </div>
+
       <div class="flex items-baseline gap-2" style="margin-top: 10px;">
         <span class="card-meta">tail</span>
         <span class="card-meta" x-text="selectedRunStatus && selectedRunStatus.line_count !== undefined ? selectedRunStatus.line_count + ' lines · ' + formatBytes(selectedRunStatus.size_bytes) : ''"></span>
@@ -698,6 +772,45 @@ function pipelineRunner() {
         await this.refreshSelectedCrawlerJob();
       }
     },
+    // ── Per-step stats helpers ─────────────────────────────────────
+    hasStepStats(step) {
+      const s = this.selectedRunStatus && this.selectedRunStatus.step_stats;
+      return !!(s && s[step]);
+    },
+    stepStat(step, key) {
+      const s = this.selectedRunStatus && this.selectedRunStatus.step_stats;
+      return s && s[step] ? s[step][key] : undefined;
+    },
+    // Pill summarizes the step's lifecycle: green if the final summary
+    // landed and there were no failures, amber/yellow while in flight,
+    // red if the orchestrator marked it failed.
+    stepStatPillClass(step) {
+      const status = this.selectedRunStatus && this.selectedRunStatus.statuses
+                       ? this.selectedRunStatus.statuses[step] : null;
+      if (status === 'failed') return 'pill-bad';
+      if (status === 'done')   return 'pill-ok';
+      if (status === 'running') return 'pill-warn';
+      return 'pill-neutral';
+    },
+    stepStatPillLabel(step) {
+      const status = this.selectedRunStatus && this.selectedRunStatus.statuses
+                       ? (this.selectedRunStatus.statuses[step] || 'pending') : 'pending';
+      const stats = this.stepStat(step, 'final');
+      // While in flight and no final yet, surface "in flight"; otherwise
+      // mirror the step's status from the pill row above.
+      if (status === 'running' && !stats) return 'in flight';
+      return status;
+    },
+    metadataProgressLabel() {
+      const submitted = this.stepStat('metadata_extractor', 'submitted') || 0;
+      const success = this.stepStat('metadata_extractor', 'success') || 0;
+      const failed = this.stepStat('metadata_extractor', 'failed') || 0;
+      const done = success + failed;
+      if (!submitted) return '';
+      const pct = submitted > 0 ? Math.round(100 * done / submitted) : 0;
+      return `${done}/${submitted} (${pct}%)`;
+    },
+
     crawlerPillClass(s) {
       switch (s) {
         case 'running':   return 'pill-warn';
