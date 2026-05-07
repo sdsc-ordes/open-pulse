@@ -52,6 +52,16 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Validate Compose manifests
+        # The compose files use ${VAR:?error} interpolation for required
+        # secrets. Compose evaluates interpolation at parse time (before
+        # profile filtering), so even gated services need their vars set.
+        # Inject placeholder values so `config` can resolve and lint the YAML.
+        env:
+          CRAWLER_API_TOKEN: ci-placeholder
+          CRAWLER_GITHUB_TOKEN: ci-placeholder
+          EXTRACTOR_GITHUB_TOKEN: ci-placeholder
+          HUB_AUTH: ci-placeholder
+          OPEN_PULSE_HOST_PATH: /tmp/open-pulse
         run: docker compose ${{ matrix.compose_files }} config > /dev/null
 
   docker-build-and-scan:
@@ -87,7 +97,7 @@ jobs:
           tags: open-pulse/${{ matrix.image.name }}:ci
 
       - name: Scan image (critical threshold)
-        uses: aquasecurity/trivy-action@0.34.2
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: image
           image-ref: open-pulse/${{ matrix.image.name }}:ci
@@ -102,7 +112,7 @@ jobs:
 
       - name: Generate SARIF report
         if: always()
-        uses: aquasecurity/trivy-action@0.34.2
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: image
           image-ref: open-pulse/${{ matrix.image.name }}:ci
