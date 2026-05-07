@@ -20,7 +20,8 @@ services:
     # see CRAWLER_API_TOKEN, NEO4J_AUTH, SPARQL_AUTH, etc. without per-step
     # plumbing.
     env_file:
-      - ./.env
+      - path: ./.env
+        required: false
     environment:
       WORKSPACE_DIR: "${OPEN_PULSE_HOST_PATH}"
       # Marker the CLI uses to detect it's running inside this container so
