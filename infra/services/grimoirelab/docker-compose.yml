@@ -36,7 +36,7 @@ services:
         - cluster.name=opensearch-cluster
         - node.name=opensearch-node1
         - discovery.type=single-node
-        - bootstrap.memory_lock=true # along with the memlock settings below, disables swapping
+        - bootstrap.memory_lock=true  # along with the memlock settings below, disables swapping
         # JVM heap. Production guidance: set heap to ~50% of mem_limit, never above 31g.
         # Default below pairs `-Xms1g -Xmx1g` (in .env) with `mem_limit: 2g` to leave
         # ~1g for off-heap (Lucene buffers, native memory). Bump both together.
@@ -46,11 +46,11 @@ services:
           soft: -1
           hard: -1
         nofile:
-          soft: 65536 # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
+          soft: 65536  # maximum number of open files for the OpenSearch user, set to at least 65536 on modern systems
           hard: 65536
       ports:
         - 9200:9200
-        - 9600:9600 # required for Performance Analyzer
+        - 9600:9600  # required for Performance Analyzer
       volumes:
         - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/opensearch-data:/usr/share/opensearch/data
       healthcheck:
@@ -208,7 +208,7 @@ services:
         - ./infra/services/grimoirelab/config/uwsgi_params:/etc/nginx/uwsgi_params
         - ${GRIMOIRE_DATA_DIR:-./data/grimoirelab}/sortinghat/static:/sortinghat:ro
       ports:
-        - 7508:8000 # PORT EDIT needs to be here to expose on a different port.
+        - 7508:8000  # PORT EDIT needs to be here to expose on a different port.
       depends_on:
         - sortinghat
       healthcheck:
