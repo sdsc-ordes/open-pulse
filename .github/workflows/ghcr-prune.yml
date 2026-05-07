@@ -9,6 +9,10 @@ on:
         description: "Print what would be deleted without deleting (default: true)."
         type: boolean
         default: true
+      prune_sha_now:
+        description: "Ignore the sha-* age grace and prune all sha-only tagged versions immediately."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -21,6 +25,10 @@ env:
   # Grace periods so an in-flight build or a just-closed PR isn't pruned mid-run.
   PR_TAG_AGE_DAYS: "7"
   UNTAGGED_AGE_DAYS: "14"
+  # `sha-<short>` tags are no longer produced by docker-publish.yml; this
+  # grace period lets the prune sweep up legacy sha-tagged versions whose
+  # only label is the sha (i.e. not also tagged `latest`/branch/version).
+  SHA_TAG_AGE_DAYS: "30"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
@@ -41,13 +49,17 @@ jobs:
             const packageName = process.env.PACKAGE_NAME;
             const prAgeMs = Number(process.env.PR_TAG_AGE_DAYS) * 86_400_000;
             const untaggedAgeMs = Number(process.env.UNTAGGED_AGE_DAYS) * 86_400_000;
+            const shaAgeMs = Number(process.env.SHA_TAG_AGE_DAYS) * 86_400_000;
 
             // Cron always applies; manual runs default to dry-run unless the
             // user explicitly sets dry_run=false.
             let shouldDelete;
+            let pruneShaNow = false;
             if (context.eventName === 'workflow_dispatch') {
               const raw = String(context.payload.inputs?.dry_run ?? 'true').toLowerCase();
               shouldDelete = raw === 'false';
+              const rawSha = String(context.payload.inputs?.prune_sha_now ?? 'false').toLowerCase();
+              pruneShaNow = rawSha === 'true';
             } else {
               shouldDelete = true;
             }
@@ -76,6 +88,8 @@ jobs:
                 const ageMs = now - new Date(version.updated_at).getTime();
                 const tags = version.metadata?.container?.tags ?? [];
                 const prTag = tags.find(t => /^pr-\d+$/.test(t));
+                const shaTags = tags.filter(t => /^sha-[0-9a-f]+$/i.test(t));
+                const isShaOnly = tags.length > 0 && shaTags.length === tags.length;
 
                 let reason = null;
 
@@ -100,11 +114,19 @@ jobs:
                   reason = prState === 'missing'
                     ? `PR #${prNumber} not found`
                     : `PR #${prNumber} closed`;
+                } else if (isShaOnly) {
+                  // Legacy `sha-<short>` tag with no other label co-pointing
+                  // at this digest. docker-publish.yml no longer emits these.
+                  if (!pruneShaNow && ageMs < shaAgeMs) { skipped++; continue; }
+                  reason = pruneShaNow
+                    ? 'sha-* legacy tag (prune_sha_now)'
+                    : 'sha-* legacy tag';
                 } else if (tags.length === 0) {
                   if (ageMs < untaggedAgeMs) { skipped++; continue; }
                   reason = 'untagged';
                 } else {
-                  // Real tag (latest, main, sha-*) — never touch from the prune job.
+                  // Protected tag (latest, branch, version, or sha-* shared
+                  // with one of those) — never touch from the prune job.
                   skipped++;
                   continue;
                 }
@@ -134,7 +156,7 @@ jobs:
             await core.summary
               .addHeading('GHCR prune summary')
               .addList([
-                `Mode: ${shouldDelete ? 'apply' : 'dry-run'}`,
+                `Mode: ${shouldDelete ? 'apply' : 'dry-run'}${pruneShaNow ? ' + prune_sha_now' : ''}`,
                 `Package: ${org}/${packageName}`,
                 `Scanned: ${scanned}`,
                 `Deleted: ${deleted}`,
@@ -142,6 +164,7 @@ jobs:
                 `Failed: ${failed}`,
                 `pr-* grace: ${process.env.PR_TAG_AGE_DAYS}d`,
                 `untagged grace: ${process.env.UNTAGGED_AGE_DAYS}d`,
+                `sha-* grace: ${process.env.SHA_TAG_AGE_DAYS}d`,
               ])
               .write();
 
