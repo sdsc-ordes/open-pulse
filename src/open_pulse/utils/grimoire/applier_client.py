@@ -67,8 +67,7 @@ def query_sparql_for_repos(
 
     if resp.status_code != 200:
         raise RuntimeError(
-            f"SPARQL query failed: HTTP {resp.status_code} on {url} — "
-            f"{resp.text[:200]}"
+            f"SPARQL query failed: HTTP {resp.status_code} on {url} — {resp.text[:200]}"
         )
     body = resp.json()
     bindings = (body.get("results") or {}).get("bindings") or []
@@ -117,7 +116,6 @@ def post_to_applier(
         resp = client.post(url, json=payload, headers=headers)
     if resp.status_code != 200:
         raise RuntimeError(
-            f"applier POST failed: HTTP {resp.status_code} on {url} — "
-            f"{resp.text[:200]}"
+            f"applier POST failed: HTTP {resp.status_code} on {url} — {resp.text[:200]}"
         )
     return resp.json()

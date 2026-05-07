@@ -100,17 +100,25 @@ _CRAWLER_JOB_RE = re.compile(r"submitted job_id=([0-9a-f-]{36})")
 _RE_STEP_FAIL = re.compile(r"Step '([^']+)' failed \(attempt (\d+)/(\d+)\)")
 _RE_QUEST_DONE = re.compile(r"Quest '([^']+)' finished")
 # Final summary the orchestrator prints after a successful run.
-_RE_PIPELINE_DONE = re.compile(r"Pipeline finished\. Completed \d+ step\(s\): ([^\n]+(?:\n\s*[^\n]+)*)")
+_RE_PIPELINE_DONE = re.compile(
+    r"Pipeline finished\. Completed \d+ step\(s\): ([^\n]+(?:\n\s*[^\n]+)*)"
+)
 
 # Per-step "I'm done" markers each step module emits in its own logger.
 # The runner itself does NOT emit `Step 'X' completed` during `quest start`,
 # so we infer step completion from these substrings instead.
 _STEP_DONE_HINTS: dict[str, tuple[str, ...]] = {
-    "crawler":            ("crawler: wrote graph to ", "crawler: job "),
-    "neo4j_upload":       ("neo4j_upload: ingested ",),
-    "metadata_extractor": ("metadata_extractor: success=", "metadata_extractor: hit max_repos"),
-    "sparql_upload":      ("sparql_upload: success=",),
-    "apply_grimoire_projects": ("apply_grimoire_projects: applied ", "apply_grimoire_projects: no owners"),
+    "crawler": ("crawler: wrote graph to ", "crawler: job "),
+    "neo4j_upload": ("neo4j_upload: ingested ",),
+    "metadata_extractor": (
+        "metadata_extractor: success=",
+        "metadata_extractor: hit max_repos",
+    ),
+    "sparql_upload": ("sparql_upload: success=",),
+    "apply_grimoire_projects": (
+        "apply_grimoire_projects: applied ",
+        "apply_grimoire_projects: no owners",
+    ),
 }
 
 
@@ -132,9 +140,7 @@ _RE_METADATA_FAIL = re.compile(r"metadata_extractor: (\S+) failed \(")
 _RE_METADATA_SUBMIT = re.compile(
     r"metadata_extractor v\d+: submitted job \S+ for (\S+) "
 )
-_RE_SPARQL_DONE = re.compile(
-    r"sparql_upload: success=(\d+) failed=(\d+) triples=(\d+)"
-)
+_RE_SPARQL_DONE = re.compile(r"sparql_upload: success=(\d+) failed=(\d+) triples=(\d+)")
 _RE_SPARQL_FAIL = re.compile(r"sparql_upload: (\S+) failed \(")
 _RE_GRIMOIRE_DONE = re.compile(
     r"apply_grimoire_projects: applied (\d+) owners · (\d+) repos"
@@ -431,19 +437,23 @@ def list_quests() -> dict[str, Any]:
     if rc not in (0, None):
         return {"quests": [], "error": (out or b"").decode("utf-8", "replace")}
 
-    paths = [p for p in (out or b"").decode("utf-8", "replace").splitlines() if p.strip()]
+    paths = [
+        p for p in (out or b"").decode("utf-8", "replace").splitlines() if p.strip()
+    ]
     quests: list[dict[str, Any]] = []
     for p in paths:
         entry: dict[str, Any] = {"path": p, "name": Path(p).name}
         try:
             text = _read_file_in_cli(cli, p)
             summary = _summarize_yaml(text)
-            entry.update({
-                "quest_name": summary.get("name"),
-                "description": summary.get("description"),
-                "step_count": summary.get("step_count"),
-                "enabled_steps": summary.get("enabled_steps") or [],
-            })
+            entry.update(
+                {
+                    "quest_name": summary.get("name"),
+                    "description": summary.get("description"),
+                    "step_count": summary.get("step_count"),
+                    "enabled_steps": summary.get("enabled_steps") or [],
+                }
+            )
         except HTTPException:
             entry["error"] = "could not read"
         # Attach the latest detached-run summary so the list can show a
@@ -454,7 +464,11 @@ def list_quests() -> dict[str, Any]:
 
 
 @router.get("/quest", dependencies=[Depends(require_auth)])
-def read_quest(path: str = Query(..., description="Path of the quest YAML inside the cli container.")) -> dict[str, Any]:
+def read_quest(
+    path: str = Query(
+        ..., description="Path of the quest YAML inside the cli container."
+    ),
+) -> dict[str, Any]:
     """Return the full text of a quest YAML plus its parsed summary.
 
     Restricted to ``*.yml`` / ``*.yaml`` to keep this endpoint from being a
@@ -490,9 +504,7 @@ def run_quest(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str,
         # known file under data/hub/runs/. We also write the runner's PID
         # to a sibling .pid file so /api/pipeline/run-stop can SIGTERM it.
         run_id = uuid.uuid4().hex[:12]
-        cli_workspace = (
-            cli.attrs.get("Config", {}).get("WorkingDir") or "/workspace"
-        )
+        cli_workspace = cli.attrs.get("Config", {}).get("WorkingDir") or "/workspace"
         log_dir = f"{cli_workspace}/data/hub/runs"
         log_filename = _run_log_filename(path, run_id)
         log_path_in_cli = f"{log_dir}/{log_filename}"
@@ -518,7 +530,9 @@ def run_quest(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str,
         )
         cli.exec_run(
             cmd=["bash", "-lc", wrapper],
-            stdout=True, stderr=True, detach=True,
+            stdout=True,
+            stderr=True,
+            detach=True,
         )
         return {
             "detached": True,
@@ -528,7 +542,11 @@ def run_quest(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str,
         }
 
     rc, out = cli.exec_run(
-        cmd=base_cmd, stdout=True, stderr=True, demux=False, detach=False,
+        cmd=base_cmd,
+        stdout=True,
+        stderr=True,
+        demux=False,
+        detach=False,
     )
     return {
         "exit_code": rc,
@@ -539,7 +557,9 @@ def run_quest(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str,
 
 @router.get("/run-status", dependencies=[Depends(require_auth)])
 def run_status(
-    run_id: str = Query(..., description="Run ID returned by POST /run with detach=true."),
+    run_id: str = Query(
+        ..., description="Run ID returned by POST /run with detach=true."
+    ),
     tail: int = Query(80, description="How many lines of the log to return."),
 ) -> dict[str, Any]:
     """Tail the detached run's log + parse step statuses.
@@ -606,17 +626,21 @@ def list_runs(limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
         text = p.read_text(encoding="utf-8", errors="replace")
         age = max(0.0, datetime.now(timezone.utc).timestamp() - st.st_mtime)
         parsed = _parse_run_log(text, age_seconds=age)
-        out.append({
-            "run_id": run_id,
-            "log_filename": p.name,
-            "quest_base": quest_base,
-            "quest_name": parsed["quest_name"],
-            "started_at": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
-            "size_bytes": st.st_size,
-            "overall": parsed["overall"],
-            "current_step": parsed["current_step"],
-            "statuses": parsed["statuses"],
-        })
+        out.append(
+            {
+                "run_id": run_id,
+                "log_filename": p.name,
+                "quest_base": quest_base,
+                "quest_name": parsed["quest_name"],
+                "started_at": datetime.fromtimestamp(
+                    st.st_mtime, tz=timezone.utc
+                ).isoformat(),
+                "size_bytes": st.st_size,
+                "overall": parsed["overall"],
+                "current_step": parsed["current_step"],
+                "statuses": parsed["statuses"],
+            }
+        )
     return {"runs": out, "total": len(files)}
 
 
@@ -649,7 +673,9 @@ def run_by_job(
             "found": True,
             "run_id": run_id,
             "log_filename": p.name,
-            "started_at": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+            "started_at": datetime.fromtimestamp(
+                st.st_mtime, tz=timezone.utc
+            ).isoformat(),
             "size_bytes": st.st_size,
             "line_count": len(lines),
             "overall": parsed["overall"],
@@ -703,8 +729,10 @@ def _build_quest_yaml(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     quest: dict[str, Any] = {"name": slug}
     if description:
         quest["description"] = description
-    quest["retry"] = {"max_attempts": int(payload.get("max_attempts", 1) or 1),
-                      "backoff_seconds": int(payload.get("backoff_seconds", 0) or 0)}
+    quest["retry"] = {
+        "max_attempts": int(payload.get("max_attempts", 1) or 1),
+        "backoff_seconds": int(payload.get("backoff_seconds", 0) or 0),
+    }
     # NB: services block intentionally omitted — defaults pick compose-network
     # DNS when running inside the cli container.
 
@@ -735,7 +763,9 @@ def _build_quest_yaml(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
 
 @router.post("/create", dependencies=[Depends(require_auth)])
-def create_quest(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+def create_quest(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     """Create a quest YAML under ``data/quests/`` from form input.
 
     The file is written through the cli container (which has the repo
@@ -797,7 +827,9 @@ def create_quest(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[s
 
 
 @router.delete("/quest", dependencies=[Depends(require_auth)])
-def delete_quest(path: str = Query(..., description="Absolute path of the quest YAML to delete.")) -> dict[str, Any]:
+def delete_quest(
+    path: str = Query(..., description="Absolute path of the quest YAML to delete."),
+) -> dict[str, Any]:
     """Delete a user-created quest under ``data/quests/``.
 
     Refuses to touch anything outside that directory.
@@ -822,7 +854,9 @@ def delete_quest(path: str = Query(..., description="Absolute path of the quest 
 
 @router.post("/run-stop", dependencies=[Depends(require_auth)])
 def run_stop(
-    run_id: str = Query(..., description="Run ID returned by POST /run with detach=true."),
+    run_id: str = Query(
+        ..., description="Run ID returned by POST /run with detach=true."
+    ),
     force: bool = Query(False, description="Use SIGKILL instead of SIGTERM."),
 ) -> dict[str, Any]:
     """Send SIGTERM (default) or SIGKILL (force=true) to the runner.
@@ -839,7 +873,7 @@ def run_stop(
         raise HTTPException(
             status_code=404,
             detail=f"no PID file for run_id={run_id}; run may have started "
-                   f"before stop support, or is already gone.",
+            f"before stop support, or is already gone.",
         )
     pid_file = matches[0]
     try:
@@ -853,7 +887,8 @@ def run_stop(
     cli = _cli_container()
     rc, out = cli.exec_run(
         cmd=["bash", "-lc", f"kill -{sig} {pid}"],
-        stdout=True, stderr=True,
+        stdout=True,
+        stderr=True,
     )
     return {
         "run_id": run_id,

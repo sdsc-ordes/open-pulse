@@ -51,8 +51,7 @@ def build_owner_grouped_projects(
 
     where = "" if include_unexplored else "WHERE r.is_explored = true"
     cypher = (
-        f"MATCH (r:Repo) {where} "
-        "RETURN r.owner AS owner, collect(r.full_name) AS repos"
+        f"MATCH (r:Repo) {where} RETURN r.owner AS owner, collect(r.full_name) AS repos"
     )
 
     driver = GraphDatabase.driver(neo4j_endpoint, auth=neo4j_auth)
@@ -87,7 +86,10 @@ def post_to_applier(
 ) -> dict[str, Any]:
     """POST a built projects.json envelope to the applier sidecar."""
     url = applier_url.rstrip("/") + "/apply"
-    headers = {"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "Content-Type": "application/json",
+    }
     with httpx.Client(timeout=timeout) as c:
         resp = c.post(url, json=payload, headers=headers)
     if resp.status_code != 200:
@@ -155,7 +157,8 @@ def run_apply_grimoire_projects(context: dict[str, object]) -> None:
         logger.warning(
             "apply_grimoire_projects: no owners matched (include_unexplored=%s, "
             "min_repos_per_owner=%d) — skipping applier POST",
-            include_unexplored, min_repos_per_owner,
+            include_unexplored,
+            min_repos_per_owner,
         )
         return
 
@@ -173,9 +176,13 @@ def run_apply_grimoire_projects(context: dict[str, object]) -> None:
         )
 
     result = post_to_applier(
-        applier_url=applier_url, bearer_token=bearer, payload=projects,
+        applier_url=applier_url,
+        bearer_token=bearer,
+        payload=projects,
     )
     logger.info(
         "apply_grimoire_projects: applied %d owners · %d repos · groups=%s",
-        len(projects), total, result.get("groups", []),
+        len(projects),
+        total,
+        result.get("groups", []),
     )

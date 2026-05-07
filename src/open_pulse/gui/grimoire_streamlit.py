@@ -52,9 +52,7 @@ def main() -> None:
 
     st.subheader("1. Data source")
     neo4j_endpoint = st.text_input("Neo4j endpoint", value="bolt://localhost:7687")
-    sparql_endpoint = st.text_input(
-        "SPARQL endpoint", value="http://localhost:7878"
-    )
+    sparql_endpoint = st.text_input("SPARQL endpoint", value="http://localhost:7878")
 
     st.subheader("2. Repository selection")
     st.info(

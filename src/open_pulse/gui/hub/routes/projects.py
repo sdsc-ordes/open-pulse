@@ -16,6 +16,7 @@ from ..queries import (
     build_filtered_query,
     builtin_query_dicts,
 )
+
 # Reuse the pipeline step's builder so the hub button + the quest step
 # return the exact same projects.json shape — they're literally the same
 # function, just with different triggers.
@@ -43,7 +44,9 @@ def _slugify(s: str) -> str:
 
 
 @router.post("/sparql/query", dependencies=[Depends(require_auth)])
-async def run_sparql(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+async def run_sparql(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     """Run a SELECT against the SPARQL endpoint and return the bindings.
 
     Body (all optional):
@@ -118,8 +121,8 @@ async def apply(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[st
         raise HTTPException(
             status_code=400,
             detail="No applier credentials available. Set APPLIER_AUTH in your "
-                   ".env (server-side default) or paste a token under Settings "
-                   "→ GrimoireLab projects key for a remote deployment.",
+            ".env (server-side default) or paste a token under Settings "
+            "→ GrimoireLab projects key for a remote deployment.",
         )
     projects_json = payload.get("projects_json")
     if not isinstance(projects_json, dict) or not projects_json:
@@ -140,6 +143,7 @@ async def apply(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[st
 
 # ── Templates + facets ──────────────────────────────────────────────────────
 
+
 @router.get("/templates", dependencies=[Depends(require_auth)])
 def list_templates() -> dict[str, Any]:
     """Return the built-in SPARQL query library (parameterised templates)."""
@@ -147,11 +151,17 @@ def list_templates() -> dict[str, Any]:
 
 
 _FACETS_CACHE: dict[str, Any] = {"at": 0.0, "data": None, "endpoint": ""}
-_FACETS_TTL = 30.0  # seconds — cheap enough to refresh, expensive enough to skip on every nav
+_FACETS_TTL = (
+    30.0  # seconds — cheap enough to refresh, expensive enough to skip on every nav
+)
 
 
-async def _run_sparql(client: httpx.AsyncClient, endpoint: str, query: str,
-                      auth: tuple[str, str] | None = None) -> dict[str, Any]:
+async def _run_sparql(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    query: str,
+    auth: tuple[str, str] | None = None,
+) -> dict[str, Any]:
     url = endpoint.rstrip("/")
     if not url.endswith("/query"):
         url += "/query"
@@ -236,7 +246,9 @@ async def facets(refresh: bool = False) -> dict[str, Any]:
 
 
 @router.post("/build-from-filters", dependencies=[Depends(require_auth)])
-async def build_from_filters(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+async def build_from_filters(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     """Compose a SPARQL query from a facet-selection map and run it.
 
     Body shape::
@@ -293,7 +305,9 @@ async def build_from_filters(payload: dict[str, Any] = Body(default_factory=dict
 
 
 @router.post("/build-by-owner", dependencies=[Depends(require_auth)])
-def build_by_owner(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+def build_by_owner(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     """Build (and optionally apply) an owner-grouped projects.json.
 
     Body (all optional):
@@ -319,7 +333,7 @@ def build_by_owner(payload: dict[str, Any] = Body(default_factory=dict)) -> dict
         raise HTTPException(
             status_code=400,
             detail="No Neo4j password available. Set NEO4J_AUTH in .env or "
-                   "include neo4j_password in the request body.",
+            "include neo4j_password in the request body.",
         )
 
     include_unexplored = bool(payload.get("include_unexplored", False))
@@ -336,7 +350,9 @@ def build_by_owner(payload: dict[str, Any] = Body(default_factory=dict)) -> dict
             title_prefix=title_prefix,
         )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Neo4j query failed: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail=f"Neo4j query failed: {exc}"
+        ) from exc
 
     response: dict[str, Any] = {
         "owners": len(projects),
@@ -351,7 +367,7 @@ def build_by_owner(payload: dict[str, Any] = Body(default_factory=dict)) -> dict
             raise HTTPException(
                 status_code=400,
                 detail="apply=true but APPLIER_AUTH is not set on the server "
-                       "and no override was provided.",
+                "and no override was provided.",
             )
         try:
             applier_resp = _post_to_applier_sidecar(

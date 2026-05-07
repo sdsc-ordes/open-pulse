@@ -10,7 +10,7 @@ behind this proxy in any deploy that publishes the port.**
 ## Files
 
 | File | Tracked? | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `Caddyfile` | yes | Caddy config — auth rules + reverse proxy to Oxigraph |
 | `docker-compose.yaml` | yes | standalone deploy (use the main stack for the full setup) |
 | `users.example` | yes | example user file format |

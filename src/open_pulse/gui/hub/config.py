@@ -112,14 +112,10 @@ def load_settings() -> Settings:
     return Settings(
         auth_token=auth,
         data_dir=Path(os.environ.get("HUB_DATA_DIR", "/data/hub")),
-        applier_url=os.environ.get(
-            "HUB_APPLIER_URL", "http://projects-applier:8000"
-        ),
+        applier_url=os.environ.get("HUB_APPLIER_URL", "http://projects-applier:8000"),
         sparql_url=os.environ.get("HUB_SPARQL_URL", "http://sparql-proxy:7878"),
         neo4j_url=os.environ.get("HUB_NEO4J_URL", "bolt://neo4j:7687"),
-        grimoire_kibiter_url=os.environ.get(
-            "HUB_KIBITER_URL", "http://localhost:7508"
-        ),
+        grimoire_kibiter_url=os.environ.get("HUB_KIBITER_URL", "http://localhost:7508"),
         opensearch_url=os.environ.get(
             "HUB_OPENSEARCH_URL", "https://opensearch-node1:9200"
         ),

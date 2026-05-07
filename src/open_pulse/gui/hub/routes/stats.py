@@ -27,8 +27,8 @@ log = logging.getLogger(__name__)
 _CACHE: dict[str, Any] = {"at": 0.0, "data": None}
 _TTL = 6.0  # seconds
 
-_HISTORY_INTERVAL = 60.0          # seconds between samples
-_HISTORY_RETENTION_DAYS = 30      # prune older rows on each insert
+_HISTORY_INTERVAL = 60.0  # seconds between samples
+_HISTORY_RETENTION_DAYS = 30  # prune older rows on each insert
 
 
 def _uptime_seconds(started_at_iso: str | None) -> int | None:
@@ -107,6 +107,7 @@ async def _neo4j_counts() -> dict[str, int | None]:
     # design (auth is a hub-side concern), so we attempt with the conventional
     # dev password and fall back gracefully on auth failure.
     import os
+
     auth_default = os.environ.get("HUB_NEO4J_PASSWORD", "openpulse-dev-password")
     try:
         driver = GraphDatabase.driver(settings.neo4j_url, auth=("neo4j", auth_default))
@@ -130,14 +131,12 @@ async def _gather() -> dict[str, Any]:
     healthy = sum(
         1
         for s in services
-        if s["health"] == "healthy" or (s["health"] is None and s["status"] == "running")
+        if s["health"] == "healthy"
+        or (s["health"] is None and s["status"] == "running")
     )
     total = len(services)
     longest_uptime = max(
-        (
-            _uptime_seconds(s.get("started_at")) or 0
-            for s in services
-        ),
+        (_uptime_seconds(s.get("started_at")) or 0 for s in services),
         default=0,
     )
 
@@ -173,6 +172,7 @@ async def get_stats() -> dict[str, Any]:
 
 
 # ── Time-series history ────────────────────────────────────────────────────
+
 
 def _history_db() -> sqlite3.Connection:
     settings = get_settings()
@@ -221,8 +221,7 @@ def _persist_sample(sample: dict[str, Any]) -> None:
             ),
         )
         conn.execute(
-            "DELETE FROM metrics_history "
-            "WHERE ts < datetime('now', ?)",
+            "DELETE FROM metrics_history WHERE ts < datetime('now', ?)",
             (f"-{_HISTORY_RETENTION_DAYS} days",),
         )
         conn.commit()
@@ -270,10 +269,12 @@ _RANGE_MAP = {
 
 @router.get("/history", dependencies=[Depends(require_auth)])
 def history(
-    range_: str = Query("6h", alias="range",
-                        description="Window size: 1h, 6h, 24h, 7d, 30d."),
-    bucket_seconds: int = Query(0,
-        description="Down-sample to one row per N seconds (0 = no bucketing)."),
+    range_: str = Query(
+        "6h", alias="range", description="Window size: 1h, 6h, 24h, 7d, 30d."
+    ),
+    bucket_seconds: int = Query(
+        0, description="Down-sample to one row per N seconds (0 = no bucketing)."
+    ),
 ) -> dict[str, Any]:
     """Return the metric series, in chronological order.
 
@@ -298,8 +299,14 @@ def history(
         conn.close()
 
     keys = (
-        "ts", "services_total", "services_running", "services_healthy",
-        "uptime_max_seconds", "sparql_repos", "neo4j_nodes", "neo4j_rels",
+        "ts",
+        "services_total",
+        "services_running",
+        "services_healthy",
+        "uptime_max_seconds",
+        "sparql_repos",
+        "neo4j_nodes",
+        "neo4j_rels",
     )
     samples = [dict(zip(keys, r)) for r in rows]
 

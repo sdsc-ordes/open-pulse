@@ -3,6 +3,8 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        # Preserve double-space hard line breaks in markdown (CommonMark).
+        args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-json
@@ -20,3 +22,9 @@ repos:
     hooks:
       - id: yamllint
         args: [-c, .yamllint]
+
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.22.1
+    hooks:
+      - id: markdownlint-cli2
+        args: ["--config", ".markdownlint.jsonc"]

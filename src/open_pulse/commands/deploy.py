@@ -197,9 +197,12 @@ def _compose_up(
 ) -> None:
     """Run ``docker compose up -d`` with the given profiles and overrides."""
     cmd: list[str] = [
-        "docker", "compose",
-        "--project-name", "open-pulse",
-        "--project-directory", str(project_root),
+        "docker",
+        "compose",
+        "--project-name",
+        "open-pulse",
+        "--project-directory",
+        str(project_root),
     ]
 
     for cf in compose_files:
@@ -343,9 +346,12 @@ def down(
     )
 
     cmd: list[str] = [
-        "docker", "compose",
-        "--project-name", "open-pulse",
-        "--project-directory", str(project_root),
+        "docker",
+        "compose",
+        "--project-name",
+        "open-pulse",
+        "--project-directory",
+        str(project_root),
     ]
     for cf in files:
         cmd.extend(["-f", str(cf)])
@@ -395,9 +401,12 @@ def ps(
     )
 
     cmd: list[str] = [
-        "docker", "compose",
-        "--project-name", "open-pulse",
-        "--project-directory", str(project_root),
+        "docker",
+        "compose",
+        "--project-name",
+        "open-pulse",
+        "--project-directory",
+        str(project_root),
     ]
     for cf in files:
         cmd.extend(["-f", str(cf)])

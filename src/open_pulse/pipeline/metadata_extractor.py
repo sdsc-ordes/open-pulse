@@ -100,9 +100,7 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
         cap = None
     for i, full_name in enumerate(repos.keys()):
         if cap is not None and i >= cap:
-            logger.info(
-                "metadata_extractor: hit max_repos=%s, stopping early", cap
-            )
+            logger.info("metadata_extractor: hit max_repos=%s, stopping early", cap)
             break
         out_path = output_dir / _safe_filename(full_name)
         if skip_existing and out_path.is_file():
@@ -129,9 +127,7 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
                 out_path.name,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "metadata_extractor: %s failed (%s)", full_name, exc
-            )
+            logger.warning("metadata_extractor: %s failed (%s)", full_name, exc)
             failed.append(full_name)
 
     logger.info(

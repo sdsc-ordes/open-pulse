@@ -126,7 +126,7 @@ curl -u admin:YOUR_PASSWORD -X GET "http://localhost:5601/api/saved_objects/_fin
 
 ### Check the indexes and aliases
 
-This allows to confirm the Mordred extraction went well for all your projects in projects.json. You can also confirm by seeing `collection finished` in the Mordred docker logs. 
+This allows to confirm the Mordred extraction went well for all your projects in projects.json. You can also confirm by seeing `collection finished` in the Mordred docker logs.
 
 It can also be seen on OpenSearch UI under Index Management - Indexes.
 
@@ -145,6 +145,6 @@ curl -k -u admin:YOUR_PASSWORD -X GET "https://localhost:9200/_cat/aliases?v"
 It can also be seen on OpenSearch UI under Dashbaords Management - Saved Objects.
 
 ```bash
-curl -u admin:YOUR_PASSWORD -X GET "http://localhost:5601/api/saved_objects/_find?type=dashboard" \   
+curl -u admin:YOUR_PASSWORD -X GET "http://localhost:5601/api/saved_objects/_find?type=dashboard" \
   -H "osd-xsrf: true"
 ```

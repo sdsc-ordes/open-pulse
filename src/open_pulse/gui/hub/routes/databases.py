@@ -58,7 +58,9 @@ def _sqlite() -> sqlite3.Connection:
 
 
 @router.post("/duckdb/query", dependencies=[Depends(require_auth)])
-def duckdb_query(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+def duckdb_query(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     """Run an arbitrary read-only DuckDB query against the scratch DB.
 
     The hub mounts `data/` at /data, so users can do e.g.::
@@ -102,7 +104,9 @@ def duckdb_query(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[s
     }
 
 
-def _log_history(engine: str, query: str, *, row_count: int | None, error: str | None) -> None:
+def _log_history(
+    engine: str, query: str, *, row_count: int | None, error: str | None
+) -> None:
     conn = _sqlite()
     try:
         conn.execute(
@@ -125,7 +129,13 @@ def list_saved() -> dict[str, Any]:
         conn.close()
     return {
         "saved": [
-            {"id": r[0], "name": r[1], "engine": r[2], "query": r[3], "created_at": r[4]}
+            {
+                "id": r[0],
+                "name": r[1],
+                "engine": r[2],
+                "query": r[3],
+                "created_at": r[4],
+            }
             for r in rows
         ]
     }
@@ -137,9 +147,13 @@ def save_query(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str
     engine = (payload.get("engine") or "").strip()
     query = (payload.get("query") or "").strip()
     if not name or not engine or not query:
-        raise HTTPException(status_code=400, detail="name, engine, and query are required")
+        raise HTTPException(
+            status_code=400, detail="name, engine, and query are required"
+        )
     if engine not in {"duckdb", "sparql", "cypher"}:
-        raise HTTPException(status_code=400, detail="engine must be duckdb|sparql|cypher")
+        raise HTTPException(
+            status_code=400, detail="engine must be duckdb|sparql|cypher"
+        )
     conn = _sqlite()
     try:
         try:
@@ -156,7 +170,9 @@ def save_query(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str
 
 
 @router.post("/sparql/query", dependencies=[Depends(require_auth)])
-async def sparql_query(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+async def sparql_query(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     """Run a SELECT against the SPARQL store and return raw bindings."""
     settings = get_settings()
     endpoint = (payload.get("endpoint") or settings.sparql_url).rstrip("/")
@@ -174,9 +190,16 @@ async def sparql_query(payload: dict[str, Any] = Body(default_factory=dict)) -> 
 
     headers = {"Accept": "application/sparql-results+json"}
     async with httpx.AsyncClient(timeout=30.0) as c:
-        resp = await c.get(endpoint, params={"query": query}, headers=headers, auth=auth)
+        resp = await c.get(
+            endpoint, params={"query": query}, headers=headers, auth=auth
+        )
     if resp.status_code != 200:
-        _log_history("sparql", query, row_count=None, error=f"HTTP {resp.status_code}: {resp.text[:200]}")
+        _log_history(
+            "sparql",
+            query,
+            row_count=None,
+            error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+        )
         raise HTTPException(
             status_code=502,
             detail=f"SPARQL endpoint returned HTTP {resp.status_code}: {resp.text[:200]}",
@@ -192,7 +215,9 @@ async def sparql_query(payload: dict[str, Any] = Body(default_factory=dict)) -> 
 
 
 @router.post("/cypher/query", dependencies=[Depends(require_auth)])
-def cypher_query(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+def cypher_query(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     """Run a Cypher statement against Neo4j and return result rows."""
     settings = get_settings()
     query = (payload.get("query") or "").strip()
@@ -268,6 +293,7 @@ def history(limit: int = 50) -> dict[str, Any]:
 
 # ── OpenSearch console (SQL plugin + raw Search DSL) ───────────────────────
 
+
 def _opensearch_auth(payload: dict[str, Any]) -> tuple[str, str]:
     """Pick OpenSearch credentials.
 
@@ -325,7 +351,8 @@ def _shape_dsl_response(body: dict[str, Any]) -> dict[str, Any]:
         }
         for k, v in src.items():
             if k not in seen:
-                cols.append(k); seen.add(k)
+                cols.append(k)
+                seen.add(k)
             # Pass nested dicts/lists through as-is; the hub UI's
             # tree-view renderer expects real JSON values to expand into
             # multi-column headers / sub-tables. Stringifying here would
@@ -343,7 +370,9 @@ def _shape_dsl_response(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/opensearch/query", dependencies=[Depends(require_auth)])
-def opensearch_query(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+def opensearch_query(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
     """Run a query against OpenSearch.
 
     Body shape::
@@ -383,8 +412,12 @@ def opensearch_query(payload: dict[str, Any] = Body(default_factory=dict)) -> di
             _log_history("opensearch", text, row_count=None, error=str(exc))
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         if resp.status_code != 200:
-            _log_history("opensearch", text, row_count=None,
-                         error=f"HTTP {resp.status_code}: {resp.text[:200]}")
+            _log_history(
+                "opensearch",
+                text,
+                row_count=None,
+                error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"HTTP {resp.status_code}: {resp.text[:300]}",
@@ -401,10 +434,14 @@ def opensearch_query(payload: dict[str, Any] = Body(default_factory=dict)) -> di
         try:
             doc = json.loads(cleaned)
         except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=400, detail=f"DSL must be valid JSON: {exc}") from exc
+            raise HTTPException(
+                status_code=400, detail=f"DSL must be valid JSON: {exc}"
+            ) from exc
         index = doc.pop("index", None)
         if not index:
-            raise HTTPException(status_code=400, detail="DSL body must include an 'index' key.")
+            raise HTTPException(
+                status_code=400, detail="DSL body must include an 'index' key."
+            )
         url = f"{base}/{index}/_search"
         try:
             resp = httpx.post(
@@ -418,8 +455,12 @@ def opensearch_query(payload: dict[str, Any] = Body(default_factory=dict)) -> di
             _log_history("opensearch", text, row_count=None, error=str(exc))
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         if resp.status_code != 200:
-            _log_history("opensearch", text, row_count=None,
-                         error=f"HTTP {resp.status_code}: {resp.text[:200]}")
+            _log_history(
+                "opensearch",
+                text,
+                row_count=None,
+                error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"HTTP {resp.status_code}: {resp.text[:300]}",
@@ -433,6 +474,7 @@ def opensearch_query(payload: dict[str, Any] = Body(default_factory=dict)) -> di
 
 
 # ── Welcome-mat examples (chips under the editor) ─────────────────────────
+
 
 @router.get("/examples", dependencies=[Depends(require_auth)])
 def list_examples(engine: str | None = None) -> dict[str, Any]:

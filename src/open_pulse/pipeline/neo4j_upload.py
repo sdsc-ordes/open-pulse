@@ -47,9 +47,7 @@ def run_neo4j_upload(context: dict[str, object]) -> None:
 
     graph = json.loads(input_path.read_text(encoding="utf-8"))
     if not isinstance(graph, dict):
-        raise RuntimeError(
-            f"neo4j_upload: {input_path} did not contain a JSON object."
-        )
+        raise RuntimeError(f"neo4j_upload: {input_path} did not contain a JSON object.")
 
     counts = services.neo4j.upload(graph)
     logger.info(
