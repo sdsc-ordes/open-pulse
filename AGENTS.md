@@ -180,7 +180,7 @@ docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compo
 ### `deploy` — Docker infrastructure management
 
 | Sub-command | Description |
-|-------------|-------------|
+| --- | --- |
 | `open-pulse deploy up` | Deploy services via Docker Compose. Without `--profile` flags, opens an interactive selector. Creates `.env` from `infra/env/.env.example` if absent. |
 | `open-pulse deploy down` | Tear down deployed services. `--volumes` / `-v` also removes named volumes. |
 | `open-pulse deploy ps` | Show the status of deployed containers. |
@@ -210,7 +210,7 @@ docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compo
 ### `quest` — Analysis pipeline execution
 
 | Sub-command | Description |
-|-------------|-------------|
+| --- | --- |
 | `open-pulse quest start` | Run the full four-step pipeline. Checkpoint files in `.quest-checkpoints/`. |
 | `open-pulse quest run <yaml>` | Run a quest YAML directly (synchronous; the hub Pipeline page invokes this). |
 | `open-pulse quest run-step <step>` | Run a single step. |
@@ -224,7 +224,7 @@ from `tentris` — the service is now technology-agnostic).
 ### `services grimoire` — GrimoireLab service tools
 
 | Sub-command | Description |
-|-------------|-------------|
+| --- | --- |
 | `open-pulse services grimoire prepare-config` | Run SPARQL queries and generate a `projects.json`. |
 | `open-pulse services grimoire apply` | Query SPARQL, build `projects.json`, POST to the applier sidecar (which writes the file and restarts mordred). |
 | `open-pulse services grimoire install-watcher` | Install a cron job that pulls a git repo and detects config changes (Linux/macOS only). |
@@ -235,7 +235,7 @@ the CLI and the hub `/api/projects/*` routes).
 ### `gui` — Interactive UIs
 
 | Sub-command | Description |
-|-------------|-------------|
+| --- | --- |
 | `open-pulse gui grimoire` | Launch the password-protected Streamlit Grimoire UI (requires `[grimoire-ui]`). |
 | `open-pulse gui hub serve` | Run the Open Pulse Hub dashboard. Requires `[hub]`. |
 
@@ -245,7 +245,7 @@ the compose `hub` service publishes 9090 → 8000.
 ### `health` — Service health checks
 
 | Usage | Description |
-|-------|-------------|
+| --- | --- |
 | `open-pulse health` | Docker reachability + container status + endpoint probes + smoke tests. |
 
 ## Open Pulse Hub
@@ -256,7 +256,7 @@ request → 12h cookie session. All Python ships with the package
 (hatchling auto-includes everything under `src/open_pulse/`).
 
 | Path | Purpose |
-|---|---|
+| --- | --- |
 | `/` | Stat cards (services healthy/total, longest uptime, SPARQL repos, Neo4j nodes/rels) · service tiles · quick links |
 | `/stack` | Profile checkboxes → `open-pulse deploy {up,down,ps}` exec'd inside the cli container |
 | `/services` | Per-container start / stop / restart + logs drawer |

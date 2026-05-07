@@ -59,8 +59,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       src: ${{ steps.filter.outputs.src }}
-      markdown: ${{ steps.filter.outputs.markdown }}
-      markdown_files: ${{ steps.filter.outputs.markdown_files }}
       shell: ${{ steps.filter.outputs.shell }}
     steps:
       - name: Checkout repository
@@ -81,8 +79,6 @@ jobs:
               - "pyproject.toml"
               - "uv.lock"
               - ".github/workflows/ci.yml"
-            markdown:
-              - "**/*.md"
             shell:
               - "**/*.sh"
               - ".github/workflows/ci.yml"
@@ -157,23 +153,6 @@ jobs:
           name: coverage-${{ matrix.python-version }}
           path: coverage.xml
           if-no-files-found: warn
-
-  markdown-validation:
-    name: Markdown validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: changes
-    if: needs.changes.outputs.markdown == 'true'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Lint Markdown
-        uses: DavidAnson/markdownlint-cli2-action@992badcdf24e3b8eb7e87ff9287fe931bcb00c6e  # v20
-        with:
-          config: .markdownlint.jsonc
-          globs: ${{ needs.changes.outputs.markdown_files }}
-          separator: ","
 
   shell-script-sanity:
     name: Shell script sanity

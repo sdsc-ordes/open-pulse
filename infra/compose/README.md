@@ -54,7 +54,7 @@ docker compose -f docker-compose.yml \
 ## Profiles
 
 | Profile | Adds |
-|---|---|
+| --- | --- |
 | `default` | Neo4j (always present; the implicit "no profile" set) |
 | `analysis` | Analysis notebook |
 | `crawler` | `open-pulse-crawler` |

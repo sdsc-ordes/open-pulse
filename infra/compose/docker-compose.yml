@@ -299,4 +299,3 @@ services:
       start_period: 10s
     mem_limit: ${HUB_MEM_LIMIT:-512m}
     cpus: ${HUB_CPUS:-1.0}
-

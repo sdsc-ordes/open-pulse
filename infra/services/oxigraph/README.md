@@ -32,7 +32,7 @@ Then read/write through the proxy at `http://localhost:7878/...`. See
 ## Endpoints
 
 | Path | Method | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `/query` | GET, POST | SPARQL 1.1 query (SELECT, ASK, DESCRIBE, CONSTRUCT) |
 | `/update` | POST | SPARQL 1.1 update (INSERT, DELETE, LOAD, CLEAR) |
 | `/store` | GET, POST, PUT, DELETE | SPARQL Graph Store HTTP Protocol |

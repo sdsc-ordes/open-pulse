@@ -67,7 +67,7 @@ leading-slash arguments).
 ### Profiles
 
 | Profile | What comes up |
-|---|---|
+| --- | --- |
 | `default` | Neo4j |
 | `crawler` | Open Pulse Crawler API |
 | `extractor` | GME metadata extractor + Selenium |

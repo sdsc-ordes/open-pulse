@@ -223,7 +223,11 @@ def _fork_edges(repos: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Build (Repo)-[:FORK_OF]->(Repo) edges when fork info present."""
     rows: list[dict[str, Any]] = []
     for full_name, r in repos.items():
-        parent = r.get("parent_full_name") or r.get("source_full_name") or r.get("forked_from")
+        parent = (
+            r.get("parent_full_name")
+            or r.get("source_full_name")
+            or r.get("forked_from")
+        )
         if isinstance(parent, str) and parent and parent != full_name:
             rows.append({"fork": full_name, "parent": parent})
     return rows

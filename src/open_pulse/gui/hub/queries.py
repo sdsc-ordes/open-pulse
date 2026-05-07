@@ -31,10 +31,11 @@ PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 
 # ── Saved templates (the "examples") ────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class QueryParam:
     name: str
-    type: str = "string"      # "string" | "list" | "regex"
+    type: str = "string"  # "string" | "list" | "regex"
     default: str = ""
     help: str = ""
 
@@ -53,7 +54,8 @@ BUILTIN_QUERIES: tuple[BuiltinQuery, ...] = (
         id="all-repos",
         name="All repositories",
         description="Every schema:SoftwareSourceCode in the store, sorted by URL.",
-        template=PREFIXES + """\
+        template=PREFIXES
+        + """\
 SELECT ?repo WHERE {
   ?repo a schema:SoftwareSourceCode .
 }
@@ -64,10 +66,14 @@ ORDER BY ?repo""",
         name="By organization",
         description="Repos whose author or publisher organization name matches exactly.",
         params=(
-            QueryParam(name="ORG", default="sdsc-ordes",
-                       help="Organization name as it appears in schema:name."),
+            QueryParam(
+                name="ORG",
+                default="sdsc-ordes",
+                help="Organization name as it appears in schema:name.",
+            ),
         ),
-        template=PREFIXES + """\
+        template=PREFIXES
+        + """\
 SELECT DISTINCT ?repo WHERE {
   ?repo a schema:SoftwareSourceCode ;
         (schema:author|schema:publisher)/schema:name "{ORG}" .
@@ -79,10 +85,14 @@ ORDER BY ?repo""",
         name="By license (substring)",
         description="Repos whose schema:license URL/string contains a substring (case-insensitive).",
         params=(
-            QueryParam(name="LICENSE", default="apache-2",
-                       help="Substring matched against the license URL or label, lower-cased."),
+            QueryParam(
+                name="LICENSE",
+                default="apache-2",
+                help="Substring matched against the license URL or label, lower-cased.",
+            ),
         ),
-        template=PREFIXES + """\
+        template=PREFIXES
+        + """\
 SELECT ?repo ?license WHERE {
   ?repo a schema:SoftwareSourceCode ;
         schema:license ?license .
@@ -95,10 +105,14 @@ ORDER BY ?repo""",
         name="By discipline / application category",
         description="Repos tagged with a schema:applicationCategory equal to the value.",
         params=(
-            QueryParam(name="CATEGORY", default="life-sciences",
-                       help="Category value as it appears in the data."),
+            QueryParam(
+                name="CATEGORY",
+                default="life-sciences",
+                help="Category value as it appears in the data.",
+            ),
         ),
-        template=PREFIXES + """\
+        template=PREFIXES
+        + """\
 SELECT DISTINCT ?repo WHERE {
   ?repo a schema:SoftwareSourceCode ;
         schema:applicationCategory ?cat .
@@ -111,10 +125,14 @@ ORDER BY ?repo""",
         name="By programming language",
         description="Repos that list a particular programmingLanguage.",
         params=(
-            QueryParam(name="LANGUAGE", default="Rust",
-                       help="Exact language name (case-sensitive); matches GitHub-style labels."),
+            QueryParam(
+                name="LANGUAGE",
+                default="Rust",
+                help="Exact language name (case-sensitive); matches GitHub-style labels.",
+            ),
         ),
-        template=PREFIXES + """\
+        template=PREFIXES
+        + """\
 SELECT DISTINCT ?repo WHERE {
   ?repo a schema:SoftwareSourceCode ;
         schema:programmingLanguage ?lang .
@@ -127,10 +145,15 @@ ORDER BY ?repo""",
         name="By keyword / topic (regex)",
         description="Repos whose keywords/topics match a regex (case-insensitive).",
         params=(
-            QueryParam(name="KEYWORD", type="regex", default="ontology",
-                       help="Regex applied to schema:keywords values."),
+            QueryParam(
+                name="KEYWORD",
+                type="regex",
+                default="ontology",
+                help="Regex applied to schema:keywords values.",
+            ),
         ),
-        template=PREFIXES + """\
+        template=PREFIXES
+        + """\
 SELECT DISTINCT ?repo WHERE {
   ?repo a schema:SoftwareSourceCode ;
         schema:keywords ?kw .
@@ -146,7 +169,8 @@ ORDER BY ?repo""",
             QueryParam(name="ORG", default="sdsc-ordes"),
             QueryParam(name="LICENSE", default="mit"),
         ),
-        template=PREFIXES + """\
+        template=PREFIXES
+        + """\
 SELECT DISTINCT ?repo WHERE {
   ?repo a schema:SoftwareSourceCode ;
         (schema:author|schema:publisher)/schema:name "{ORG}" ;
@@ -160,10 +184,14 @@ ORDER BY ?repo""",
         name="Recently modified",
         description="Repos with schema:dateModified after a given ISO date.",
         params=(
-            QueryParam(name="SINCE", default="2025-01-01",
-                       help="ISO date; only repos modified on or after this date are returned."),
+            QueryParam(
+                name="SINCE",
+                default="2025-01-01",
+                help="ISO date; only repos modified on or after this date are returned.",
+            ),
         ),
-        template=PREFIXES + """\
+        template=PREFIXES
+        + """\
 SELECT ?repo ?modified WHERE {
   ?repo a schema:SoftwareSourceCode ;
         schema:dateModified ?modified .
@@ -178,28 +206,36 @@ def builtin_query_dicts() -> list[dict[str, object]]:
     """Serialise BUILTIN_QUERIES for JSON return."""
     out: list[dict[str, object]] = []
     for q in BUILTIN_QUERIES:
-        out.append({
-            "id": q.id,
-            "name": q.name,
-            "description": q.description,
-            "template": q.template,
-            "params": [
-                {"name": p.name, "type": p.type, "default": p.default, "help": p.help}
-                for p in q.params
-            ],
-        })
+        out.append(
+            {
+                "id": q.id,
+                "name": q.name,
+                "description": q.description,
+                "template": q.template,
+                "params": [
+                    {
+                        "name": p.name,
+                        "type": p.type,
+                        "default": p.default,
+                        "help": p.help,
+                    }
+                    for p in q.params
+                ],
+            }
+        )
     return out
 
 
 # ── Facets (the "list of possible filters with counts") ─────────────────────
 
+
 @dataclass(frozen=True)
 class Facet:
-    key: str                       # internal id (also the filter key)
-    label: str                     # UI label
+    key: str  # internal id (also the filter key)
+    label: str  # UI label
     description: str
-    values_query: str              # SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) ...
-    predicate_path: str            # SPARQL property path between ?repo and the facet value
+    values_query: str  # SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) ...
+    predicate_path: str  # SPARQL property path between ?repo and the facet value
 
 
 FACETS: tuple[Facet, ...] = (
@@ -208,7 +244,8 @@ FACETS: tuple[Facet, ...] = (
         label="Organization",
         description="Authors and publishers as schema:Organization (or anything with schema:name).",
         predicate_path="(schema:author|schema:publisher)/schema:name",
-        values_query=PREFIXES + """\
+        values_query=PREFIXES
+        + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
         (schema:author|schema:publisher)/schema:name ?value .
@@ -221,7 +258,8 @@ ORDER BY DESC(?count) ?value""",
         label="License",
         description="schema:license values (URLs or string labels).",
         predicate_path="schema:license",
-        values_query=PREFIXES + """\
+        values_query=PREFIXES
+        + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
         schema:license ?value .
@@ -234,7 +272,8 @@ ORDER BY DESC(?count) ?value""",
         label="Discipline / Category",
         description="schema:applicationCategory — discipline-level tags.",
         predicate_path="schema:applicationCategory",
-        values_query=PREFIXES + """\
+        values_query=PREFIXES
+        + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
         schema:applicationCategory ?value .
@@ -247,7 +286,8 @@ ORDER BY DESC(?count) ?value""",
         label="Programming language",
         description="schema:programmingLanguage values.",
         predicate_path="schema:programmingLanguage",
-        values_query=PREFIXES + """\
+        values_query=PREFIXES
+        + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
         schema:programmingLanguage ?value .
@@ -260,7 +300,8 @@ ORDER BY DESC(?count) ?value""",
         label="Keyword / Topic",
         description="schema:keywords / topic tags.",
         predicate_path="schema:keywords",
-        values_query=PREFIXES + """\
+        values_query=PREFIXES
+        + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
         schema:keywords ?value .
@@ -274,7 +315,8 @@ LIMIT 200""",
         label="Repository type",
         description="rdf:type — the schema.org class(es) asserted on the resource.",
         predicate_path="a",
-        values_query=PREFIXES + """\
+        values_query=PREFIXES
+        + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a ?value .
   FILTER(STRSTARTS(STR(?value), "http://schema.org/"))
@@ -293,6 +335,7 @@ def facet_by_key(key: str) -> Facet | None:
 
 
 # ── Filter-builder: compose a SPARQL query from selected facet values ─────
+
 
 def _escape_literal(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')

@@ -50,9 +50,7 @@ def run_sparql_upload(context: dict[str, object]) -> None:
 
     files = sorted(input_dir.glob("*.json"))
     if not files:
-        logger.warning(
-            "sparql_upload: %s has no JSON files to upload", input_dir
-        )
+        logger.warning("sparql_upload: %s has no JSON files to upload", input_dir)
         return
 
     success = 0
@@ -77,6 +75,5 @@ def run_sparql_upload(context: dict[str, object]) -> None:
     )
     if success == 0 and failed:
         raise RuntimeError(
-            f"sparql_upload: all {len(failed)} files failed; "
-            f"first failure: {failed[0]}"
+            f"sparql_upload: all {len(failed)} files failed; first failure: {failed[0]}"
         )

@@ -239,8 +239,7 @@ class MetadataExtractorService:
         result = final.get("result")
         if not isinstance(result, dict):
             raise RuntimeError(
-                f"metadata_extractor v2: job {job_id} completed without a "
-                "result body"
+                f"metadata_extractor v2: job {job_id} completed without a result body"
             )
         return result
 

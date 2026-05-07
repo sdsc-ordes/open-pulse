@@ -1,7 +1,7 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 pre-commit:
-    npx markdownlint-cli2 --config .markdownlint.jsonc --fix "infra/services/**/*.md"
+    npx markdownlint-cli2 --config .markdownlint.jsonc --fix "**/*.md" "#docs-site/node_modules/**" "#.venv/**"
     uv run --with pre-commit pre-commit run --all-files
 
 # Re-render the grimoire setup.cfg (after editing

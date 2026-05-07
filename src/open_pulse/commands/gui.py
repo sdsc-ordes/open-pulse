@@ -37,7 +37,9 @@ def grimoire_ui() -> None:
 def hub_serve(
     host: str = typer.Option("0.0.0.0", "--host", help="Bind address."),
     port: int = typer.Option(8000, "--port", "-p", help="Port to listen on."),
-    reload: bool = typer.Option(False, "--reload", help="Enable hot reload (dev only)."),
+    reload: bool = typer.Option(
+        False, "--reload", help="Enable hot reload (dev only)."
+    ),
 ) -> None:
     """Run the Open Pulse Hub dashboard.
 

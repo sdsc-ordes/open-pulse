@@ -83,8 +83,8 @@ def list_services() -> list[dict[str, Any]]:
             {
                 "name": name,
                 "image": attrs.get("Config", {}).get("Image"),
-                "status": c.status,           # running / exited / created / ...
-                "health": health,             # healthy / unhealthy / starting / None
+                "status": c.status,  # running / exited / created / ...
+                "health": health,  # healthy / unhealthy / starting / None
                 "started_at": started_at,
                 "uptime_seconds": _uptime_seconds(started_at),
                 "ports": _format_ports(attrs.get("NetworkSettings", {}).get("Ports")),
