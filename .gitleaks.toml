@@ -1,0 +1,16 @@
+title = "open-pulse gitleaks config"
+
+# Inherit gitleaks' built-in rule set; we only add allowlist entries below.
+[extend]
+useDefault = true
+
+# Findings whose match contains any of these substrings are suppressed.
+# They mark documentation placeholders and shell variable interpolations
+# in healthcheck commands — not real credentials.
+[allowlist]
+description = "Doc placeholders and shell variable references (not real secrets)"
+stopwords = [
+  "YOUR_PASSWORD",
+  "your-password",
+  "OPENSEARCH_INITIAL_ADMIN_PASSWORD",
+]
