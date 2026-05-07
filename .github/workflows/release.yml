@@ -15,11 +15,16 @@ concurrency:
 env:
   # Force JS actions onto Node 24 ahead of the June 2026 GHA default flip.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Match the project's lower bound (pyproject: requires-python >=3.11).
+  BUILD_PYTHON_VERSION: "3.11"
+  # Pin the wheel-builder so release artifacts are reproducible.
+  PYTHON_BUILD_VERSION: "1.2.2"
 
 jobs:
   build-release-assets:
     name: Build release assets
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -30,6 +35,11 @@ jobs:
             echo "Tag ${GITHUB_REF_NAME} is not a stable semver tag (vX.Y.Z)."
             exit 1
           fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.BUILD_PYTHON_VERSION }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -53,18 +63,18 @@ jobs:
       - name: Export image archives
         run: |
           mkdir -p release-artifacts
-          docker save "open-pulse/open-pulse:${GITHUB_REF_NAME}" -o release-artifacts/open-pulse-${GITHUB_REF_NAME}.tar
-          docker save "open-pulse/devcontainer:${GITHUB_REF_NAME}" -o release-artifacts/devcontainer-${GITHUB_REF_NAME}.tar
+          docker save "open-pulse/open-pulse:${GITHUB_REF_NAME}" -o "release-artifacts/open-pulse-${GITHUB_REF_NAME}.tar"
+          docker save "open-pulse/devcontainer:${GITHUB_REF_NAME}" -o "release-artifacts/devcontainer-${GITHUB_REF_NAME}.tar"
           (cd release-artifacts && sha256sum *.tar > SHA256SUMS.txt)
 
       - name: Build open-pulse wheel artifact
         run: |
-          python -m pip install build
+          python -m pip install "build==${{ env.PYTHON_BUILD_VERSION }}"
           mkdir -p release-artifacts/python
           python -m build --wheel --outdir release-artifacts/python
 
       - name: Create draft GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           draft: true
           generate_release_notes: true

@@ -1,0 +1,107 @@
+version: 2
+
+updates:
+  # GitHub Actions used by workflows in .github/workflows.
+  # Dependabot will update the SHA pin and the trailing `# vX.Y.Z` comment together.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 10
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: ci
+      include: scope
+    labels:
+      - dependencies
+      - github-actions
+
+  # Python dependencies declared in pyproject.toml (project + dependency-groups).
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 10
+    groups:
+      python-minor-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: deps
+      include: scope
+    labels:
+      - dependencies
+      - python
+
+  # Docker base images used by built artefacts and the devcontainer.
+  # Compose service images (infra/services/**) use docker-compose, handled below.
+  - package-ecosystem: docker
+    directories:
+      - "/tools/images"
+      - "/.devcontainer"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps(docker)
+      include: scope
+    labels:
+      - dependencies
+      - docker
+
+  # Compose-managed images for the local services stack.
+  - package-ecosystem: docker-compose
+    directories:
+      - "/infra/compose"
+      - "/infra/services/oxigraph"
+      - "/infra/services/grimoirelab"
+      - "/infra/services/sparql-proxy"
+      - "/infra/services/neo4j"
+      - "/infra/services/portainer"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps(compose)
+      include: scope
+    labels:
+      - dependencies
+      - docker
+
+  # Docusaurus site dependencies.
+  - package-ecosystem: npm
+    directory: "/docs-site"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: deps(docs)
+      include: scope
+    labels:
+      - dependencies
+      - docs
