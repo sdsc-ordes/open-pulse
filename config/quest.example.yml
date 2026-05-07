@@ -66,7 +66,7 @@ quest:
       force_refresh: false           # only honored by mode=v1_gimie
       max_repos: null                # cap repos to process (null = all)
       mode: "v2"                     # "v2" (default) or "v1_gimie"
-      v2_agent_runtime: "rule_based" # "rule_based" (no LLM) or "llm" (needs RCP_TOKEN)
+      v2_agent_runtime: "rule_based"  # "rule_based" (no LLM) or "llm" (needs RCP_TOKEN)
       v2_poll_interval_seconds: 2.0
       v2_timeout_seconds: 600.0
 

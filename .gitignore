@@ -8,6 +8,8 @@ tentris.env
 **/*.key
 **/*secret*
 .internal
+.claude
+.cursor
 
 # Airflow local/runtime files
 infra/services/airflow/src/env_variables.json
