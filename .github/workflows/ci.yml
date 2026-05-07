@@ -37,6 +37,10 @@ concurrency:
   group: ci-baseline-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Force JS actions onto Node 24 ahead of the June 2026 GHA default flip.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   changes:
     name: Detect changed scopes
@@ -49,7 +53,7 @@ jobs:
       shell: ${{ steps.filter.outputs.shell }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -81,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -101,7 +105,7 @@ jobs:
     if: needs.changes.outputs.src == 'true'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -127,7 +131,7 @@ jobs:
     if: needs.changes.outputs.yaml == 'true' || needs.changes.outputs.markdown == 'true'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Lint YAML
         if: needs.changes.outputs.yaml == 'true'
@@ -150,7 +154,7 @@ jobs:
     if: needs.changes.outputs.shell == 'true'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install --yes shellcheck
