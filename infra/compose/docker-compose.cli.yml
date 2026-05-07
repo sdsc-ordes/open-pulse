@@ -6,7 +6,7 @@ services:
     # image with:
     #   docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
     # then set OPEN_PULSE_IMAGE=open-pulse:local in your .env.
-    image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest}"
+    image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse:latest}"
     container_name: open-pulse-cli
     restart: unless-stopped
     depends_on:

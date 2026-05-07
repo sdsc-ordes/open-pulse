@@ -17,7 +17,7 @@ docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
 echo "OPEN_PULSE_IMAGE=open-pulse:local" >> .env
 ```
 
-(`OPEN_PULSE_IMAGE` defaults to `ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest`.)
+(`OPEN_PULSE_IMAGE` defaults to `ghcr.io/sdsc-ordes/open-pulse:latest`.)
 
 ## Usage
 
@@ -74,11 +74,11 @@ Both services reference a single image var so a tag bump only edits one place:
 
 ```yaml
 hub:
-  image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest}"
+  image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse:latest}"
   command: ["gui", "hub", "serve", "--host", "0.0.0.0", "--port", "8000"]
 
 open-pulse-cli:
-  image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest}"
+  image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse:latest}"
   entrypoint: ["sleep", "infinity"]
 ```
 

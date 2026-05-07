@@ -27,9 +27,9 @@ permissions:
 env:
   REGISTRY: ghcr.io
   # Path matches the OPEN_PULSE_IMAGE default in infra/compose/docker-compose.yml.
-  # Org is sdsc-ordes; package_name within the org is "open-pulse/open-pulse".
-  IMAGE_NAME: sdsc-ordes/open-pulse/open-pulse
-  PACKAGE_NAME: open-pulse/open-pulse
+  # Org is sdsc-ordes; package_name within the org is "open-pulse".
+  IMAGE_NAME: sdsc-ordes/open-pulse
+  PACKAGE_NAME: open-pulse
   ORG: sdsc-ordes
 
 concurrency:
@@ -44,6 +44,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up QEMU (multi-arch emulation)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -72,6 +77,7 @@ jobs:
           context: .
           file: tools/images/Dockerfile-open-pulse
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
