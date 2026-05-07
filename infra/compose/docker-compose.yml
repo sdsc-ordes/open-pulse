@@ -251,7 +251,7 @@ services:
   # tools/images/Dockerfile-open-pulse. The hub role is selected by overriding
   # `command:` to `gui hub serve …`. Pin a tag via OPEN_PULSE_IMAGE.
   hub:
-    image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest}"
+    image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse:latest}"
     command: ["gui", "hub", "serve", "--host", "0.0.0.0", "--port", "8000"]
     container_name: open-pulse-hub
     profiles:

@@ -100,7 +100,7 @@ open-pulse/
   tools/
     images/
       Dockerfile-open-pulse   # SINGLE image: CLI + orchestrator + hub
-                              # → ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest
+                              # → ghcr.io/sdsc-ordes/open-pulse:latest
       Dockerfile-airflow      # (legacy)
       README.md               # How to build / publish / run the image
 
@@ -122,7 +122,7 @@ build context). One image (`open-pulse`) plays two roles via compose
 overrides:
 
 ```
-                           open-pulse:local / ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest
+                           open-pulse:local / ghcr.io/sdsc-ordes/open-pulse:latest
                            ├── command: gui hub serve …          → open-pulse-hub
                            └── entrypoint: sleep infinity        → open-pulse-cli
                                   (mounts /var/run/docker.sock and host repo
@@ -294,7 +294,7 @@ read-only at `/data` inside the hub so DuckDB can read other services' files.
     bind-mounted at the same absolute path inside, so nested `docker compose`
     bind paths resolve identically on both sides).
 - **Image var:** `OPEN_PULSE_IMAGE` (default
-  `ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest`). Build local with
+  `ghcr.io/sdsc-ordes/open-pulse:latest`). Build local with
   `-t open-pulse:local` and override.
 - **Data root:** all persistent state under `data/` at the repo root, namespaced
   per service. Main stack writes to `data/<service>/`; grimoirelab to
@@ -332,7 +332,7 @@ read-only at `/data` inside the hub so DuckDB can read other services' files.
 ## Pending / known follow-ups
 
 See `dev/plans/follow-ups.md` for the live list. High-impact entries:
-- Publish `ghcr.io/sdsc-ordes/open-pulse/open-pulse:*` from CI.
+- Publish `ghcr.io/sdsc-ordes/open-pulse:*` from CI.
 - Regenerate `uv.lock` to include the `[hub]` extra so the Dockerfile can
   re-add `--frozen` for reproducible builds.
 - Pull the grimoire applier sidecar into the main compose (currently the hub

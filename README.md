@@ -40,7 +40,7 @@ One image (`open-pulse`) plays two roles via compose overrides — the
 the `open-pulse-hub` container runs the FastAPI dashboard.
 
 ```bash
-# Build locally (or pull from ghcr.io/sdsc-ordes/open-pulse/open-pulse:latest)
+# Build locally (or pull from ghcr.io/sdsc-ordes/open-pulse:latest)
 docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
 echo "OPEN_PULSE_IMAGE=open-pulse:local" >> .env
 
