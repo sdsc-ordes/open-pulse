@@ -37,6 +37,7 @@ infra/services/tentris-server/tentris-license.toml
 *.py[cod]
 .ipynb_checkpoints/
 .venv/
+.venv-matrix/
 venv/
 
 # Python build artefacts
