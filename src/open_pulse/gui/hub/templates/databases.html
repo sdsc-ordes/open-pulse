@@ -83,17 +83,28 @@
                     placeholder="-- click an example chip above, or type a query here. ⌘/Ctrl+Enter to run."></textarea>
         </div>
 
-        <div x-show="needsAuthInputs()" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
-          <input :placeholder="userPlaceholder()" x-model="user" />
-          <input type="password" placeholder="password (defaults to Settings)" x-model="password" />
-        </div>
-
         <div class="flex gap-2 mt-3" style="align-items: center;">
           <button class="btn btn-primary" @click="run()" :disabled="busy">Run <span class="kbd ml-1">⌘↵</span></button>
+          <button class="btn" @click="showSnippets = !showSnippets" :title="showSnippets ? 'Hide examples' : 'Show curl / python / js examples'" style="padding-left: 10px; padding-right: 10px;">&lt;/&gt;</button>
           <input style="margin-left: 12px;" placeholder="save to library as…" x-model="saveName" />
           <button class="btn" @click="save()" :disabled="!saveName">Save to library</button>
           <span class="card-meta ml-auto" x-text="resultMeta()"></span>
         </div>
+
+        <div x-show="showSnippets" x-cloak class="card mt-3" style="padding: 10px 14px; background: var(--panel-bg, #0f1218);">
+          <div class="flex gap-2" style="align-items: center; margin-bottom: 8px;">
+            <span class="card-meta">Run this query from outside the Hub:</span>
+            <template x-for="lang in ['curl','python','js']" :key="lang">
+              <button class="btn" :class="snippetLang === lang ? 'btn-primary' : ''"
+                      @click="snippetLang = lang" x-text="lang" style="padding: 2px 10px;"></button>
+            </template>
+            <button class="btn ml-auto" @click="copySnippet()" :title="snippetCopied ? 'Copied!' : 'Copy snippet'"
+                    x-text="snippetCopied ? '✓ copied' : 'Copy'" style="padding: 2px 10px;"></button>
+          </div>
+          <pre class="console" style="margin: 0; padding: 10px 12px; white-space: pre-wrap; max-height: 240px; overflow: auto;" x-text="renderSnippet()"></pre>
+          <p class="card-meta" style="margin-top: 6px;">Replace placeholder credentials with the values from <code>infra/env/.env</code>. Reads are public by default; writes require admin auth.</p>
+        </div>
+
         <div x-show="error" class="card tone-bad mt-3" style="padding: 8px 12px;" x-text="error"></div>
       </div>
     </div>
@@ -448,11 +459,179 @@ window.opDefaults = {
   neo4j_user:         {{ default_neo4j_user|default('neo4j')|tojson }},
   neo4j_password:     {{ default_neo4j_password|default('')|tojson }},
 };
+// ── Snippet generators (called from dbConsole().renderSnippet) ───────
+function _jsStr(s) { return JSON.stringify(s ?? ''); }
+function _shQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
+function _looksLikeSparqlUpdate(q) {
+  const stripped = q.replace(/^\s*PREFIX[^\n]*\n?/gmi, '').trim().toUpperCase();
+  return /^(INSERT|DELETE|LOAD|CLEAR|CREATE|DROP|COPY|MOVE|ADD)\b/.test(stripped);
+}
+function _sparqlSnippet(lang, q, host) {
+  const isUpdate = _looksLikeSparqlUpdate(q);
+  const base = 'http://' + host + ':7502';
+  const path = isUpdate ? '/update' : '/query';
+  const endpoint = base + path;
+  if (lang === 'curl') {
+    if (isUpdate) {
+      return [
+        '# SPARQL update — admin Basic Auth required',
+        'curl -X POST -u ' + _shQuote('admin_user:password') + ' \\',
+        "  -H 'Content-Type: application/sparql-update' \\",
+        '  --data ' + _shQuote(q) + ' \\',
+        '  ' + _shQuote(endpoint),
+      ].join('\n');
+    }
+    return [
+      '# SPARQL query (public read by default)',
+      'curl -G ' + _shQuote(endpoint) + ' \\',
+      "  -H 'Accept: application/sparql-results+json' \\",
+      '  --data-urlencode ' + _shQuote('query=' + q),
+    ].join('\n');
+  }
+  if (lang === 'python') {
+    if (isUpdate) {
+      return [
+        'import httpx',
+        '',
+        'r = httpx.post(',
+        '    ' + _jsStr(endpoint) + ',',
+        '    content=' + _jsStr(q) + ',',
+        '    headers={"Content-Type": "application/sparql-update"},',
+        '    auth=("admin_user", "password"),  # SPARQL_AUTH',
+        ')',
+        'r.raise_for_status()',
+      ].join('\n');
+    }
+    return [
+      'import httpx',
+      '',
+      'r = httpx.get(',
+      '    ' + _jsStr(endpoint) + ',',
+      '    params={"query": ' + _jsStr(q) + '},',
+      '    headers={"Accept": "application/sparql-results+json"},',
+      ')',
+      'r.raise_for_status()',
+      'print(r.json())',
+    ].join('\n');
+  }
+  if (lang === 'js') {
+    if (isUpdate) {
+      return [
+        '// SPARQL update — admin Basic Auth required',
+        "const r = await fetch(" + _jsStr(endpoint) + ", {",
+        "  method: 'POST',",
+        "  headers: {",
+        "    'Content-Type': 'application/sparql-update',",
+        "    Authorization: 'Basic ' + btoa('admin_user:password'),  // SPARQL_AUTH",
+        "  },",
+        '  body: ' + _jsStr(q) + ',',
+        '});',
+      ].join('\n');
+    }
+    return [
+      '// SPARQL query (public read by default)',
+      "const url = " + _jsStr(endpoint) + " + '?' + new URLSearchParams({ query: " + _jsStr(q) + " });",
+      "const r = await fetch(url, { headers: { Accept: 'application/sparql-results+json' } });",
+      'console.log(await r.json());',
+    ].join('\n');
+  }
+  return '';
+}
+function _cypherSnippet(lang, q, host) {
+  const bolt = 'bolt://' + host + ':7504';
+  const httpEndpoint = 'http://' + host + ':7503/db/neo4j/tx/commit';
+  if (lang === 'curl') {
+    return [
+      '# Cypher via the Neo4j HTTP API',
+      'curl -X POST -u ' + _shQuote('neo4j:password') + ' \\',
+      "  -H 'Content-Type: application/json' \\",
+      "  -H 'Accept: application/json' \\",
+      '  --data ' + _shQuote(JSON.stringify({statements: [{statement: q}]})) + ' \\',
+      '  ' + _shQuote(httpEndpoint),
+    ].join('\n');
+  }
+  if (lang === 'python') {
+    return [
+      '# pip install neo4j',
+      'from neo4j import GraphDatabase',
+      '',
+      'with GraphDatabase.driver(' + _jsStr(bolt) + ', auth=("neo4j", "password")) as driver:',
+      '    with driver.session() as session:',
+      '        for record in session.run(' + _jsStr(q) + '):',
+      '            print(record)',
+    ].join('\n');
+  }
+  if (lang === 'js') {
+    return [
+      '// Cypher via the Neo4j HTTP API',
+      'const body = { statements: [{ statement: ' + _jsStr(q) + ' }] };',
+      "const r = await fetch(" + _jsStr(httpEndpoint) + ", {",
+      "  method: 'POST',",
+      "  headers: {",
+      "    'Content-Type': 'application/json',",
+      "    Authorization: 'Basic ' + btoa('neo4j:password'),",
+      "  },",
+      '  body: JSON.stringify(body),',
+      '});',
+      'console.log(await r.json());',
+    ].join('\n');
+  }
+  return '';
+}
+function _opensearchSnippet(lang, q, host, osMode) {
+  // OpenSearch is currently in-network only. Show the internal URL plus a
+  // note. For external access route through the GrimoireLab nginx instead.
+  const endpoint = 'https://opensearch-node1:9200/_search';
+  const note = '# Internal-only — run from a host on the docker network, or proxy via GrimoireLab nginx.\n';
+  const payload = (osMode === 'sql') ? '/_plugins/_sql' : '/_search';
+  const url = 'https://opensearch-node1:9200' + payload;
+  if (lang === 'curl') {
+    return [
+      note.trimEnd(),
+      'curl -k -X POST -u ' + _shQuote('admin:password') + ' \\',
+      "  -H 'Content-Type: application/json' \\",
+      '  --data ' + _shQuote(q) + ' \\',
+      '  ' + _shQuote(url),
+    ].join('\n');
+  }
+  if (lang === 'python') {
+    return [
+      note.trimEnd(),
+      'import httpx',
+      '',
+      'r = httpx.post(',
+      '    ' + _jsStr(url) + ',',
+      '    content=' + _jsStr(q) + ',',
+      '    headers={"Content-Type": "application/json"},',
+      '    auth=("admin", "password"),',
+      '    verify=False,  # self-signed cert in dev',
+      ')',
+      'r.raise_for_status()',
+      'print(r.json())',
+    ].join('\n');
+  }
+  if (lang === 'js') {
+    return [
+      note.trimEnd(),
+      "const r = await fetch(" + _jsStr(url) + ", {",
+      "  method: 'POST',",
+      "  headers: {",
+      "    'Content-Type': 'application/json',",
+      "    Authorization: 'Basic ' + btoa('admin:password'),",
+      "  },",
+      '  body: ' + _jsStr(q) + ',',
+      '});',
+      'console.log(await r.json());',
+    ].join('\n');
+  }
+  return '';
+}
 function dbConsole() {
   return {
     engines: ['sparql', 'cypher', 'opensearch'],
     engine: 'sparql',
-    user: '', password: '',
+    // Snippets panel state (curl / python / js examples).
+    showSnippets: false, snippetLang: 'curl', snippetCopied: false,
     osMode: 'sql',
     busy: false, error: '',
     columns: [], rows: [], truncated: false, rawDump: '',
@@ -504,12 +683,8 @@ function dbConsole() {
       this.engine = first.engine;
       this.switchTab(first.id);
 
-      this.applyEngineAuth();
-      window.addEventListener('op-secrets-changed', () => this.applyEngineAuth());
-
       this.$watch('query', () => { this.recomputeGutter(); });
       this.$watch('engine', () => {
-        this.applyEngineAuth();
         this.error = ''; this.rows = []; this.columns = []; this.rawDump = '';
       });
 
@@ -678,14 +853,11 @@ function dbConsole() {
         let path;
         if (this.engine === 'sparql') {
           path = '/api/databases/sparql/query';
-          body.auth_user = this.user || null; body.auth_password = this.password || null;
         } else if (this.engine === 'cypher') {
           path = '/api/databases/cypher/query';
-          body.auth_user = this.user || null; body.auth_password = this.password || null;
         } else if (this.engine === 'opensearch') {
           path = '/api/databases/opensearch/query';
           body.mode = this.osMode;
-          body.auth_user = this.user || null; body.auth_password = this.password || null;
         }
         const r = await fetch(path, {
           method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
