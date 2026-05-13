@@ -438,6 +438,16 @@ function loadTabs() {
 function saveTabs(tabs) { localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(tabs)); }
 function newTabId() { return 't-' + Math.random().toString(36).slice(2, 10); }
 
+// Auth defaults injected by the /databases route (server-side env).
+// Used as the fallback when localStorage (window.opSecrets) is empty.
+window.opDefaults = {
+  sparql_user:        {{ default_sparql_user|default('')|tojson }},
+  sparql_password:    {{ default_sparql_password|default('')|tojson }},
+  opensearch_user:    {{ default_opensearch_user|default('admin')|tojson }},
+  opensearch_password:{{ default_opensearch_password|default('')|tojson }},
+  neo4j_user:         {{ default_neo4j_user|default('neo4j')|tojson }},
+  neo4j_password:     {{ default_neo4j_password|default('')|tojson }},
+};
 function dbConsole() {
   return {
     engines: ['sparql', 'cypher', 'opensearch'],

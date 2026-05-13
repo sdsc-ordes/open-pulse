@@ -120,7 +120,20 @@ def projects_page(request: Request, _: None = Depends(require_auth)) -> HTMLResp
 
 @app.get("/databases", response_class=HTMLResponse)
 def databases_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
-    return templates.TemplateResponse(request, "databases.html", {"page": "databases"})
+    settings = get_settings()
+    return templates.TemplateResponse(
+        request,
+        "databases.html",
+        {
+            "page": "databases",
+            "default_sparql_user": settings.sparql_user,
+            "default_sparql_password": settings.sparql_password,
+            "default_opensearch_user": settings.opensearch_username,
+            "default_opensearch_password": settings.opensearch_password,
+            "default_neo4j_user": settings.neo4j_user or "neo4j",
+            "default_neo4j_password": settings.neo4j_password,
+        },
+    )
 
 
 @app.get("/pipeline", response_class=HTMLResponse)

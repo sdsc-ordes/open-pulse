@@ -223,12 +223,15 @@ def cypher_query(
     query = (payload.get("query") or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
-    user = payload.get("auth_user") or "neo4j"
-    pw = payload.get("auth_password") or ""
+    # Body wins; fall back to NEO4J_AUTH from settings (parsed at startup).
+    user = (payload.get("auth_user") or "").strip() or settings.neo4j_user or "neo4j"
+    pw = payload.get("auth_password")
+    if not pw:
+        pw = settings.neo4j_password
     if not pw:
         raise HTTPException(
             status_code=400,
-            detail="auth_password is required (Neo4j password from NEO4J_AUTH).",
+            detail="Neo4j password not set — provide it in the auth inputs or set NEO4J_AUTH in .env.",
         )
     try:
         from neo4j import GraphDatabase
