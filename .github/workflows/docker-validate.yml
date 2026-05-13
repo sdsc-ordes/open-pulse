@@ -46,6 +46,7 @@ jobs:
         # profile filtering), so even gated services need their vars set.
         # Inject placeholder values so `config` can resolve and lint the YAML.
         env:
+          APPLIER_AUTH: ci-placeholder
           CRAWLER_API_TOKEN: ci-placeholder
           CRAWLER_GITHUB_TOKEN: ci-placeholder
           EXTRACTOR_GITHUB_TOKEN: ci-placeholder

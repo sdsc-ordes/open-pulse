@@ -5,7 +5,8 @@ services:
     expose:
       - "3306"
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh", "--su=root", "--connect", "--innodb_initialized"]
       retries: 5
@@ -31,7 +32,8 @@ services:
     image: opensearchproject/opensearch:3
     restart: unless-stopped
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       - cluster.name=opensearch-cluster
       - node.name=opensearch-node1
@@ -73,7 +75,8 @@ services:
     image: opensearchproject/opensearch-dashboards:3
     restart: unless-stopped
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     ports:
       - 5601:5601
     depends_on:
@@ -105,7 +108,8 @@ services:
       - python
       - /workspace/python-scripts/render_setup_cfg.py
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       - SETUP_CFG_TEMPLATE_PATH=/workspace/templates/setup.cfg.template
       - PROJECTS_JSON_PATH=/workspace/input/projects.json
@@ -128,7 +132,8 @@ services:
       - ./grimoirelab/scripts:/workspace/scripts:ro
       - ./grimoirelab/config/sigils:/workspace/config/sigils:ro
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       - SCRIPTS_DIR=/workspace/scripts
       - SIGILS_DIR=/workspace/config/sigils
@@ -156,7 +161,8 @@ services:
       retries: 3
       start_period: 60s
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       - TMPDIR=/home/grimoire/tmp
     volumes:
@@ -177,7 +183,8 @@ services:
     restart: on-failure:3
     image: grimoirelab/sortinghat
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     expose:
       - "9314"
     volumes:
@@ -194,7 +201,8 @@ services:
     restart: unless-stopped
     image: grimoirelab/sortinghat-worker
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     depends_on:
       mariadb:
         condition: service_healthy
@@ -207,7 +215,8 @@ services:
     restart: on-failure:3
     image: nginx:latest
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     volumes:
       - ./grimoirelab/config/nginx.conf.template:/etc/nginx/templates/default.conf.template
       - ./grimoirelab/config/uwsgi_params:/etc/nginx/uwsgi_params
@@ -234,7 +243,8 @@ services:
     # GHCR tag is pulled.
     image: "${OPEN_PULSE_APPLIER_IMAGE:-ghcr.io/sdsc-ordes/open-pulse-applier:latest}"
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       - APPLIER_AUTH=${APPLIER_AUTH:?APPLIER_AUTH must be set in .env}
       - MORDRED_CONTAINER_NAME=${MORDRED_CONTAINER_NAME:-open-pulse-mordred}
