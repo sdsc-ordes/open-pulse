@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "open-pulse"
+name = "open-pulse-science"
 version = "0.1.0"
 description = "Open Pulse unified CLI and analysis toolkit."
 readme = "README.md"
