@@ -36,7 +36,7 @@ Add `-f infra/open-pulse-stack/docker-compose.grimoirelab.yml` (or pass
 GrimoireLab stack (mariadb, valkey, opensearch, mordred, sortinghat,
 nginx, and the projects-applier sidecar).
 
-Then open <http://localhost:7507> (the default on EPFL hosts; older
+Then open [http://localhost:7507](http://localhost:7507) (the default on EPFL hosts; older
 installs and `infra/.env.example` still ship 9090 — set `HUB_PORT` in
 `infra/.env` to override). Log in with `openpulse` / `$HUB_AUTH` (the
 username is free-form; only the password is checked).
