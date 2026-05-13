@@ -20,16 +20,16 @@ class Neo4jServiceProtocol(Protocol):
         """Release service resources."""
 
 
-class TentrisServiceProtocol(Protocol):
-    """Contract for Tentris service clients."""
+class SparqlStoreServiceProtocol(Protocol):
+    """Contract for SPARQL-store service clients."""
 
     endpoint: str
 
     def upload(self, context: dict[str, object]) -> None:
-        """Upload pipeline payload to Tentris."""
+        """Upload pipeline payload to the SPARQL store."""
 
     def check_sparql(self) -> tuple[bool, str]:
-        """Probe Tentris SPARQL endpoint reachability."""
+        """Probe SPARQL endpoint reachability."""
 
     def close(self) -> None:
         """Release service resources."""

@@ -13,16 +13,17 @@ from rich.console import Console
 from rich.table import Table
 
 from open_pulse.services.config import (
+    DEFAULT_CRAWLER_ENDPOINT,
     DEFAULT_GRIMOIRELAB_DB,
     DEFAULT_NEO4J_BOLT_ENDPOINT,
     DEFAULT_NEO4J_HTTP_ENDPOINT,
-    DEFAULT_TENTRIS_SPARQL_ENDPOINT,
+    DEFAULT_SPARQL_ENDPOINT,
 )
 from open_pulse.services.health import probe_endpoints
 
 console = Console()
 
-_COMPOSE_FILE = Path("infra/compose/docker-compose.yml")
+_COMPOSE_FILE = Path("infra/open-pulse-stack/docker-compose.yml")
 
 
 def _find_project_root() -> Path | None:
@@ -82,11 +83,12 @@ def _get_container_statuses(project_root: Path) -> list[dict[str, str]]:
 def _probe_endpoints(
     neo4j_http: str,
     neo4j_bolt: str,
-    tentris: str,
+    sparql: str,
     grimoirelab_db: str,
+    crawler: str,
 ) -> list[tuple[str, str, bool, str]]:
     """Probe all known service endpoints and return results."""
-    return probe_endpoints(neo4j_http, neo4j_bolt, tentris, grimoirelab_db)
+    return probe_endpoints(neo4j_http, neo4j_bolt, sparql, grimoirelab_db, crawler)
 
 
 def _smoke_tests(
@@ -189,20 +191,25 @@ def check(
         str,
         typer.Option("--neo4j-bolt", help="Neo4j Bolt endpoint to probe."),
     ] = DEFAULT_NEO4J_BOLT_ENDPOINT,
-    tentris: Annotated[
+    sparql: Annotated[
         str,
-        typer.Option(help="Tentris SPARQL endpoint to probe."),
-    ] = DEFAULT_TENTRIS_SPARQL_ENDPOINT,
+        typer.Option(help="SPARQL store base URL to probe."),
+    ] = DEFAULT_SPARQL_ENDPOINT,
     grimoirelab_db: Annotated[
         str,
         typer.Option("--grimoirelab-db", help="GrimoireLab PostgreSQL host:port."),
     ] = DEFAULT_GRIMOIRELAB_DB,
+    crawler: Annotated[
+        str,
+        typer.Option(help="Open Pulse Crawler API base URL to probe."),
+    ] = DEFAULT_CRAWLER_ENDPOINT,
 ) -> None:
     """Check the health of all deployed services.
 
     Verifies Docker daemon reachability, inspects running container states,
-    probes service endpoints (Neo4j, Tentris, GrimoireLab DB), and runs
-    lightweight smoke tests.  Exits with code 1 when any check fails.
+    probes service endpoints (Neo4j, SPARQL store, GrimoireLab DB, Crawler API),
+    and runs lightweight smoke tests.  Exits with code 1 when any check
+    fails.
     """
     all_ok = True
 
@@ -235,7 +242,9 @@ def check(
         )
 
     # -- Endpoint probes ------------------------------------------------------
-    endpoint_results = _probe_endpoints(neo4j, neo4j_bolt, tentris, grimoirelab_db)
+    endpoint_results = _probe_endpoints(
+        neo4j, neo4j_bolt, sparql, grimoirelab_db, crawler
+    )
 
     console.print()
     console.print(_render_endpoint_table(endpoint_results))

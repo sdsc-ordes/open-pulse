@@ -1,3 +1,18 @@
+# Single image for the whole open-pulse package: the CLI, the orchestrator
+# container (mounts the docker socket), and the hub dashboard all run from
+# the same image. The Compose service definition picks the role via
+# `command:` / `entrypoint:` overrides.
+#
+# Build (from repo root):
+#   docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
+#
+# Run modes:
+#   • CLI:   docker run --rm open-pulse:local --help
+#   • Hub:   docker run --rm -p 9090:8000 -e HUB_AUTH=... open-pulse:local gui hub serve --host 0.0.0.0
+#   • Idle:  docker run --rm --entrypoint sh open-pulse:local -c 'sleep infinity'
+#            (used by the cli orchestrator container so we can `docker exec`
+#            into it; in compose this is a one-line `entrypoint:` override.)
+
 FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -6,29 +21,51 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1
 
 ARG UV_VERSION=0.8.15
-ARG APP_USER=openpulse
-ARG APP_UID=10001
 
+# OS deps + Docker CLI + compose plugin (the orchestrator role drives the
+# rest of the stack via the bind-mounted /var/run/docker.sock).
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates curl \
+    && apt-get install --yes --no-install-recommends \
+         ca-certificates curl gnupg git \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg \
+       -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+       > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends \
+         docker-ce-cli docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd --create-home --home-dir /home/${APP_USER} --shell /bin/bash --uid ${APP_UID} ${APP_USER}
-
+# uv (installs to /root/.local then we move to /usr/local for everyone).
 RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/uv \
     && mv /root/.local/bin/uvx /usr/local/bin/uvx
 
 WORKDIR /app
 
+# Build the package + [hub] extras into /app/.venv. Wheel install (no editable)
+# so the hub's templates / static assets ship as part of the package data.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --no-editable
-
 COPY src/open_pulse ./src/open_pulse
-RUN uv sync --frozen --no-dev \
-    && chown -R ${APP_USER}:${APP_USER} /app
+# Note: `--frozen` would be ideal but the committed uv.lock predates the
+# `[hub]` extra. Drop --frozen for now; the lock is regenerated in-place at
+# build time (deterministic per pyproject), and we'll re-freeze once a host
+# `uv lock` run lands the new extras.
+RUN uv sync --no-dev --no-editable --extra hub \
+    && ln -sf /app/.venv/bin/open-pulse /usr/local/bin/open-pulse
 
-USER ${APP_USER}
+ENV PATH=/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    HUB_DATA_DIR=/data/hub
 
-ENTRYPOINT ["uv", "run", "open-pulse"]
-CMD ["health"]
+# Hub data dir lives here when no host volume is mounted.
+RUN mkdir -p /data/hub
+
+EXPOSE 8000
+
+# Default: run the CLI. The hub service in compose overrides `command:` to
+# `gui hub serve …`; the orchestrator service overrides `entrypoint:` to
+# stay idle and accept `docker exec` invocations.
+ENTRYPOINT ["open-pulse"]
+CMD ["--help"]

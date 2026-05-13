@@ -20,11 +20,12 @@ from open_pulse.orchestrator import run_sequential
 from open_pulse.services.container import ServiceContainer
 from open_pulse.tasks import FunctionTask
 
+from .apply_grimoire_projects import run_apply_grimoire_projects
 from .config import QuestFileConfig, RetryConfig, StepConfig
 from .crawler import run_crawler
 from .metadata_extractor import run_metadata_extractor
 from .neo4j_upload import run_neo4j_upload
-from .tentris_upload import run_tentris_upload
+from .sparql_upload import run_sparql_upload
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ STEP_REGISTRY: dict[str, StepFunc] = {
     "crawler": run_crawler,
     "neo4j_upload": run_neo4j_upload,
     "metadata_extractor": run_metadata_extractor,
-    "tentris_upload": run_tentris_upload,
+    "sparql_upload": run_sparql_upload,
+    "apply_grimoire_projects": run_apply_grimoire_projects,
 }
 
 STEP_NAMES: tuple[str, ...] = tuple(STEP_REGISTRY)
@@ -124,7 +126,8 @@ def build_tasks(config: QuestFileConfig) -> tuple[FunctionTask, ...]:
         "crawler": quest.steps.crawler,
         "neo4j_upload": quest.steps.neo4j_upload,
         "metadata_extractor": quest.steps.metadata_extractor,
-        "tentris_upload": quest.steps.tentris_upload,
+        "sparql_upload": quest.steps.sparql_upload,
+        "apply_grimoire_projects": quest.steps.apply_grimoire_projects,
     }
 
     tasks: list[FunctionTask] = []
@@ -232,7 +235,8 @@ def run_single_step(
         "crawler": quest.steps.crawler,
         "neo4j_upload": quest.steps.neo4j_upload,
         "metadata_extractor": quest.steps.metadata_extractor,
-        "tentris_upload": quest.steps.tentris_upload,
+        "sparql_upload": quest.steps.sparql_upload,
+        "apply_grimoire_projects": quest.steps.apply_grimoire_projects,
     }
     services = ServiceContainer.from_quest_config(quest)
     func = STEP_REGISTRY[step_name]

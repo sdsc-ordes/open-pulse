@@ -5,41 +5,74 @@ slug: /services
 
 # Services
 
-The `open_pulse.services` package centralizes service integration logic used by CLI commands and pipeline steps.
+The `open_pulse.services` package centralizes service-integration logic
+used by CLI commands and pipeline steps. Clients are technology-agnostic
+where possible: the SPARQL store client targets any SPARQL 1.1 + Graph
+Store HTTP Protocol endpoint (Oxigraph, Tentris, Virtuoso, …).
 
 ## Modules
 
 - `open_pulse.services.config`
-  - canonical endpoint defaults
-  - typed `ServicesConfig`
+  - canonical endpoint defaults (auto-adapt to host vs. in-stack)
+  - typed `ServicesConfig` and per-service config models
 - `open_pulse.services.base`
-  - service protocols/contracts
+  - service protocols / contracts
 - `open_pulse.services.neo4j`
-  - Neo4j service wrapper (`upload`, `check_bolt`, `close`)
-- `open_pulse.services.tentris`
-  - Tentris service wrapper (`upload`, `check_sparql`, `close`)
+  - Neo4j wrapper (`upload`, `check_bolt`, `close`)
+- `open_pulse.services.sparql_store`
+  - Technology-agnostic SPARQL store wrapper (`upload`, `check_sparql`,
+    `close`): JSON-LD → N-Triples → Graph Store HTTP Protocol upload, with
+    optional HTTP Basic Auth for writes (read from `auth_env`). Works
+    with Oxigraph, Tentris, or any SPARQL 1.1 store that speaks the
+    Graph Store Protocol.
+- `open_pulse.services.crawler`
+  - Open Pulse Crawler client (`submit_crawl`, `get_status`,
+    `wait_for_completion`, `get_graph`); bearer from `api_token_env`
+- `open_pulse.services.metadata_extractor`
+  - git-metadata-extractor client (gimie v1 + rule-based v2 paths);
+    bearer from `api_token_env` when set, omitted otherwise so auth-free
+    deploys keep working
 - `open_pulse.services.health`
-  - shared endpoint probe helpers used by `open-pulse health`
+  - shared endpoint-probe helpers used by `open-pulse health`
 - `open_pulse.services.container`
-  - run-scoped `ServiceContainer`
+  - run-scoped `ServiceContainer` constructed from a quest's services block
+
+The legacy `open_pulse.services.tentris` module was renamed to
+`sparql_store`; quest YAML uses `quest.services.sparql_store.endpoint`.
 
 ## Configuration contract
 
-Quest config must include:
+A quest declares the services it talks to and the env-var names that hold
+their credentials. Service endpoints live ONLY under `quest.services.*`;
+step-level `endpoint` fields are not supported.
 
 ```yaml
 quest:
   services:
+    crawler:
+      endpoint: "http://crawler:8000"
+      api_token_env: CRAWLER_API_TOKEN
     neo4j:
-      endpoint: "bolt://localhost:7687"
-    tentris:
-      endpoint: "http://localhost:7502/sparql"
+      endpoint: "bolt://neo4j:7687"
+      auth_env: NEO4J_AUTH
+    metadata_extractor:
+      endpoint: "http://git-metadata-extractor:1234"
+      api_token_env: EXTRACTOR_API_TOKEN
+    sparql_store:
+      endpoint: "http://sparql-proxy:7878"
+      auth_env: SPARQL_AUTH
 ```
-
-Step-level endpoint fields are removed.
 
 ## Lifecycle contract
 
-- Create one `ServiceContainer` per quest run (or single-step run).
+- Create one `ServiceContainer` per quest run (or single-step run) via
+  `ServiceContainer.from_quest_config(quest)` or
+  `ServiceContainer.from_services_config(services)`.
 - Inject into step context as `context["services"]`.
-- Always call `close_all()` after execution.
+- Always call `close_all()` after execution (or use the container as a
+  context manager — its `__exit__` calls `close_all()`).
+
+Pipeline steps access shared clients through
+`context["services"].{neo4j,sparql_store,crawler,metadata_extractor}`
+rather than constructing their own — see
+[Analysis](../analysis/index.md) for the step integration contract.

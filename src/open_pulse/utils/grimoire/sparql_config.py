@@ -1,6 +1,6 @@
 """SPARQL-based GrimoireLab configuration generator.
 
-Queries Neo4j and/or Tentris to discover repositories and produces a
+Queries Neo4j and/or a SPARQL store to discover repositories and produces a
 GrimoireLab ``projects.json`` configuration file that can drive
 Perceval data-collection runs.
 """
@@ -28,7 +28,7 @@ LIMIT 100
 def generate_config(
     *,
     neo4j_endpoint: str = "bolt://localhost:7687",
-    tentris_endpoint: str = "http://localhost:7502/sparql",
+    sparql_endpoint: str = "http://localhost:7878",
     output: Path = Path("projects.json"),
 ) -> Path:
     """Query knowledge-graph endpoints and write a GrimoireLab config file.
@@ -41,7 +41,7 @@ def generate_config(
     """
     _console.print(
         f"[bold]SPARQL config generator[/bold] "
-        f"(neo4j={neo4j_endpoint}, tentris={tentris_endpoint})"
+        f"(neo4j={neo4j_endpoint}, sparql={sparql_endpoint})"
     )
     _console.print(f"[dim]Query:[/dim]\n{PLACEHOLDER_SPARQL.strip()}")
 
@@ -56,8 +56,8 @@ def generate_config(
 def _run_placeholder_query() -> list[dict[str, str]]:
     """Simulate SPARQL query results.
 
-    In production this will issue HTTP requests to the Tentris SPARQL
-    endpoint and/or Bolt queries to Neo4j.  For now we return an empty
+    In production this will issue HTTP requests to the SPARQL endpoint
+    and/or Bolt queries to Neo4j.  For now we return an empty
     list so the rest of the pipeline can be exercised end-to-end.
     """
     _console.print(

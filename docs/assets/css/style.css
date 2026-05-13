@@ -367,6 +367,49 @@ a:focus-visible {
   color: #ef4444;
 }
 
+.hero-cta-row {
+  margin-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.62rem 1.05rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  font-size: clamp(0.82rem, 1vw, 0.94rem);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.cta-btn:hover,
+.cta-btn:focus-visible {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  transform: translateY(-1px);
+}
+
+.cta-btn .cta-arrow {
+  transition: transform 140ms ease;
+}
+
+.cta-btn:hover .cta-arrow {
+  transform: translateX(2px);
+}
+
+.cta-hint {
+  color: var(--text-muted, var(--text));
+  opacity: 0.7;
+  font-size: clamp(0.72rem, 0.9vw, 0.82rem);
+}
+
 .repo-link {
   margin: 0.1rem 0 0;
   font-size: clamp(0.78rem, 1.05vw, 0.9rem);
