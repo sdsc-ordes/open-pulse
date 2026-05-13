@@ -1,0 +1,90 @@
+# Environment and secrets
+.env
+.env.*
+!.env.dist
+!.env.example
+tentris.env
+**/*.pem
+**/*.key
+**/*secret*
+.internal
+.claude
+.cursor
+
+# Airflow local/runtime files
+infra/services/airflow/src/env_variables.json
+**/airflow/config/
+**/airflow/plugins/
+**/airflow/logs/
+
+# Docker/database runtime data — ignore any `data/` dir at any level so an
+# accidental relative-path resolution (e.g. `infra/open-pulse-stack/data/`)
+# can't pollute the working tree. Per-service subdirs under the configured
+# OPEN_PULSE_DATA_DIR are also covered by this single rule.
+data/
+# Whitelist the docs landing's data dir (hosts the generated nodes.json
+# and any other static JSON the landing fetches).
+!docs/data/
+!docs/data/**
+infra/services/graphdb/graphdb-data/
+
+# Tentris local data and licenses
+infra/services/tentris-server/data/
+infra/services/tentris-server/instance_data.ttl
+infra/services/tentris-server/tentris-license.toml
+
+# Python and notebooks
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+.venv-matrix/
+venv/
+
+# Python build artefacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Test, lint, and type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Quest pipeline runtime artefacts
+.quest-artifacts/
+.quest-checkpoints/
+logs/
+*.log
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# JavaScript/docs tooling artifacts
+node_modules/
+docs-site/build/
+docs-site/.docusaurus/
+docs-site/.cache/
+docs-site/.pnpm-store/
+# Docusaurus build is staged here by docs-pages-deploy.yml at deploy time;
+# do not track the generated content.
+docs/docs/
+
+# Backup files (timestamped .bak from sed -i / cp -a operations)
+*.bak
+*.bak.*

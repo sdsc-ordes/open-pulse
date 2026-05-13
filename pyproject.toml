@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "open-pulse-science"
+version = "1.0.0"
+description = "Open Pulse unified CLI and analysis toolkit."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Open Pulse Team" },
+]
+dependencies = [
+  "typer>=0.15",
+  "questionary>=2.1",
+  "pydantic>=2.10",
+  "pyyaml>=6.0",
+  "python-dotenv>=1.1",
+  "rich>=13.9",
+  "httpx>=0.27",
+  "neo4j>=5.20",
+  "rdflib>=7.0",
+]
+
+[project.optional-dependencies]
+grimoire-ui = [
+  "streamlit>=1.41",
+]
+hub = [
+  # FastAPI surface for `open-pulse gui hub serve`. Heavy enough that we
+  # don't want it pulled into a CLI-only install.
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.20",
+  "docker>=7.1",
+  "duckdb>=1.1",
+]
+
+[project.scripts]
+open-pulse = "open_pulse.cli:main"
+
+[dependency-groups]
+dev = [
+  "pre-commit>=4.5.1",
+  "ruff>=0.9.0",
+]
+test = [
+  "pytest>=8.3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/open_pulse"]

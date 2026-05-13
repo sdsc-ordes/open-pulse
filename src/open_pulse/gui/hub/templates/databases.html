@@ -1,0 +1,1252 @@
+{% extends "base.html" %}
+{% block heading %}Query{% endblock %}
+{% block subheading %}SPARQL · Cypher · OpenSearch consoles. Click an example chip to load it; your tabs persist locally in your browser.{% endblock %}
+
+{% block content %}
+<div x-data="dbConsole()" x-init="init()" class="space-y-4">
+
+  <!-- Engine picker -->
+  <div class="tab-bar">
+    <template x-for="t in engines" :key="t">
+      <button :class="engine === t ? 'active' : ''" @click="setEngine(t)" x-text="t"></button>
+    </template>
+    <span class="card-meta ml-auto" style="padding: 10px 14px;" x-text="hint()"></span>
+  </div>
+
+  <!-- Welcome-mat: clickable example chips (always visible) -->
+  <div class="examples-rail">
+    <span class="examples-label">Try one</span>
+    <template x-for="ex in (examples[engine] || [])" :key="ex.id">
+      <button class="example-chip"
+              :class="activeExampleId === ex.id ? 'is-active' : ''"
+              :title="ex.summary || ex.name"
+              @click="loadExample(ex)">
+        <span class="example-chip-name" x-text="ex.name"></span>
+        <span class="example-chip-mode" x-show="ex.mode" x-text="ex.mode"></span>
+      </button>
+    </template>
+    <template x-if="!(examples[engine] || []).length">
+      <span class="card-meta" style="font-style: italic;">no curated examples yet for <span x-text="engine"></span>.</span>
+    </template>
+  </div>
+  <p class="examples-summary" x-show="activeExampleSummary" x-text="activeExampleSummary"></p>
+
+  <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;">
+
+    <!-- ── Editor (left, 2fr) ─────────────────────────────────────── -->
+    <div class="card" style="padding: 0; overflow: hidden;">
+      <!-- Browser-style tab strip (browser-local; persisted in op:hub:db-tabs:v1) -->
+      <div class="tabs-strip">
+        <template x-for="t in tabsForEngine()" :key="t.id">
+          <div class="qtab" :class="t.id === activeTabId ? 'is-active' : ''"
+               @click="switchTab(t.id)" :title="t.name">
+            <span class="qtab-engine" x-text="t.engine"></span>
+            <span class="qtab-name" x-text="t.name"></span>
+            <span class="qtab-dirty" x-show="t.id === activeTabId && tabIsDirty"></span>
+            <button class="qtab-close" @click.stop="closeTab(t.id)" title="Close tab">×</button>
+          </div>
+        </template>
+        <button class="qtab-new" @click="newTab()" title="New tab">+</button>
+        <span class="ml-auto card-meta" style="padding: 0 12px;">
+          <span x-text="tabsForEngine().length"></span>
+          <span x-show="tabsForEngine().length === 1"> tab</span>
+          <span x-show="tabsForEngine().length !== 1"> tabs</span>
+          · local
+        </span>
+      </div>
+
+      <div class="editor-shell" style="padding: 12px;">
+        <div class="flex items-baseline gap-2 mb-2">
+          <input class="qtab-rename"
+                 x-model="activeTabName"
+                 @input="renameActiveTab($event.target.value)"
+                 placeholder="tab name" />
+          <!-- OpenSearch mode toggle (sql vs raw search DSL) -->
+          <div x-show="engine === 'opensearch'" class="ml-auto" style="display: flex; gap: 4px;">
+            <button class="btn" :class="osMode === 'sql' ? 'btn-primary' : 'btn-ghost'" @click="osMode='sql'">SQL</button>
+            <button class="btn" :class="osMode === 'dsl' ? 'btn-primary' : 'btn-ghost'" @click="osMode='dsl'">DSL</button>
+          </div>
+        </div>
+
+        <!-- Code editor with line-number gutter -->
+        <div class="code-editor">
+          <pre class="gutter" x-ref="gutter" x-text="lineNumbers"></pre>
+          <textarea class="mono"
+                    x-ref="textarea"
+                    rows="14"
+                    spellcheck="false"
+                    x-model="query"
+                    @input="onEditorInput()"
+                    @scroll="syncGutter()"
+                    @keydown.window.meta.enter.prevent="run()"
+                    @keydown.window.ctrl.enter.prevent="run()"
+                    placeholder="-- click an example chip above, or type a query here. ⌘/Ctrl+Enter to run."></textarea>
+        </div>
+
+        <div class="flex gap-2 mt-3" style="align-items: center;">
+          <button class="btn btn-primary" @click="run()" :disabled="busy">Run <span class="kbd ml-1">⌘↵</span></button>
+          <button class="btn" @click="showSnippets = !showSnippets" :title="showSnippets ? 'Hide examples' : 'Show curl / python / js examples'" style="padding-left: 10px; padding-right: 10px;">&lt;/&gt;</button>
+          <input style="margin-left: 12px;" placeholder="save to library as…" x-model="saveName" />
+          <button class="btn" @click="save()" :disabled="!saveName">Save to library</button>
+          <span class="card-meta ml-auto" x-text="resultMeta()"></span>
+        </div>
+
+        <div x-show="showSnippets" x-cloak class="card mt-3" style="padding: 10px 14px; background: var(--panel-bg, #0f1218);">
+          <div class="flex gap-2" style="align-items: center; margin-bottom: 8px;">
+            <span class="card-meta">Run this query from outside the Hub:</span>
+            <template x-for="lang in ['curl','python','js']" :key="lang">
+              <button class="btn" :class="snippetLang === lang ? 'btn-primary' : ''"
+                      @click="snippetLang = lang" x-text="lang" style="padding: 2px 10px;"></button>
+            </template>
+            <button class="btn ml-auto" @click="copySnippet()" :title="snippetCopied ? 'Copied!' : 'Copy snippet'"
+                    x-text="snippetCopied ? '✓ copied' : 'Copy'" style="padding: 2px 10px;"></button>
+          </div>
+          <pre class="console" style="margin: 0; padding: 10px 12px; white-space: pre-wrap; max-height: 240px; overflow: auto;" x-text="renderSnippet()"></pre>
+          <p class="card-meta" style="margin-top: 6px;">Replace placeholder credentials with the values from <code>infra/env/.env</code>. Reads are public by default; writes require admin auth.</p>
+        </div>
+
+        <div x-show="error" class="card tone-bad mt-3" style="padding: 8px 12px;" x-text="error"></div>
+      </div>
+    </div>
+
+    <!-- ── Saved-queries library (right, 1fr) ─────────────────────── -->
+    <div class="card">
+      <div class="card-title">Library</div>
+      <p class="card-meta">
+        Server-side library (stored in the hub's SQLite). Use the
+        <em>Save to library</em> button on the editor to add the current query;
+        click an entry below to load it as a fresh tab.
+      </p>
+      <div style="margin-top: 8px;">
+        <template x-for="s in savedFiltered()" :key="s.id">
+          <button @click="loadFromLibrary(s)"
+                  style="width: 100%; text-align: left; padding: 8px 10px; border-radius: 6px; background: transparent; border: 0; color: var(--fg); cursor: pointer;"
+                  onmouseover="this.style.background='var(--surface-sunk)'"
+                  onmouseout="this.style.background='transparent'">
+            <div class="font-semibold" x-text="s.name"></div>
+            <div class="card-meta">· <span x-text="s.engine"></span></div>
+          </button>
+        </template>
+        <template x-if="savedFiltered().length === 0">
+          <p class="card-meta" style="font-style: italic;">none for <span x-text="engine"></span> yet</p>
+        </template>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <div class="flex items-baseline gap-3 result-header">
+      <div class="card-title">Result</div>
+      <span class="card-meta" x-show="sortColumn"
+            x-text="'sorted by ' + sortColumn + ' ' + (sortDir === 'asc' ? '↑' : '↓')"></span>
+
+      <div class="result-tools" x-show="rows.length">
+        <button class="btn btn-ghost" x-show="sortColumn" @click="clearSort()"
+                title="Clear column sort">↕ reset sort</button>
+        <span class="card-meta" x-show="sortColumn" style="margin: 0 6px;">·</span>
+        <span class="card-meta" style="margin-right: 4px;">download</span>
+        <button class="btn"        @click="download('csv')"      title="CSV (RFC 4180)">CSV</button>
+        <button class="btn"        @click="download('md')"       title="Markdown table">MD</button>
+        <button class="btn"        @click="download('json-rec')" title="JSON: array of {col: value} records">JSON rec</button>
+        <button class="btn"        @click="download('json-col')" title="JSON: {col: [values]} columnar">JSON col</button>
+      </div>
+    </div>
+
+    <!-- Tree-aware result table. The whole thead+tbody is built as a
+         single x-html blob: Alpine x-for can't easily express variable
+         depth with rowspan/colspan + nested <table> in tbody. All values
+         are escaped before injection (see _escape). The per-column type
+         dropdown lives inside the level-0 thead cells; selecting one
+         dispatches a delegated change handler that rewrites cellTypes. -->
+    <div x-show="rows.length" class="tree-table"
+         style="overflow: auto; max-height: 60vh; margin-top: 12px;"
+         x-html="renderTreeTable()"
+         @change="onCellTypeChange($event)"
+         @click="onHeaderClick($event)"></div>
+
+    <p x-show="!rows.length && !busy" class="card-meta" style="font-style: italic; margin-top: 12px;">No rows yet — pick an example above or run a query.</p>
+    <pre x-show="rawDump" class="console mt-3" x-text="rawDump"></pre>
+  </div>
+
+</div>
+
+<style>
+  /* ── tree-view: tabla en tabla ─────────────────────────────────── */
+  .tree-table table.data.tree {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  .tree-table table.data.tree th {
+    background: var(--surface-sunk);
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    font-weight: 600;
+    text-align: left;
+    font-size: 11px;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .tree-table table.data.tree > tbody > tr > td {
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .tree-table table.nested {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 11px;
+    background: var(--surface-soft);
+  }
+  .tree-table table.nested th,
+  .tree-table table.nested td {
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+  }
+  .tree-table table.nested th {
+    background: var(--surface);
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .tree-table .nested-cell { padding: 2px !important; }
+  .tree-table .nested-list { display: flex; flex-direction: column; gap: 1px; }
+  .tree-table .nested-list > div {
+    padding: 2px 6px;
+    background: var(--surface-soft);
+    border-radius: 3px;
+    font-size: 11px;
+    word-break: break-all;
+  }
+  /* Header cell with column name + type-selector dropdown. */
+  .tree-table .th-with-type {
+    display: flex; align-items: center; gap: 6px;
+    justify-content: space-between;
+  }
+  .tree-table .th-with-type .th-label {
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+  }
+  .tree-table .th-with-type .th-label:hover { color: var(--accent, currentColor); }
+  .tree-table .th-type {
+    font-size: 10px;
+    padding: 1px 4px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface);
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .tree-table .th-type:hover { color: var(--fg); }
+  /* Per-leaf renderers for url / image / pretty. */
+  .tree-table .cell-url {
+    color: var(--accent, #4a9eff);
+    text-decoration: underline;
+    word-break: break-all;
+  }
+  .tree-table .cell-img-cell { text-align: center; }
+  .tree-table .cell-img {
+    max-width: 120px; max-height: 80px;
+    object-fit: contain;
+    border-radius: 3px;
+    background: var(--surface-soft);
+  }
+  .tree-table .cell-pretty {
+    margin: 0;
+    padding: 4px 8px;
+    background: var(--surface-soft);
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px; overflow: auto;
+  }
+
+  /* ── examples chips ─────────────────────────────────────────────── */
+  .examples-rail {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 10px 12px;
+    background: var(--surface-soft);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .examples-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--fg-muted); margin-right: 4px;
+  }
+  .example-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg);
+    border-radius: 999px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  .example-chip:hover { background: var(--surface-sunk); border-color: var(--border-strong); }
+  .example-chip.is-active {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    color: var(--fg);
+  }
+  .example-chip-mode { font-size: 9px; text-transform: uppercase; color: var(--fg-faint); letter-spacing: .08em; }
+  .examples-summary { font-size: 12px; color: var(--fg-muted); margin: 8px 4px 0; font-style: italic; }
+
+  /* ── browser-style tab strip ───────────────────────────────────── */
+  .tabs-strip {
+    display: flex; align-items: stretch;
+    background: var(--surface-soft);
+    border-bottom: 1px solid var(--border);
+    padding: 0 4px;
+    overflow-x: auto;
+  }
+  .qtab {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 12px;
+    border-right: 1px solid var(--border);
+    background: var(--surface-sunk);
+    color: var(--fg-muted);
+    font-size: 12px;
+    cursor: pointer;
+    max-width: 200px;
+    border-top: 2px solid transparent;
+  }
+  .qtab:hover { background: var(--surface); color: var(--fg); }
+  .qtab.is-active {
+    background: var(--surface);
+    color: var(--fg);
+    border-top-color: var(--accent);
+    cursor: default;
+  }
+  .qtab-engine {
+    font-size: 9px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .06em;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .qtab-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+  .qtab-dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+  .qtab-close {
+    border: 0; background: transparent; color: var(--fg-faint);
+    cursor: pointer; padding: 0 2px; font-size: 14px; line-height: 1;
+    border-radius: 3px;
+  }
+  .qtab-close:hover { background: var(--bad-soft); color: var(--bad); }
+  .qtab-new {
+    border: 0; background: transparent;
+    color: var(--fg-muted); font-size: 16px; line-height: 1;
+    padding: 8px 14px; cursor: pointer;
+  }
+  .qtab-new:hover { background: var(--surface); color: var(--fg); }
+  .qtab-rename {
+    flex: 0 1 320px;
+    background: transparent;
+    border: 0; border-bottom: 1px dashed var(--border);
+    border-radius: 0;
+    padding: 4px 0;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  .qtab-rename:focus { border-bottom-color: var(--accent); box-shadow: none; }
+
+  /* ── result toolbar + sortable headers ─────────────────────────── */
+  .result-tools {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin-left: auto;
+    flex-wrap: wrap;
+  }
+  .result-tools .btn { padding: 4px 8px; font-size: 11px; }
+  table.data.sortable th {
+    cursor: pointer;
+    user-select: none;
+    padding-right: 22px;        /* room for the indicator */
+    position: relative;
+    transition: background .15s;
+  }
+  table.data.sortable th:hover { background: var(--surface-sunk); color: var(--fg); }
+  table.data.sortable th.is-sorted {
+    background: var(--accent-soft);
+    color: var(--fg);
+  }
+  table.data.sortable th .sort-indicator {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: var(--fg-faint);
+    opacity: .6;
+  }
+  table.data.sortable th.is-sorted .sort-indicator {
+    color: var(--accent);
+    opacity: 1;
+  }
+
+  /* ── code editor with gutter ───────────────────────────────────── */
+  .code-editor {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-soft);
+    overflow: hidden;
+  }
+  .code-editor .gutter {
+    margin: 0;
+    padding: 10px 8px 10px 10px;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg-faint);
+    font: 13px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
+    text-align: right;
+    user-select: none;
+    overflow: hidden;
+    min-width: 40px;
+    max-height: inherit;
+    white-space: pre;
+  }
+  .code-editor textarea {
+    flex: 1;
+    margin: 0;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    resize: vertical;
+    padding: 10px 12px;
+    font: 13px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
+    box-shadow: none !important;
+    outline: 0;
+  }
+  .code-editor textarea:focus {
+    background: var(--surface) !important;
+  }
+</style>
+
+<script>
+const TAB_STORAGE_KEY = 'op:hub:db-tabs:v1';
+
+const STARTERS = {
+  sparql: '# pick an example above, or type SPARQL here. ⌘/Ctrl+Enter to run.\nPREFIX schema: <http://schema.org/>\nSELECT ?repo WHERE { ?repo a schema:SoftwareSourceCode } LIMIT 25',
+  cypher: '// pick an example above, or type Cypher here. ⌘/Ctrl+Enter to run.\nMATCH (n) RETURN labels(n) AS labels, count(*) AS n ORDER BY n DESC LIMIT 25',
+  opensearch: '-- pick an example above (SQL or DSL), or type your own.\nSHOW TABLES LIKE \'%\';',
+};
+const HINTS = {
+  sparql: 'Reads HUB_SPARQL_URL by default · supply user/password for Basic auth.',
+  cypher: 'Password = the part after the slash in NEO4J_AUTH.',
+  opensearch: 'SQL plugin (default) hits /_plugins/_sql; DSL hits /<index>/_search — JSON body must include `index`.',
+};
+
+function loadTabs() {
+  try { return JSON.parse(localStorage.getItem(TAB_STORAGE_KEY) || '[]') || []; }
+  catch (_) { return []; }
+}
+function saveTabs(tabs) { localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(tabs)); }
+function newTabId() { return 't-' + Math.random().toString(36).slice(2, 10); }
+
+// Auth defaults injected by the /databases route (server-side env).
+// Used as the fallback when localStorage (window.opSecrets) is empty.
+window.opDefaults = {
+  sparql_user:        {{ default_sparql_user|default('')|tojson }},
+  sparql_password:    {{ default_sparql_password|default('')|tojson }},
+  opensearch_user:    {{ default_opensearch_user|default('admin')|tojson }},
+  opensearch_password:{{ default_opensearch_password|default('')|tojson }},
+  neo4j_user:         {{ default_neo4j_user|default('neo4j')|tojson }},
+  neo4j_password:     {{ default_neo4j_password|default('')|tojson }},
+};
+// ── Snippet generators (called from dbConsole().renderSnippet) ───────
+function _jsStr(s) { return JSON.stringify(s ?? ''); }
+function _shQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
+function _looksLikeSparqlUpdate(q) {
+  const stripped = q.replace(/^\s*PREFIX[^\n]*\n?/gmi, '').trim().toUpperCase();
+  return /^(INSERT|DELETE|LOAD|CLEAR|CREATE|DROP|COPY|MOVE|ADD)\b/.test(stripped);
+}
+function _sparqlSnippet(lang, q, host) {
+  const isUpdate = _looksLikeSparqlUpdate(q);
+  const base = 'http://' + host + ':7502';
+  const path = isUpdate ? '/update' : '/query';
+  const endpoint = base + path;
+  if (lang === 'curl') {
+    if (isUpdate) {
+      return [
+        '# SPARQL update — admin Basic Auth required',
+        'curl -X POST -u ' + _shQuote('admin_user:password') + ' \\',
+        "  -H 'Content-Type: application/sparql-update' \\",
+        '  --data ' + _shQuote(q) + ' \\',
+        '  ' + _shQuote(endpoint),
+      ].join('\n');
+    }
+    return [
+      '# SPARQL query (public read by default)',
+      'curl -G ' + _shQuote(endpoint) + ' \\',
+      "  -H 'Accept: application/sparql-results+json' \\",
+      '  --data-urlencode ' + _shQuote('query=' + q),
+    ].join('\n');
+  }
+  if (lang === 'python') {
+    if (isUpdate) {
+      return [
+        'import httpx',
+        '',
+        'r = httpx.post(',
+        '    ' + _jsStr(endpoint) + ',',
+        '    content=' + _jsStr(q) + ',',
+        '    headers={"Content-Type": "application/sparql-update"},',
+        '    auth=("admin_user", "password"),  # SPARQL_AUTH',
+        ')',
+        'r.raise_for_status()',
+      ].join('\n');
+    }
+    return [
+      'import httpx',
+      '',
+      'r = httpx.get(',
+      '    ' + _jsStr(endpoint) + ',',
+      '    params={"query": ' + _jsStr(q) + '},',
+      '    headers={"Accept": "application/sparql-results+json"},',
+      ')',
+      'r.raise_for_status()',
+      'print(r.json())',
+    ].join('\n');
+  }
+  if (lang === 'js') {
+    if (isUpdate) {
+      return [
+        '// SPARQL update — admin Basic Auth required',
+        "const r = await fetch(" + _jsStr(endpoint) + ", {",
+        "  method: 'POST',",
+        "  headers: {",
+        "    'Content-Type': 'application/sparql-update',",
+        "    Authorization: 'Basic ' + btoa('admin_user:password'),  // SPARQL_AUTH",
+        "  },",
+        '  body: ' + _jsStr(q) + ',',
+        '});',
+      ].join('\n');
+    }
+    return [
+      '// SPARQL query (public read by default)',
+      "const url = " + _jsStr(endpoint) + " + '?' + new URLSearchParams({ query: " + _jsStr(q) + " });",
+      "const r = await fetch(url, { headers: { Accept: 'application/sparql-results+json' } });",
+      'console.log(await r.json());',
+    ].join('\n');
+  }
+  return '';
+}
+function _cypherSnippet(lang, q, host) {
+  const bolt = 'bolt://' + host + ':7504';
+  const httpEndpoint = 'http://' + host + ':7503/db/neo4j/tx/commit';
+  if (lang === 'curl') {
+    return [
+      '# Cypher via the Neo4j HTTP API',
+      'curl -X POST -u ' + _shQuote('neo4j:password') + ' \\',
+      "  -H 'Content-Type: application/json' \\",
+      "  -H 'Accept: application/json' \\",
+      '  --data ' + _shQuote(JSON.stringify({statements: [{statement: q}]})) + ' \\',
+      '  ' + _shQuote(httpEndpoint),
+    ].join('\n');
+  }
+  if (lang === 'python') {
+    return [
+      '# pip install neo4j',
+      'from neo4j import GraphDatabase',
+      '',
+      'with GraphDatabase.driver(' + _jsStr(bolt) + ', auth=("neo4j", "password")) as driver:',
+      '    with driver.session() as session:',
+      '        for record in session.run(' + _jsStr(q) + '):',
+      '            print(record)',
+    ].join('\n');
+  }
+  if (lang === 'js') {
+    return [
+      '// Cypher via the Neo4j HTTP API',
+      'const body = { statements: [{ statement: ' + _jsStr(q) + ' }] };',
+      "const r = await fetch(" + _jsStr(httpEndpoint) + ", {",
+      "  method: 'POST',",
+      "  headers: {",
+      "    'Content-Type': 'application/json',",
+      "    Authorization: 'Basic ' + btoa('neo4j:password'),",
+      "  },",
+      '  body: JSON.stringify(body),',
+      '});',
+      'console.log(await r.json());',
+    ].join('\n');
+  }
+  return '';
+}
+function _opensearchSnippet(lang, q, host, osMode) {
+  // OpenSearch is currently in-network only. Show the internal URL plus a
+  // note. For external access route through the GrimoireLab nginx instead.
+  const endpoint = 'https://opensearch-node1:9200/_search';
+  const note = '# Internal-only — run from a host on the docker network, or proxy via GrimoireLab nginx.\n';
+  const payload = (osMode === 'sql') ? '/_plugins/_sql' : '/_search';
+  const url = 'https://opensearch-node1:9200' + payload;
+  if (lang === 'curl') {
+    return [
+      note.trimEnd(),
+      'curl -k -X POST -u ' + _shQuote('admin:password') + ' \\',
+      "  -H 'Content-Type: application/json' \\",
+      '  --data ' + _shQuote(q) + ' \\',
+      '  ' + _shQuote(url),
+    ].join('\n');
+  }
+  if (lang === 'python') {
+    return [
+      note.trimEnd(),
+      'import httpx',
+      '',
+      'r = httpx.post(',
+      '    ' + _jsStr(url) + ',',
+      '    content=' + _jsStr(q) + ',',
+      '    headers={"Content-Type": "application/json"},',
+      '    auth=("admin", "password"),',
+      '    verify=False,  # self-signed cert in dev',
+      ')',
+      'r.raise_for_status()',
+      'print(r.json())',
+    ].join('\n');
+  }
+  if (lang === 'js') {
+    return [
+      note.trimEnd(),
+      "const r = await fetch(" + _jsStr(url) + ", {",
+      "  method: 'POST',",
+      "  headers: {",
+      "    'Content-Type': 'application/json',",
+      "    Authorization: 'Basic ' + btoa('admin:password'),",
+      "  },",
+      '  body: ' + _jsStr(q) + ',',
+      '});',
+      'console.log(await r.json());',
+    ].join('\n');
+  }
+  return '';
+}
+function dbConsole() {
+  return {
+    engines: ['sparql', 'cypher', 'opensearch'],
+    engine: 'sparql',
+    // Snippets panel state (curl / python / js examples).
+    showSnippets: false, snippetLang: 'curl', snippetCopied: false,
+    osMode: 'sql',
+    busy: false, error: '',
+    columns: [], rows: [], truncated: false, rawDump: '',
+    sortColumn: null,
+    sortDir: 'asc',          // 'asc' | 'desc'
+    // Per-column render override (set via the in-header dropdown). Keys
+    // are column names; values are one of:
+    //   auto    — primitive → text, object → tree, array → sub-table,
+    //             mixed shapes → JSON string (the safe heuristic)
+    //   json    — force tree expansion even for mixed columns
+    //   pretty  — multi-line indented JSON inside a <pre>
+    //   text    — single-line JSON.stringify / String(value)
+    //   url     — render as <a href> for string values
+    //   image   — render as <img src> for string values
+    // Reset on every fresh query (different queries → different schema).
+    cellTypes: {},
+    treeMaxDepth: 5,
+    examples: {},
+    activeExampleId: null,
+    activeExampleSummary: '',
+
+    // ── tabs ─────────────────────────────────────────────────────
+    tabs: [],
+    activeTabId: null,
+    activeTabName: '',
+    tabIsDirty: false,
+    query: '',
+    lineNumbers: '1',
+
+    // ── library (server-side SQLite) ─────────────────────────────
+    saved: [],
+    saveName: '',
+
+    async init() {
+      this.tabs = loadTabs();
+      if (!this.tabs.length) {
+        // Seed three default tabs, one per engine, with the engine starter.
+        for (const eng of this.engines) {
+          this.tabs.push({
+            id: newTabId(),
+            name: eng + ' scratch',
+            engine: eng,
+            content: STARTERS[eng],
+          });
+        }
+        saveTabs(this.tabs);
+      }
+      const first = this.tabs.find(t => t.engine === this.engine) || this.tabs[0];
+      this.engine = first.engine;
+      this.switchTab(first.id);
+
+      this.$watch('query', () => { this.recomputeGutter(); });
+      this.$watch('engine', () => {
+        this.error = ''; this.rows = []; this.columns = []; this.rawDump = '';
+      });
+
+      await Promise.all([this.loadExamples(), this.loadSaved()]);
+      this.recomputeGutter();
+    },
+
+    // ── library (server-side SQLite) ─────────────────────────────
+    async loadSaved() {
+      const r = await fetch('/api/databases/saved');
+      const j = await r.json();
+      this.saved = j.saved || [];
+    },
+    savedFiltered() { return this.saved.filter(s => s.engine === this.engine); },
+    async save() {
+      if (!this.saveName) return;
+      const r = await fetch('/api/databases/saved', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: this.saveName, engine: this.engine, query: this.query }),
+      });
+      if (r.ok) { this.saveName = ''; await this.loadSaved(); }
+    },
+    loadFromLibrary(item) {
+      // Spawn a fresh local tab seeded from the library entry — keeps the
+      // user's existing in-progress edits untouched.
+      const t = {
+        id: newTabId(),
+        name: item.name,
+        engine: item.engine,
+        content: item.query,
+      };
+      this.tabs.push(t);
+      saveTabs(this.tabs);
+      this.engine = item.engine;
+      this.switchTab(t.id);
+    },
+
+    // ── tabs: storage + lifecycle ────────────────────────────────
+    tabsForEngine() { return this.tabs.filter(t => t.engine === this.engine); },
+
+    persistActive() {
+      const t = this.tabs.find(x => x.id === this.activeTabId);
+      if (!t) return;
+      t.content = this.query;
+      t.name = this.activeTabName;
+      saveTabs(this.tabs);
+      this.tabIsDirty = false;
+    },
+
+    onEditorInput() {
+      this.tabIsDirty = true;
+      // Debounced auto-persist; saves on every keystroke after a short pause.
+      if (this._saveTimer) clearTimeout(this._saveTimer);
+      this._saveTimer = setTimeout(() => this.persistActive(), 350);
+    },
+
+    switchTab(id) {
+      // Persist the outgoing tab synchronously before switching.
+      this.persistActive();
+      const t = this.tabs.find(x => x.id === id);
+      if (!t) return;
+      this.activeTabId = id;
+      this.activeTabName = t.name;
+      this.engine = t.engine;
+      this.query = t.content;
+      this.activeExampleId = null;
+      this.activeExampleSummary = '';
+      this.error = ''; this.rows = []; this.columns = []; this.rawDump = '';
+      this.recomputeGutter();
+    },
+
+    newTab() {
+      const t = {
+        id: newTabId(),
+        name: 'untitled',
+        engine: this.engine,
+        content: STARTERS[this.engine] || '',
+      };
+      this.tabs.push(t);
+      saveTabs(this.tabs);
+      this.switchTab(t.id);
+    },
+
+    closeTab(id) {
+      const idx = this.tabs.findIndex(t => t.id === id);
+      if (idx === -1) return;
+      this.tabs.splice(idx, 1);
+      saveTabs(this.tabs);
+      if (this.activeTabId === id) {
+        const next = this.tabsForEngine()[0]
+                  || this.tabs.find(t => t.engine === this.engine)
+                  || this.tabs[0];
+        if (next) this.switchTab(next.id);
+        else this.newTab();
+      }
+    },
+
+    renameActiveTab(name) {
+      const t = this.tabs.find(x => x.id === this.activeTabId);
+      if (!t) return;
+      t.name = name || 'untitled';
+      saveTabs(this.tabs);
+    },
+
+    setEngine(name) {
+      // Clicking an engine in the top tab-bar: switch to the first existing
+      // tab on that engine, or create a fresh scratch tab.
+      this.engine = name;
+      const found = this.tabs.find(t => t.engine === name);
+      if (found) this.switchTab(found.id);
+      else this.newTab();
+    },
+
+    // ── line-number gutter ───────────────────────────────────────
+    recomputeGutter() {
+      const lines = (this.query || '').split('\n').length || 1;
+      this.lineNumbers = Array.from({length: lines}, (_, i) => String(i + 1)).join('\n');
+      // Sync immediately too — content edits can shift scroll.
+      this.$nextTick(() => this.syncGutter());
+    },
+    syncGutter() {
+      const ta = this.$refs.textarea;
+      const g  = this.$refs.gutter;
+      if (ta && g) g.scrollTop = ta.scrollTop;
+    },
+
+    // ── auth ─────────────────────────────────────────────────────
+    applyEngineAuth() {
+      if (this.engine === 'sparql') {
+        this.user = window.opSecrets.get('sparql_user');
+        this.password = window.opSecrets.get('sparql_password');
+      } else if (this.engine === 'opensearch') {
+        this.user = window.opSecrets.get('opensearch_user') || 'admin';
+        this.password = window.opSecrets.get('opensearch_password');
+      } else {
+        this.user = ''; this.password = '';
+      }
+    },
+    needsAuthInputs() { return this.engine !== 'sparql' || !!this.password; /* always show */ },
+    userPlaceholder() {
+      if (this.engine === 'cypher') return "user (default 'neo4j')";
+      if (this.engine === 'opensearch') return "user (default 'admin')";
+      return 'user (optional)';
+    },
+    hint() { return HINTS[this.engine] || ''; },
+
+    // ── examples ─────────────────────────────────────────────────
+    async loadExamples() {
+      const r = await fetch('/api/databases/examples');
+      const j = await r.json();
+      this.examples = j.engines || {};
+    },
+    loadExample(ex) {
+      this.query = ex.body;
+      this.activeExampleId = ex.id;
+      this.activeExampleSummary = ex.summary || '';
+      if (this.engine === 'opensearch' && ex.mode) this.osMode = ex.mode;
+      this.onEditorInput();
+    },
+
+    // ── run ──────────────────────────────────────────────────────
+    async run() {
+      this.busy = true; this.error = ''; this.rows = []; this.columns = []; this.rawDump = '';
+      try {
+        const body = { query: this.query };
+        let path;
+        if (this.engine === 'sparql') {
+          path = '/api/databases/sparql/query';
+        } else if (this.engine === 'cypher') {
+          path = '/api/databases/cypher/query';
+        } else if (this.engine === 'opensearch') {
+          path = '/api/databases/opensearch/query';
+          body.mode = this.osMode;
+        }
+        const r = await fetch(path, {
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(()=>({detail:'unknown error'}));
+          this.error = j.detail || ('HTTP ' + r.status);
+          return;
+        }
+        const j = await r.json();
+        this.columns = j.columns || []; this.rows = j.rows || []; this.truncated = !!j.truncated;
+        this.rawDump = j.raw ? JSON.stringify(j.raw, null, 2) : '';
+        // Reset sort on a fresh result set so the user sees raw order first.
+        this.sortColumn = null;
+        this.sortDir = 'asc';
+        // New schema → drop any per-column type overrides from the previous query.
+        this.cellTypes = {};
+      } catch (e) { this.error = e.message; }
+      finally   { this.busy = false; }
+    },
+
+    // ── sorting ──────────────────────────────────────────────────
+    toggleSort(col) {
+      if (this.sortColumn === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortColumn = col;
+        this.sortDir = 'asc';
+      }
+    },
+    clearSort() { this.sortColumn = null; this.sortDir = 'asc'; },
+
+    sortedRows() {
+      if (!this.sortColumn) return this.rows;
+      const idx = this.columns.indexOf(this.sortColumn);
+      if (idx === -1) return this.rows;
+      const dir = this.sortDir === 'desc' ? -1 : 1;
+      // Copy first — Array.sort mutates and would re-trigger Alpine watchers.
+      return [...this.rows].sort((a, b) => {
+        const av = a[idx], bv = b[idx];
+        // Stable handling of nulls / undefined: always last.
+        const aN = av === null || av === undefined;
+        const bN = bv === null || bv === undefined;
+        if (aN && bN) return 0;
+        if (aN) return 1;
+        if (bN) return -1;
+        // Numeric path when both sides parse as finite numbers.
+        const an = Number(av), bn = Number(bv);
+        if (Number.isFinite(an) && Number.isFinite(bn) && av !== '' && bv !== '') {
+          return (an - bn) * dir;
+        }
+        // Fall back to locale-aware string compare.
+        return String(av).localeCompare(String(bv), undefined, { numeric: true }) * dir;
+      });
+    },
+
+    // ── downloads ────────────────────────────────────────────────
+    _csvCell(v) {
+      if (v === null || v === undefined) return '';
+      const s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+      return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    },
+    _mdCell(v) {
+      if (v === null || v === undefined) return '';
+      const s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+      return s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+    },
+    toCsv() {
+      const head = this.columns.map(c => this._csvCell(c)).join(',');
+      const body = this.sortedRows()
+        .map(row => row.map(c => this._csvCell(c)).join(','))
+        .join('\n');
+      return head + '\n' + body;
+    },
+    toMarkdown() {
+      const cols = this.columns;
+      const head = '| ' + cols.map(c => this._mdCell(c)).join(' | ') + ' |';
+      const sep  = '| ' + cols.map(() => '---').join(' | ') + ' |';
+      const body = this.sortedRows()
+        .map(row => '| ' + row.map(c => this._mdCell(c)).join(' | ') + ' |')
+        .join('\n');
+      return [head, sep, body].join('\n');
+    },
+    toJsonRecords() {
+      return JSON.stringify(this.sortedRows().map(row => {
+        const o = {};
+        this.columns.forEach((c, i) => { o[c] = row[i]; });
+        return o;
+      }), null, 2);
+    },
+    toJsonColumns() {
+      const o = {};
+      for (const c of this.columns) o[c] = [];
+      for (const row of this.sortedRows()) {
+        this.columns.forEach((c, i) => { o[c].push(row[i]); });
+      }
+      return JSON.stringify(o, null, 2);
+    },
+    download(fmt) {
+      const map = {
+        'csv':      { body: this.toCsv(),         ext: 'csv',  mime: 'text/csv' },
+        'md':       { body: this.toMarkdown(),    ext: 'md',   mime: 'text/markdown' },
+        'json-rec': { body: this.toJsonRecords(), ext: 'json', mime: 'application/json' },
+        'json-col': { body: this.toJsonColumns(), ext: 'json', mime: 'application/json' },
+      };
+      const m = map[fmt];
+      if (!m) return;
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const tabName = (this.activeTabName || this.engine).replace(/[^A-Za-z0-9_-]+/g, '-');
+      const blob = new Blob([m.body], { type: m.mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${tabName}-${stamp}.${m.ext}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    },
+
+    resultMeta() {
+      if (this.busy) return 'running…';
+      if (!this.rows.length) return '';
+      return this.rows.length + ' rows' + (this.truncated ? ' (truncated)' : '');
+    },
+    cellLabel(v) {
+      if (v === null || v === undefined) return '';
+      if (typeof v === 'object') return JSON.stringify(v);
+      return String(v);
+    },
+
+    // ── Tree-aware renderer ─────────────────────────────────────────
+    // Single x-html blob: walks every cell to discover nested structure,
+    // emits multi-row thead (object expansion) + nested <table>s for
+    // array cells. Per-column type dropdowns are embedded in the level-0
+    // <th>; a delegated @change handler rewrites cellTypes.
+    renderTreeTable() {
+      const rows = this.sortedRows();
+      const cols = this.columns;
+
+      // Top-level subtrees honor the per-column type override.
+      const subtrees = cols.map((c, j) =>
+        this._buildTopSubtree(rows.map(r => r[j]), this.getCellType(c))
+      );
+
+      // Number of header rows = 1 (column name + dropdown) + max object
+      // expansion depth. Leaves and arrays don't grow the header.
+      const objDepth = (t) => {
+        if (!t || t.kind !== 'object') return 0;
+        return 1 + Math.max(0, ...Object.values(t.children).map(objDepth));
+      };
+      const headerLevels = 1 + Math.max(0, ...subtrees.map(objDepth));
+      const headerGrid = Array.from({length: headerLevels}, () => []);
+      for (let j = 0; j < cols.length; j++) {
+        this._addHeaderCells(cols[j], subtrees[j], 0, headerLevels - 1, headerGrid, /*topLevel=*/ true);
+      }
+
+      let html = '<table class="data tree">';
+      html += '<thead>';
+      for (const row of headerGrid) {
+        html += '<tr>';
+        for (const cell of row) {
+          if (cell.topLevel) {
+            const sortMark = this.sortColumn === cell.label
+              ? (this.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+            const safeCol = this._escape(cell.label);
+            html += `<th colspan="${cell.colspan}" rowspan="${cell.rowspan}">`
+                  + `<div class="th-with-type">`
+                  +   `<span class="th-label" data-col-sort="${safeCol}" title="Sort by ${safeCol}">${safeCol}${sortMark}</span>`
+                  +   this._typeSelectHtml(cell.label, this.getCellType(cell.label))
+                  + `</div>`
+                  + `</th>`;
+          } else {
+            html += `<th colspan="${cell.colspan}" rowspan="${cell.rowspan}">${this._escape(cell.label)}</th>`;
+          }
+        }
+        html += '</tr>';
+      }
+      html += '</thead><tbody>';
+
+      for (const row of rows) {
+        html += '<tr>';
+        for (let j = 0; j < cols.length; j++) {
+          html += this._renderCells(row[j], subtrees[j]);
+        }
+        html += '</tr>';
+      }
+      html += '</tbody></table>';
+      return html;
+    },
+
+    getCellType(col) {
+      return this.cellTypes[col] || 'auto';
+    },
+
+    onCellTypeChange(e) {
+      const col = e.target && e.target.getAttribute && e.target.getAttribute('data-col-type');
+      if (!col) return;
+      // Replace object so Alpine sees a property change (not a deep mutation).
+      this.cellTypes = { ...this.cellTypes, [col]: e.target.value };
+    },
+
+    onHeaderClick(e) {
+      // Delegated click handler for the sort affordance. Only fires for
+      // elements explicitly tagged data-col-sort (the column-name span);
+      // the type-selector dropdown sits next to it but doesn't carry the
+      // attr, so clicking the dropdown won't trigger a sort.
+      const col = e.target && e.target.getAttribute && e.target.getAttribute('data-col-sort');
+      if (!col) return;
+      this.toggleSort(col);
+    },
+
+    _typeSelectHtml(col, current) {
+      const opts = ['auto', 'json', 'pretty', 'text', 'url', 'image'];
+      const safeCol = this._escape(col);
+      const options = opts.map(t =>
+        `<option value="${t}"${t === current ? ' selected' : ''}>${t}</option>`
+      ).join('');
+      return `<select class="th-type" data-col-type="${safeCol}" title="Render this column as…">${options}</select>`;
+    },
+
+    // Top-level subtree honors the user's override:
+    //   url/image/text/pretty → leaf with a render hint
+    //   json                  → object/array expansion, mixed shapes allowed
+    //   auto                  → object/array expansion, mixed → leaf (safe default)
+    _buildTopSubtree(values, type) {
+      if (type === 'text' || type === 'pretty' || type === 'url' || type === 'image') {
+        return { kind: 'leaf', renderAs: type };
+      }
+      return this._buildSubtree(values, 0, /*allowMixed=*/ type === 'json');
+    },
+
+    // Recursive shape detector. `allowMixed` lets json-typed columns
+    // expand even when some rows have primitives or arrays alongside
+    // objects — primitive rows just render empty for the sub-keys.
+    _buildSubtree(values, depth, allowMixed) {
+      if (depth >= this.treeMaxDepth) return { kind: 'leaf' };
+      let hasObj = false, hasArr = false, hasPrim = false;
+      const keys = new Set();
+      const arrItems = [];
+      for (const v of values) {
+        if (v === null || v === undefined) continue;
+        if (Array.isArray(v)) {
+          hasArr = true;
+          for (const it of v) arrItems.push(it);
+        } else if (typeof v === 'object') {
+          hasObj = true;
+          for (const k of Object.keys(v)) keys.add(k);
+        } else {
+          hasPrim = true;
+        }
+      }
+      if (!allowMixed) {
+        if (hasObj && hasPrim) return { kind: 'leaf' };
+        if (hasArr && (hasObj || hasPrim)) return { kind: 'leaf' };
+      }
+      // Forced-expand under json: pick whichever shape dominates;
+      // arrays beat objects since "tabla en tabla" reads better than
+      // "expanded keys with empty cells for the array rows".
+      if (hasArr) return { kind: 'array', child: this._buildSubtree(arrItems, depth + 1, allowMixed) };
+      if (hasObj) {
+        const children = {};
+        for (const k of keys) {
+          const sub = values.map(v =>
+            (v && typeof v === 'object' && !Array.isArray(v)) ? v[k] : undefined
+          );
+          children[k] = this._buildSubtree(sub, depth + 1, allowMixed);
+        }
+        return { kind: 'object', children };
+      }
+      return { kind: 'leaf' };
+    },
+
+    _leafCount(t) {
+      if (!t || t.kind !== 'object') return 1;
+      return Object.values(t.children).reduce((a, c) => a + this._leafCount(c), 0);
+    },
+
+    _addHeaderCells(label, subtree, level, maxLevel, grid, topLevel) {
+      if (subtree.kind !== 'object') {
+        grid[level].push({
+          label,
+          colspan: this._leafCount(subtree),
+          rowspan: maxLevel - level + 1,
+          topLevel: !!topLevel,
+        });
+        return;
+      }
+      grid[level].push({
+        label,
+        colspan: this._leafCount(subtree),
+        rowspan: 1,
+        topLevel: !!topLevel,
+      });
+      for (const k of Object.keys(subtree.children)) {
+        this._addHeaderCells(k, subtree.children[k], level + 1, maxLevel, grid, /*topLevel=*/ false);
+      }
+    },
+
+    _renderCells(value, subtree) {
+      if (subtree.kind === 'leaf') {
+        return this._renderLeaf(value, subtree.renderAs);
+      }
+      if (subtree.kind === 'object') {
+        let out = '';
+        for (const k of Object.keys(subtree.children)) {
+          const sub = (value && typeof value === 'object' && !Array.isArray(value)) ? value[k] : undefined;
+          out += this._renderCells(sub, subtree.children[k]);
+        }
+        return out;
+      }
+      if (subtree.kind === 'array') {
+        const items = Array.isArray(value) ? value : [];
+        if (!items.length) return '<td class="card-meta" style="font-style: italic;">∅</td>';
+        const child = subtree.child;
+        if (child.kind === 'object') {
+          const keys = Object.keys(child.children);
+          const objDepth = (t) => (!t || t.kind !== 'object') ? 0 : 1 + Math.max(0, ...Object.values(t.children).map(objDepth));
+          const innerLevels = 1 + Math.max(0, ...keys.map(k => objDepth(child.children[k])));
+          const innerGrid = Array.from({length: innerLevels}, () => []);
+          for (const k of keys) {
+            this._addHeaderCells(k, child.children[k], 0, innerLevels - 1, innerGrid, /*topLevel=*/ false);
+          }
+          let inner = '<table class="nested">';
+          inner += '<thead>';
+          for (const r of innerGrid) {
+            inner += '<tr>';
+            for (const c of r) {
+              inner += `<th colspan="${c.colspan}" rowspan="${c.rowspan}">${this._escape(c.label)}</th>`;
+            }
+            inner += '</tr>';
+          }
+          inner += '</thead><tbody>';
+          for (const item of items) {
+            inner += '<tr>';
+            for (const k of keys) {
+              const sub = (item && typeof item === 'object' && !Array.isArray(item)) ? item[k] : undefined;
+              inner += this._renderCells(sub, child.children[k]);
+            }
+            inner += '</tr>';
+          }
+          inner += '</tbody></table>';
+          return `<td class="nested-cell">${inner}</td>`;
+        }
+        // Array of primitives or array-of-arrays: stacked list.
+        let html = '<td class="nested-cell"><div class="nested-list">';
+        for (const item of items) {
+          if (Array.isArray(item) || (item && typeof item === 'object')) {
+            html += `<div>${this._escape(JSON.stringify(item))}</div>`;
+          } else {
+            html += `<div>${this._escape(item === null || item === undefined ? '' : String(item))}</div>`;
+          }
+        }
+        html += '</div></td>';
+        return html;
+      }
+      return '<td></td>';
+    },
+
+    // Leaf renderer. `renderAs` (set on the subtree by _buildTopSubtree)
+    // selects the variant; undefined falls back to the default which is
+    // "single-line text / JSON-stringified objects" — same as the auto
+    // heuristic produced before per-column types existed.
+    _renderLeaf(value, renderAs) {
+      if (value === null || value === undefined) {
+        return '<td class="mono" style="font-size: 12px;"></td>';
+      }
+      if (renderAs === 'url' && typeof value === 'string' && value) {
+        const safe = this._escape(value);
+        return `<td><a href="${safe}" target="_blank" rel="noopener" class="cell-url">${safe}</a></td>`;
+      }
+      if (renderAs === 'image' && typeof value === 'string' && value) {
+        const safe = this._escape(value);
+        return `<td class="cell-img-cell"><img src="${safe}" loading="lazy" alt="" class="cell-img"/></td>`;
+      }
+      if (renderAs === 'pretty') {
+        const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
+        return `<td><pre class="cell-pretty">${this._escape(text)}</pre></td>`;
+      }
+      // text / auto leaf / fallback
+      const label = typeof value === 'object' ? JSON.stringify(value) : String(value);
+      return `<td class="mono" style="font-size: 12px;">${this._escape(label)}</td>`;
+    },
+
+    _escape(s) {
+      if (s === null || s === undefined) return '';
+      return String(s).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    },
+  };
+}
+</script>
+{% endblock %}

@@ -1,0 +1,68 @@
+name: docs-build
+
+on:
+  pull_request:
+    branches:
+      - main
+      - docs
+    paths:
+      - "docs-site/**"
+      - ".github/workflows/docs-build.yml"
+  push:
+    branches:
+      - main
+      - docs
+    paths:
+      - "docs-site/**"
+      - ".github/workflows/docs-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Force JS actions onto Node 24 ahead of the June 2026 GHA default flip.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    name: Docusaurus build and link checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: docs-site
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a0ea98b2dc7d387a59324835f7421c1d5f8357b4  # v6.0.5
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: docs-site/pnpm-lock.yaml
+
+      - name: Install docs dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build docs
+        env:
+          CI: "true"
+        run: pnpm build
+
+      - name: Upload docs preview artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-preview-${{ github.event.pull_request.number }}
+          path: docs-site/build
+          if-no-files-found: error

@@ -1,0 +1,55 @@
+name: Compose Validate
+
+on:
+  pull_request:
+    paths:
+      - "infra/open-pulse-stack/**"
+      - ".github/workflows/docker-validate.yml"
+  push:
+    branches:
+      - main
+      - "release/**"
+    paths:
+      - "infra/open-pulse-stack/**"
+      - ".github/workflows/docker-validate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Force JS actions onto Node 24 ahead of the June 2026 GHA default flip.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  compose-config-validation:
+    name: Compose config validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        compose_files:
+          - "-f infra/open-pulse-stack/docker-compose.yml"
+          - "-f infra/open-pulse-stack/docker-compose.yml -f infra/open-pulse-stack/docker-compose.cli.yml"
+          - "-f infra/open-pulse-stack/docker-compose.yml -f infra/open-pulse-stack/docker-compose.grimoirelab.yml"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Validate Compose manifests
+        # The compose files use ${VAR:?error} interpolation for required
+        # secrets. Compose evaluates interpolation at parse time (before
+        # profile filtering), so even gated services need their vars set.
+        # Inject placeholder values so `config` can resolve and lint the YAML.
+        env:
+          APPLIER_AUTH: ci-placeholder
+          CRAWLER_API_TOKEN: ci-placeholder
+          CRAWLER_GITHUB_TOKEN: ci-placeholder
+          EXTRACTOR_GITHUB_TOKEN: ci-placeholder
+          HUB_AUTH: ci-placeholder
+          OPEN_PULSE_HOST_PATH: /tmp/open-pulse
+        run: docker compose ${{ matrix.compose_files }} config > /dev/null

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block heading %}Logs{% endblock %}
+{% block subheading %}Tail any open-pulse container's recent output.{% endblock %}
+
+{% block content %}
+<div x-data="logsView()" x-init="loadServices()" class="space-y-4">
+
+  <div class="card">
+    <div class="flex items-center gap-2">
+      <select x-model="name" @change="reload()" style="min-width: 220px;">
+        <template x-for="s in services" :key="s.name">
+          <option :value="s.name" x-text="s.name"></option>
+        </template>
+      </select>
+      <select x-model.number="tail" @change="reload()" style="width: 110px;">
+        <option>100</option><option>200</option><option>500</option><option>1000</option><option>2000</option>
+      </select>
+      <button class="btn" @click="reload()">↻</button>
+      <label class="card-meta" style="margin-left: 12px; display: flex; align-items: center; gap: 6px;">
+        <input type="checkbox" x-model="auto">
+        <span>auto-refresh 5s</span>
+      </label>
+      <span class="ml-auto card-meta" x-text="status"></span>
+    </div>
+  </div>
+
+  <pre class="console" style="height: 70vh; overflow: auto;" x-text="text"></pre>
+
+</div>
+
+<script>
+function logsView() {
+  return {
+    services: [],
+    name: '', tail: 500, text: '',
+    auto: false, timer: null, status: '',
+    async loadServices() {
+      const r = await fetch('/api/services/');
+      const j = await r.json();
+      this.services = j.services || [];
+      if (!this.name && this.services.length) {
+        this.name = this.services[0].name;
+        await this.reload();
+      }
+    },
+    async reload() {
+      if (!this.name) return;
+      this.status = 'fetching…';
+      try {
+        const r = await fetch(`/api/services/${this.name}/logs?tail=${this.tail}`);
+        const j = await r.json();
+        this.text = j.logs || '';
+        this.status = new Date().toLocaleTimeString();
+      } catch (e) { this.status = '⚠ ' + e.message; }
+      this.scheduleAuto();
+    },
+    scheduleAuto() {
+      if (this.timer) clearTimeout(this.timer);
+      if (this.auto) this.timer = setTimeout(() => this.reload(), 5000);
+    },
+  };
+}
+</script>
+{% endblock %}

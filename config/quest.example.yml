@@ -1,0 +1,76 @@
+# open-pulse quest — canonical example with every field shown and its default.
+#
+# Copy this to a working `quest.yml` and tweak. Anything left unset uses the
+# value shown in the comment next to it. Pass with `open-pulse quest start
+# --config <file>`.
+#
+# When running the CLI from *inside* a docker container (e.g. the
+# devcontainer), replace `localhost` with `host.docker.internal` so the
+# container can reach services on the host bridge.
+
+quest:
+  name: "my-quest-run"
+
+  # Retry policy applied per-step. Each step's body is wrapped by the runner.
+  retry:
+    max_attempts: 3       # default 3
+    backoff_seconds: 5    # default 5
+
+  logging:
+    level: "INFO"         # default INFO
+    file: "logs/quest.log"  # default null (stderr only)
+
+  # ── Service connection settings ─────────────────────────────────────────
+  services:
+    crawler:
+      endpoint: "http://localhost:8000"
+      api_token_env: "CRAWLER_API_TOKEN"   # env var name holding the bearer token
+    neo4j:
+      endpoint: "bolt://localhost:7687"
+      auth_env: "NEO4J_AUTH"                # 'username/password' format
+    metadata_extractor:
+      endpoint: "http://localhost:1234"     # git-metadata-extractor
+    sparql_store:
+      endpoint: "http://localhost:7878"     # any SPARQL 1.1 + Graph Store HTTP store
+      auth_env: "SPARQL_AUTH"               # Basic Auth: 'username/password'
+
+  # ── Pipeline steps ──────────────────────────────────────────────────────
+  # Steps run in order: crawler → neo4j_upload → metadata_extractor →
+  # sparql_upload. Set `enabled: false` to skip any.
+  steps:
+    crawler:
+      enabled: true
+      seeds: ["sdsc-ordes/open-pulse-crawler"]
+      max_rounds: 2                  # BFS depth (1–10)
+      crawl_dependencies: false
+      crawl_dependents: false
+      min_stars: 0                   # filter dependents/dependencies below this
+      max_dependents: null           # cap dependents per repo (null = no cap)
+      batch_size: null               # crawler default (matches max_concurrent)
+      output_dir: ".quest-artifacts/crawler-json"
+      output_filename: "crawler-graph.json"
+      poll_interval_seconds: 5.0
+      timeout_seconds: 3600.0
+
+    neo4j_upload:
+      enabled: true
+      input_dir: ".quest-artifacts/crawler-json"
+      input_filename: "crawler-graph.json"
+
+    metadata_extractor:
+      enabled: true
+      input_dir: ".quest-artifacts/crawler-json"
+      input_filename: "crawler-graph.json"
+      output_dir: ".quest-artifacts/metadata-json"
+      skip_existing: true            # don't re-fetch JSON-LD when file exists
+      force_refresh: false           # only honored by mode=v1_gimie
+      max_repos: null                # cap repos to process (null = all)
+      mode: "v2"                     # "v2" (default) or "v1_gimie"
+      v2_agent_runtime: "rule_based"  # "rule_based" (no LLM) or "llm" (needs RCP_TOKEN)
+      v2_poll_interval_seconds: 2.0
+      v2_timeout_seconds: 600.0
+
+    sparql_upload:
+      enabled: true
+      input_dir: ".quest-artifacts/metadata-json"
+      named_graph: null              # default graph; set a URI to write to a named graph

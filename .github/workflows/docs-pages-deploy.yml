@@ -1,0 +1,103 @@
+name: docs-pages-deploy
+
+# Publishes the consolidated docs/ directory to GitHub Pages:
+#   - docs/index.html              the project landing
+#   - docs/env-wizard/             the static infra/.env wizard
+#   - docs/env-builder.html        legacy env helper
+#   - docs/assets, docs/statics    landing assets
+#   - docs/docs/                   built Docusaurus site (this workflow
+#                                  populates it from docs-site/)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - "docs-site/**"
+      - "nodes/**"
+      - "scripts/build-nodes.mjs"
+      - ".github/workflows/docs-pages-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-pages-deploy
+  cancel-in-progress: true
+
+env:
+  # Force JS actions onto Node 24 ahead of the June 2026 GHA default flip.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    name: Build consolidated docs artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a0ea98b2dc7d387a59324835f7421c1d5f8357b4  # v6.0.5
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: docs-site/pnpm-lock.yaml
+
+      - name: Install docs dependencies
+        working-directory: docs-site
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate hosted-nodes manifest from nodes/*.yaml
+        # Zero-deps inline parser — see scripts/build-nodes.mjs.
+        # Re-runs on every deploy so the landing reflects the latest
+        # node definitions even if the PR author forgot to commit the
+        # regenerated docs/data/nodes.json.
+        run: node scripts/build-nodes.mjs
+
+      - name: Build Docusaurus
+        working-directory: docs-site
+        env:
+          CI: "true"
+          # Pages serves the repo at /open-pulse/, and the consolidated
+          # tree puts Docusaurus output under docs/docs/, so the public
+          # docs path is /open-pulse/docs/.
+          DOCS_BASE_URL: "/open-pulse/docs/"
+        run: pnpm build
+
+      - name: Stage Docusaurus build into docs/docs/
+        run: |
+          rm -rf docs/docs
+          mkdir -p docs/docs
+          cp -R docs-site/build/. docs/docs/
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Pages site
+        id: deployment
+        uses: actions/deploy-pages@v4
