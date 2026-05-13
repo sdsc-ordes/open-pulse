@@ -281,6 +281,13 @@ services:
         condition: service_started
     ports:
       - "${SPARQL_PROXY_PORT:-7878}:7878"
+    environment:
+      # Paths to protect with the reader/admin Basic Auth block in the
+      # Caddyfile. Default `__off__` is a sentinel that matches no real
+      # request, so reads pass through anonymously. Set to e.g.
+      # `/query /query/*` in your .env to require auth on reads (admin
+      # OR reader credentials accepted).
+      SPARQL_READ_AUTH_PATHS: "${SPARQL_READ_AUTH_PATHS:-__off__}"
     volumes:
       - ../services/sparql-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ../services/sparql-proxy/users:/etc/caddy/users:ro

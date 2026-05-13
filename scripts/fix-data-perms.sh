@@ -127,53 +127,94 @@ restart_if_running() {
 # Phase 1 — sparql-proxy missing users file
 ###############################################################################
 
+# Generate one Caddyfile basic_auth users file from a `user/password` env value.
+# Writes <users_dir>/<file>; chmod 0644. No-op on dry-run.
+_write_caddy_user_file() {
+  local sp_value="$1" users_dir="$2" filename="$3" role="$4"
+  if [[ -z "$sp_value" || "$sp_value" != */* ]]; then
+    printf '  %s %s: no value (or malformed) — skipping\n' "$(yellow '[skip]')" "$role"
+    return
+  fi
+  local user pass
+  user=${sp_value%%/*}
+  pass=${sp_value#*/}
+  if [[ -z "$user" || -z "$pass" ]]; then
+    printf '  %s %s: empty user or password — skipping\n' "$(yellow '[skip]')" "$role"
+    return
+  fi
+  mkdir -p "$users_dir"
+  local out="$users_dir/$filename"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '  %s would write %s (user %s)\n' "$(yellow '[dry-run]')" "$out" "$user"
+    return
+  fi
+  local hash
+  hash=$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$pass" 2>/dev/null)
+  if [[ -z "$hash" ]]; then
+    printf '  %s %s: caddy hash-password failed\n' "$(red '[fail]')" "$role"
+    return
+  fi
+  printf '%s %s\n' "$user" "$hash" > "$out"
+  chmod 0644 "$out"
+  printf '  %s wrote %s for user %s\n' "$(green '[ok]')" "$out" "$user"
+}
+
 fix_sparql_users() {
-  log "sparql-proxy: ensure Caddy basic_auth users file"
+  log "sparql-proxy: ensure Caddy basic_auth users files (admin + optional reader)"
   local sp_dir="$INFRA/services/sparql-proxy"
   local users_dir="$sp_dir/users"
+  local admin_dir="$users_dir/admin"
+  local reader_dir="$users_dir/reader"
   local caddy="$sp_dir/Caddyfile"
-  local users_file="$users_dir/sparql_users.caddy"
   local env_file="$INFRA/env/.env"
 
-  mkdir -p "$users_dir"
-  if compgen -G "$users_dir/*" >/dev/null; then
-    printf '  %s users file already present in %s\n' "$(green '[ok]')" "$users_dir"
-  else
-    if [[ ! -f "$env_file" ]]; then
-      printf '  %s no %s; skipping users file generation\n' "$(yellow '[skip]')" "$env_file"
-      return
-    fi
-    local sparql_auth user pass
-    sparql_auth=$(grep -E '^SPARQL_AUTH=' "$env_file" | head -1 | sed 's/^SPARQL_AUTH=//')
-    user=${sparql_auth%%/*}
-    pass=${sparql_auth#*/}
-    if [[ -z "$user" || -z "$pass" || "$user" == "$pass" ]]; then
-      printf '  %s SPARQL_AUTH missing or malformed in %s\n' "$(red '[fail]')" "$env_file"
-      return
-    fi
+  mkdir -p "$admin_dir" "$reader_dir"
+
+  # Migrate legacy single-file layout if present.
+  local legacy="$users_dir/sparql_users.caddy"
+  if [[ -f "$legacy" && ! -f "$admin_dir/sparql_users.caddy" ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf '  %s would generate %s for user %s\n' "$(yellow '[dry-run]')" "$users_file" "$user"
-      return
+      printf '  %s would migrate %s -> %s\n' "$(yellow '[dry-run]')" "$legacy" "$admin_dir/sparql_users.caddy"
+    else
+      mv "$legacy" "$admin_dir/sparql_users.caddy"
+      printf '  %s migrated legacy users file to %s\n' "$(green '[ok]')" "$admin_dir/sparql_users.caddy"
     fi
-    local hash
-    hash=$(docker run --rm caddy:2-alpine caddy hash-password --plaintext "$pass" 2>/dev/null)
-    if [[ -z "$hash" ]]; then
-      printf '  %s caddy hash-password failed\n' "$(red '[fail]')"
-      return
-    fi
-    printf '%s %s\n' "$user" "$hash" > "$users_file"
-    chmod 0644 "$users_file"
-    printf '  %s wrote %s\n' "$(green '[ok]')" "$users_file"
   fi
 
-  # Fix Caddyfile if it still imports the directory directly.
+  if [[ ! -f "$env_file" ]]; then
+    printf '  %s no %s; skipping users file generation\n' "$(yellow '[skip]')" "$env_file"
+  else
+    # Admin (writes, plus reads if SPARQL_READ_AUTH_PATHS is set).
+    local sparql_auth
+    sparql_auth=$(grep -E '^SPARQL_AUTH=' "$env_file" | head -1 | sed 's/^SPARQL_AUTH=//')
+    if compgen -G "$admin_dir/*" >/dev/null && [[ "$DRY_RUN" -ne 1 ]]; then
+      printf '  %s admin users file already present in %s\n' "$(green '[ok]')" "$admin_dir"
+    else
+      _write_caddy_user_file "$sparql_auth" "$admin_dir" "sparql_users.caddy" "admin"
+    fi
+
+    # Reader (optional). Generated only if SPARQL_READER_AUTH is set.
+    local reader_auth
+    reader_auth=$(grep -E '^SPARQL_READER_AUTH=' "$env_file" | head -1 | sed 's/^SPARQL_READER_AUTH=//')
+    if [[ -n "$reader_auth" ]]; then
+      if compgen -G "$reader_dir/*" >/dev/null && [[ "$DRY_RUN" -ne 1 ]]; then
+        printf '  %s reader users file already present in %s\n' "$(green '[ok]')" "$reader_dir"
+      else
+        _write_caddy_user_file "$reader_auth" "$reader_dir" "sparql_reader.caddy" "reader"
+      fi
+    else
+      printf '  %s SPARQL_READER_AUTH not set — read gate stays off\n' "$(gray '[note]')"
+    fi
+  fi
+
+  # Legacy Caddyfile glob fix (idempotent — no-op once already patched).
   if grep -qE '^[[:space:]]*import /etc/caddy/users[[:space:]]*$' "$caddy"; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf '  %s would change "import /etc/caddy/users" -> "import /etc/caddy/users/*"\n' "$(yellow '[dry-run]')"
+      printf '  %s would change "import /etc/caddy/users" -> "import /etc/caddy/users/admin/*"\n' "$(yellow '[dry-run]')"
     else
       cp -a "$caddy" "${caddy}.bak.$(date +%Y%m%d-%H%M%S)"
-      sed -i -E 's|^([[:space:]]*)import /etc/caddy/users[[:space:]]*$|\1import /etc/caddy/users/*|' "$caddy"
-      printf '  %s patched Caddyfile import to glob\n' "$(green '[ok]')"
+      sed -i -E 's|^([[:space:]]*)import /etc/caddy/users[[:space:]]*$|\1import /etc/caddy/users/admin/*|' "$caddy"
+      printf '  %s patched Caddyfile legacy import\n' "$(green '[ok]')"
     fi
   fi
 
