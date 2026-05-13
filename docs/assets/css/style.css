@@ -303,6 +303,94 @@ a:focus-visible {
   overflow: hidden;
 }
 
+.install-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.5rem 0.55rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.install-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: clamp(0.72rem, 0.95vw, 0.84rem);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0.34rem 0.7rem 0.46rem;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: -1px;
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+
+.install-tab:hover,
+.install-tab:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.install-tab.is-active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  border-bottom-color: transparent;
+}
+
+.install-tab__dot {
+  font-size: 0.95em;
+  line-height: 1;
+}
+
+.docs-cta {
+  position: fixed;
+  top: calc(var(--marquee-h) + 12px);
+  right: 14px;
+  z-index: 8;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  font-size: clamp(0.74rem, 0.85vw, 0.84rem);
+  font-weight: 600;
+  text-decoration: none;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  transition: background-color 140ms ease, transform 140ms ease, border-color 140ms ease;
+}
+
+.docs-cta:hover,
+.docs-cta:focus-visible {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.docs-cta__version {
+  opacity: 0.75;
+  font-weight: 500;
+}
+
+.docs-cta__arrow {
+  transition: transform 140ms ease;
+}
+
+.docs-cta:hover .docs-cta__arrow {
+  transform: translateX(2px);
+}
+
 .clone-block code {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: clamp(0.77rem, 1.18vw, 1rem);

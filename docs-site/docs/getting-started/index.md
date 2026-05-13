@@ -57,10 +57,11 @@ Default credentials: `openpulse` / `replace-me`. OpenSearch (in the
 
 ### `.env` wizard
 
-Don't want to hand-edit the file? The static wizard at
-[`/env-wizard/`](pathname:///env-wizard/) walks through the questions, generates
-strong tokens locally with the Web Crypto API (nothing leaves the
-browser), and outputs a complete `infra/.env` you can paste or download.
+Don't want to hand-edit the file? The static `.env` wizard linked from
+the [project landing](https://sdsc-ordes.github.io/open-pulse/) walks
+through the questions, generates strong tokens locally with the Web
+Crypto API (nothing leaves the browser), and outputs a complete
+`infra/.env` you can paste or download.
 
 ## Hack on the package
 

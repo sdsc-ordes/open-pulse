@@ -102,6 +102,12 @@
       </div>
     </header>
 
+    <a class="docs-cta" href="./docs/" aria-label="Open documentation, version 1.0.0">
+      <span class="docs-cta__label">Docs</span>
+      <span class="docs-cta__version">v1.0.0</span>
+      <span class="docs-cta__arrow" aria-hidden="true">→</span>
+    </a>
+
     <main class="viewport" id="main-content">
       <canvas id="constellation-canvas" aria-hidden="true"></canvas>
 
@@ -119,8 +125,22 @@
 
             <div class="clone-block">
               <span class="code-sticker">Public soon</span>
-              <pre><code id="clone-command">git clone https://github.com/sdsc-ordes/open-pulse.git</code></pre>
-              <button id="clone-copy-btn" type="button" class="copy-btn" aria-label="Copy clone command">Copy</button>
+              <div class="install-tabs" role="tablist" aria-label="Install method">
+                <button class="install-tab is-active" data-target="epfl" type="button" role="tab" aria-selected="true">
+                  <span class="install-tab__dot">🟢</span>EPFL
+                </button>
+                <button class="install-tab" data-target="docker" type="button" role="tab" aria-selected="false">
+                  <span class="install-tab__dot">🐳</span>Docker
+                </button>
+                <button class="install-tab" data-target="pip" type="button" role="tab" aria-selected="false">
+                  <span class="install-tab__dot">🐍</span>pip
+                </button>
+                <button class="install-tab" data-target="source" type="button" role="tab" aria-selected="false">
+                  <span class="install-tab__dot">🛠</span>Source
+                </button>
+              </div>
+              <pre><code id="clone-command" data-current="epfl">https://openpulse.epfl.ch</code></pre>
+              <button id="clone-copy-btn" type="button" class="copy-btn" aria-label="Copy install command">Copy</button>
             </div>
 
             <div class="hero-cta-row">

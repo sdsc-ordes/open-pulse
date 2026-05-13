@@ -76,6 +76,10 @@ node_modules/
 docs-site/build/
 docs-site/.docusaurus/
 docs-site/.cache/
+docs-site/.pnpm-store/
+# Docusaurus build is staged here by docs-pages-deploy.yml at deploy time;
+# do not track the generated content.
+docs/docs/
 
 # Backup files (timestamped .bak from sed -i / cp -a operations)
 *.bak

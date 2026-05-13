@@ -1,5 +1,10 @@
 (function () {
-  const CLONE_COMMAND = "git clone https://github.com/sdsc-ordes/open-pulse.git";
+  const COMMANDS = {
+    epfl: "https://openpulse.epfl.ch",
+    docker: "docker pull ghcr.io/sdsc-ordes/open-pulse:v1.0.0",
+    pip: "pip install open-pulse-science",
+    source: "git clone https://github.com/sdsc-ordes/open-pulse.git",
+  };
 
   async function copyText(text) {
     if (navigator.clipboard && window.isSecureContext) {
@@ -39,16 +44,35 @@
     }, 1250);
   }
 
+  function selectTab(target) {
+    const codeEl = document.getElementById("clone-command");
+    if (!codeEl) return;
+    const cmd = COMMANDS[target];
+    if (typeof cmd !== "string") return;
+    codeEl.textContent = cmd;
+    codeEl.dataset.current = target;
+    document.querySelectorAll(".install-tab").forEach(function (tab) {
+      const active = tab.dataset.target === target;
+      tab.classList.toggle("is-active", active);
+      tab.setAttribute("aria-selected", active ? "true" : "false");
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".install-tab").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        selectTab(tab.dataset.target);
+      });
+    });
+
     const copyButton = document.getElementById("clone-copy-btn");
-    if (!copyButton) {
-      return;
-    }
+    const codeEl = document.getElementById("clone-command");
+    if (!copyButton || !codeEl) return;
 
     copyButton.addEventListener("click", async function () {
       let copied = false;
       try {
-        copied = await copyText(CLONE_COMMAND);
+        copied = await copyText(codeEl.textContent);
       } catch (_error) {
         copied = false;
       }
