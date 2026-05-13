@@ -9,32 +9,6 @@
     try { return new URL(url).host; } catch (_) { return url; }
   }
 
-  function renderCard(node) {
-    const flag = node.flag || "🌐";
-    const status = String(node.status || "live").toLowerCase();
-    const isLive = status === "live";
-    const tag = status.replace(/-/g, " ");
-    return [
-      '<a class="node-card node-card--' + escapeHtml(status) + '" ',
-      'href="' + escapeHtml(node.url) + '" ',
-      'target="_blank" rel="noopener noreferrer" ',
-      'aria-label="Open ' + escapeHtml(node.name) + ' — ' + escapeHtml(node.url) + '">',
-        '<span class="node-card__flag" aria-hidden="true">' + escapeHtml(flag) + '</span>',
-        '<span class="node-card__body">',
-          '<span class="node-card__heading">',
-            '<span class="node-card__name">' + escapeHtml(node.name) + '</span>',
-            '<span class="node-card__status">' + escapeHtml(tag) + '</span>',
-          '</span>',
-          '<span class="node-card__institution">' + escapeHtml(node.institution || "") + '</span>',
-          node.location ? '<span class="node-card__location">' + escapeHtml(node.location) + '</span>' : '',
-          node.description ? '<span class="node-card__desc">' + escapeHtml(node.description) + '</span>' : '',
-          '<span class="node-card__url"><code>' + escapeHtml(hostFromUrl(node.url)) + '</code></span>',
-        '</span>',
-        '<span class="node-card__arrow" aria-hidden="true">' + (isLive ? "→" : "·") + '</span>',
-      '</a>'
-    ].join("");
-  }
-
   async function loadNodes() {
     try {
       const resp = await fetch("./data/nodes.json", { cache: "no-cache" });
@@ -42,22 +16,99 @@
       return await resp.json();
     } catch (e) {
       console.error("Could not load nodes.json", e);
-      return null;
+      return [];
     }
   }
 
-  function render(nodes) {
-    const grid = document.getElementById("hosted-nodes-grid");
-    if (!grid) return;
-    grid.removeAttribute("data-loading");
-    if (!nodes || !nodes.length) {
-      grid.innerHTML = '<p class="nodes-grid__placeholder">No hosted instances listed yet.</p>';
-      return;
+  function renderLeafTab(node, idx) {
+    const slug = String(node._source || node.name || ("node-" + idx))
+      .replace(/\.ya?ml$/i, "")
+      .toLowerCase();
+    const flag = node.flag || "🌐";
+    return [
+      '<li>',
+        '<button class="leaf-tab' + (idx === 0 ? ' is-active' : '') + '" ',
+          'data-node-slug="' + escapeHtml(slug) + '" ',
+          'data-node-index="' + idx + '" ',
+          'type="button" role="tab" ',
+          'aria-selected="' + (idx === 0 ? "true" : "false") + '">',
+          '<span class="leaf-tab__icon" aria-hidden="true">' + escapeHtml(flag) + '</span>',
+          '<span class="leaf-tab__label">' + escapeHtml(node.name || slug) + '</span>',
+        '</button>',
+      '</li>'
+    ].join("");
+  }
+
+  function renderAddLeaf() {
+    return [
+      '<li>',
+        '<a class="leaf-tab leaf-tab--add" href="./docs/operations/register-a-node/" ',
+           'aria-label="Add your own node">',
+          '<span class="leaf-tab__icon" aria-hidden="true">+</span>',
+          '<span class="leaf-tab__label">Add yours</span>',
+          '<span aria-hidden="true">→</span>',
+        '</a>',
+      '</li>'
+    ].join("");
+  }
+
+  function renderDetail(node) {
+    if (!node) {
+      return '<p class="installer__placeholder">Select a node from the left.</p>';
     }
-    grid.innerHTML = nodes.map(renderCard).join("");
+    const status = String(node.status || "live").toLowerCase();
+    const flag = node.flag || "🌐";
+    return [
+      '<div class="node-detail node-detail--' + escapeHtml(status) + '">',
+        '<div class="node-detail__head">',
+          '<span class="node-detail__flag" aria-hidden="true">' + escapeHtml(flag) + '</span>',
+          '<h3 class="node-detail__name">' + escapeHtml(node.name || "") + '</h3>',
+          '<span class="node-detail__status">' + escapeHtml(status.replace(/-/g, " ")) + '</span>',
+        '</div>',
+        node.institution ? '<p class="node-detail__meta">' + escapeHtml(node.institution) + (node.location ? ' · ' + escapeHtml(node.location) : '') + '</p>' : '',
+        node.description ? '<p class="node-detail__desc">' + escapeHtml(node.description) + '</p>' : '',
+        '<a class="node-detail__cta" href="' + escapeHtml(node.url) + '" target="_blank" rel="noopener noreferrer">',
+          '<span>Open ' + escapeHtml(hostFromUrl(node.url)) + '</span>',
+          '<span class="node-detail__cta-arrow" aria-hidden="true">→</span>',
+        '</a>',
+        node.contact ? '<p class="node-detail__contact">Contact: <a href="mailto:' + escapeHtml(node.contact) + '">' + escapeHtml(node.contact) + '</a></p>' : '',
+      '</div>'
+    ].join("");
+  }
+
+  function activateLeaf(idx, nodes) {
+    document
+      .querySelectorAll('.installer__panel[data-super="nodes"] .leaf-tab:not(.leaf-tab--add)')
+      .forEach(function (tab) {
+        const isThis = Number(tab.dataset.nodeIndex) === idx;
+        tab.classList.toggle("is-active", isThis);
+        tab.setAttribute("aria-selected", isThis ? "true" : "false");
+      });
+    const body = document.getElementById("nodes-body");
+    if (body) body.innerHTML = renderDetail(nodes[idx]);
   }
 
   document.addEventListener("DOMContentLoaded", async function () {
-    render(await loadNodes());
+    const list = document.getElementById("nodes-leaf-tabs");
+    const body = document.getElementById("nodes-body");
+    if (!list || !body) return;
+
+    const nodes = await loadNodes();
+
+    if (!nodes.length) {
+      list.innerHTML = renderAddLeaf();
+      body.innerHTML = '<p class="installer__placeholder">No nodes yet — be the first.</p>';
+      return;
+    }
+
+    list.innerHTML = nodes.map(renderLeafTab).join("") + renderAddLeaf();
+    activateLeaf(0, nodes);
+
+    list.addEventListener("click", function (event) {
+      const tab = event.target.closest(".leaf-tab:not(.leaf-tab--add)");
+      if (!tab) return;
+      const idx = Number(tab.dataset.nodeIndex);
+      if (Number.isFinite(idx)) activateLeaf(idx, nodes);
+    });
   });
 })();

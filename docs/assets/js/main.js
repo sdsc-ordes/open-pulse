@@ -10,24 +10,17 @@
       await navigator.clipboard.writeText(text);
       return true;
     }
-
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.setAttribute("readonly", "");
-    textArea.style.position = "absolute";
-    textArea.style.left = "-9999px";
-    document.body.appendChild(textArea);
-    textArea.select();
-    textArea.setSelectionRange(0, text.length);
-
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "absolute";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
     let copied = false;
-    try {
-      copied = document.execCommand("copy");
-    } catch (_error) {
-      copied = false;
-    }
-
-    document.body.removeChild(textArea);
+    try { copied = document.execCommand("copy"); } catch (_) { copied = false; }
+    document.body.removeChild(ta);
     return copied;
   }
 
@@ -36,46 +29,60 @@
     void button.offsetWidth;
     button.classList.add(ok ? "is-copied" : "is-failed");
     button.textContent = ok ? "Copied" : "Copy failed";
-
-    window.setTimeout(function () {
+    setTimeout(function () {
       button.classList.remove("is-copied", "is-failed");
       button.textContent = "Copy";
     }, 1250);
   }
 
-  function selectTab(target) {
+  function switchSuper(target) {
+    document.querySelectorAll(".super-tab").forEach(function (t) {
+      const active = t.dataset.super === target;
+      t.classList.toggle("is-active", active);
+      t.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    document.querySelectorAll(".installer__panel").forEach(function (p) {
+      const active = p.dataset.super === target;
+      if (active) p.removeAttribute("hidden");
+      else p.setAttribute("hidden", "");
+    });
+  }
+
+  function selfDeploySelect(target) {
     const codeEl = document.getElementById("clone-command");
     if (!codeEl) return;
     const cmd = COMMANDS[target];
     if (typeof cmd !== "string") return;
     codeEl.textContent = cmd;
     codeEl.dataset.current = target;
-    document.querySelectorAll(".install-tab").forEach(function (tab) {
-      const active = tab.dataset.target === target;
-      tab.classList.toggle("is-active", active);
-      tab.setAttribute("aria-selected", active ? "true" : "false");
-    });
+    document
+      .querySelectorAll('.installer__panel[data-super="self-deploy"] .leaf-tab')
+      .forEach(function (tab) {
+        const active = tab.dataset.leaf === target;
+        tab.classList.toggle("is-active", active);
+        tab.setAttribute("aria-selected", active ? "true" : "false");
+      });
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    document.querySelectorAll(".install-tab").forEach(function (tab) {
-      tab.addEventListener("click", function () {
-        selectTab(tab.dataset.target);
-      });
+    document.querySelectorAll(".super-tab").forEach(function (tab) {
+      tab.addEventListener("click", function () { switchSuper(tab.dataset.super); });
     });
+
+    document
+      .querySelectorAll('.installer__panel[data-super="self-deploy"] .leaf-tab')
+      .forEach(function (tab) {
+        tab.addEventListener("click", function () { selfDeploySelect(tab.dataset.leaf); });
+      });
 
     const copyButton = document.getElementById("clone-copy-btn");
     const codeEl = document.getElementById("clone-command");
-    if (!copyButton || !codeEl) return;
-
-    copyButton.addEventListener("click", async function () {
-      let copied = false;
-      try {
-        copied = await copyText(codeEl.textContent);
-      } catch (_error) {
-        copied = false;
-      }
-      flashCopyState(copyButton, copied);
-    });
+    if (copyButton && codeEl) {
+      copyButton.addEventListener("click", async function () {
+        let ok = false;
+        try { ok = await copyText(codeEl.textContent); } catch (_) { ok = false; }
+        flashCopyState(copyButton, ok);
+      });
+    }
   });
 })();

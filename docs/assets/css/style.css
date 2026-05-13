@@ -303,256 +303,328 @@ a:focus-visible {
   overflow: hidden;
 }
 
-/* Hosted-nodes section (above the clone block) */
-.hosted-nodes {
-  width: min(100%, 74ch);
+
+/* Installer: two-level tabbed selector (super tabs + left-rail leaf tabs).
+   Replaces the previous hosted-nodes grid + clone-block tabs. */
+.installer {
+  width: min(100%, 88ch);
   margin: clamp(0.9rem, 1.7vh, 1.35rem) auto 0;
-  text-align: left;
-}
-
-.section-eyebrow {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  margin: 0 0 0.65rem;
-}
-
-.section-eyebrow h2 {
-  margin: 0;
-  font-size: clamp(0.92rem, 1.1vw, 1.05rem);
-  font-weight: 700;
-  letter-spacing: 0.005em;
-  color: var(--text);
-}
-
-.section-eyebrow p {
-  margin: 0;
-  font-size: clamp(0.74rem, 0.85vw, 0.84rem);
-  color: var(--text-muted);
-  opacity: 0.85;
-}
-
-.nodes-grid {
-  display: grid;
-  gap: 0.55rem;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
-}
-
-.nodes-grid__placeholder {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  margin: 0.3rem 0;
-}
-
-.nodes-grid__add {
-  margin: 0.7rem 0 0;
-  font-size: clamp(0.7rem, 0.8vw, 0.78rem);
-  color: var(--text-muted);
-  opacity: 0.85;
-}
-
-.node-card {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.75rem;
-  align-items: center;
-  padding: 0.85rem 1rem;
-  border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 14px;
   background:
     linear-gradient(
       125deg,
-      color-mix(in srgb, var(--bg-secondary) 80%, transparent) 0%,
-      color-mix(in srgb, var(--bg-secondary) 60%, transparent) 100%
+      color-mix(in srgb, var(--bg-secondary) 84%, transparent) 0%,
+      color-mix(in srgb, var(--bg-secondary) 62%, transparent) 100%
     );
+  box-shadow:
+    0 0 0 1px rgba(58, 134, 255, 0.08),
+    0 0 24px rgba(30, 64, 175, 0.18);
+  overflow: hidden;
+  text-align: left;
+}
+
+.installer__super {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 8%, transparent) 0%,
+    transparent 100%
+  );
+}
+
+.super-tab {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.6rem 1rem 0.7rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  font-size: clamp(0.84rem, 1.05vw, 0.96rem);
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  border-radius: 10px 10px 0 0;
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.super-tab:hover,
+.super-tab:focus-visible {
   color: var(--text);
-  text-decoration: none;
-  box-shadow:
-    0 0 0 1px rgba(58, 134, 255, 0.06),
-    0 4px 14px rgba(0, 0, 0, 0.2);
-  transition: border-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.node-card:hover,
-.node-card:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-  transform: translateY(-1px);
-  box-shadow:
-    0 0 0 1px rgba(58, 134, 255, 0.18),
-    0 8px 20px rgba(58, 134, 255, 0.22);
+.super-tab.is-active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-secondary) 90%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--bg-secondary) 90%, transparent);
 }
 
-.node-card__flag {
-  font-size: clamp(1.6rem, 2.1vw, 2rem);
+.super-tab__icon {
+  font-size: 1.05em;
   line-height: 1;
 }
 
-.node-card__body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.18rem;
-  min-width: 0;
+.super-tab__hint {
+  font-weight: 500;
+  font-size: 0.78em;
+  opacity: 0.7;
+  margin-left: 0.2rem;
 }
 
-.node-card__heading {
+@media (max-width: 600px) {
+  .super-tab__hint { display: none; }
+}
+
+.installer__panel {
+  display: grid;
+  grid-template-columns: minmax(11rem, 18ch) 1fr;
+  min-height: 16rem;
+}
+
+.installer__panel[hidden] { display: none; }
+
+@media (max-width: 640px) {
+  .installer__panel { grid-template-columns: 1fr; }
+}
+
+.leaf-tabs {
+  list-style: none;
+  margin: 0;
+  padding: 0.75rem 0.5rem;
+  border-right: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: color-mix(in srgb, var(--bg-secondary) 30%, transparent);
+}
+
+.leaf-tabs__loading {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  padding: 0.45rem 0.7rem;
+}
+
+@media (max-width: 640px) {
+  .leaf-tabs {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+    padding: 0.55rem 0.6rem;
+  }
+}
+
+.leaf-tab,
+.leaf-tab--add {
+  appearance: none;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  font-size: clamp(0.78rem, 0.95vw, 0.88rem);
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
-.node-card__name {
-  font-size: clamp(0.95rem, 1.15vw, 1.08rem);
-  font-weight: 700;
+.leaf-tab:hover,
+.leaf-tab:focus-visible,
+.leaf-tab--add:hover,
+.leaf-tab--add:focus-visible {
   color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-.node-card__status {
-  font-size: clamp(0.62rem, 0.7vw, 0.7rem);
+.leaf-tab.is-active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.leaf-tab__icon {
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+.leaf-tab__label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leaf-tab--add {
+  margin-top: auto;
+  border: 1px dashed color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--link);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  justify-content: space-between;
+}
+
+.leaf-tab--add:hover,
+.leaf-tab--add:focus-visible {
+  border-color: var(--accent);
+}
+
+.leaf-tab--add .leaf-tab__icon {
+  font-size: 1.2em;
+  font-weight: 700;
+}
+
+.installer__body {
+  position: relative;
+  padding: clamp(0.9rem, 1.6vh, 1.3rem) clamp(1rem, 1.8vw, 1.6rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.installer__body pre {
+  margin: 0;
+  padding: 0.78rem 4.3rem 0.78rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  overflow: hidden;
+  position: relative;
+}
+
+.installer__body code {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: clamp(0.78rem, 1.05vw, 0.95rem);
+  color: color-mix(in srgb, var(--text) 90%, var(--accent) 10%);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.installer__body .copy-btn {
+  position: absolute;
+  top: clamp(0.95rem, 1.65vh, 1.35rem);
+  right: clamp(1.1rem, 2vw, 1.7rem);
+}
+
+.installer__placeholder {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* Node detail panel — rendered on the right when a node leaf is active */
+.node-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.node-detail__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.node-detail__flag {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.node-detail__name {
+  margin: 0;
+  font-size: clamp(1.15rem, 1.5vw, 1.4rem);
+  font-weight: 800;
+  letter-spacing: -0.005em;
+}
+
+.node-detail__status {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 0.18em 0.5em;
+  padding: 0.2em 0.55em;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-.node-card--beta .node-card__status,
-.node-card--coming-soon .node-card__status {
+.node-detail--beta .node-detail__status,
+.node-detail--coming-soon .node-detail__status {
   color: var(--text-muted);
   border-color: color-mix(in srgb, var(--text) 18%, transparent);
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
-.node-card__institution,
-.node-card__location {
-  font-size: clamp(0.72rem, 0.85vw, 0.82rem);
-  color: var(--text-muted);
-}
-
-.node-card__location {
-  opacity: 0.85;
-}
-
-.node-card__desc {
-  font-size: clamp(0.78rem, 0.95vw, 0.88rem);
-  color: var(--text);
-  opacity: 0.92;
-  margin-top: 0.18rem;
-}
-
-.node-card__url {
-  margin-top: 0.3rem;
-  font-size: clamp(0.7rem, 0.85vw, 0.78rem);
-  color: var(--text-muted);
-}
-
-.node-card__url code {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.95em;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
-  padding: 0.05em 0.4em;
-  border-radius: 4px;
-  color: var(--link);
-}
-
-.node-card__arrow {
-  font-size: 1.4rem;
-  color: var(--accent);
-  transition: transform 200ms ease;
-}
-
-.node-card:hover .node-card__arrow {
-  transform: translateX(3px);
-}
-
-.self-deploy-divider {
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  width: min(100%, 74ch);
-  margin: clamp(1.1rem, 2.2vh, 1.6rem) auto clamp(0.5rem, 1vh, 0.8rem);
-  color: var(--text-muted);
-  font-size: clamp(0.72rem, 0.85vw, 0.8rem);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.self-deploy-divider::before,
-.self-deploy-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: color-mix(in srgb, var(--text) 18%, transparent);
-}
-
-.install-tabs {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  padding: 0.7rem 0.8rem 0.55rem;
+.node-detail__meta {
   margin: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent) 6%, transparent) 0%,
-    transparent 100%
-  );
-  border-radius: 12px 12px 0 0;
+  font-size: clamp(0.78rem, 0.95vw, 0.86rem);
+  color: var(--text-muted);
 }
 
-.install-tab {
-  appearance: none;
-  border: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
-  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
-  color: var(--text-muted);
-  font-family: "Manrope", "Segoe UI", sans-serif;
-  font-size: clamp(0.74rem, 0.92vw, 0.86rem);
-  font-weight: 600;
-  letter-spacing: 0.005em;
-  padding: 0.42rem 0.85rem;
-  border-radius: 999px;
-  cursor: pointer;
+.node-detail__desc {
+  margin: 0.2rem 0;
+  font-size: clamp(0.85rem, 1.05vw, 0.95rem);
+  color: var(--text);
+  opacity: 0.95;
+}
+
+.node-detail__cta {
   display: inline-flex;
   align-items: center;
-  gap: 0.38rem;
-  transition:
-    color 160ms ease,
-    background-color 160ms ease,
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--text);
+  font-weight: 700;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: clamp(0.8rem, 1vw, 0.92rem);
+  text-decoration: none;
+  align-self: flex-start;
+  transition: background-color 140ms ease, transform 140ms ease, border-color 140ms ease;
 }
 
-.install-tab:hover,
-.install-tab:focus-visible {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+.node-detail__cta:hover,
+.node-detail__cta:focus-visible {
+  background: color-mix(in srgb, var(--accent) 42%, transparent);
   transform: translateY(-1px);
 }
 
-.install-tab.is-active {
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 28%, var(--bg-secondary));
-  border-color: var(--accent);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
-    0 4px 12px color-mix(in srgb, var(--accent) 22%, transparent);
+.node-detail__cta-arrow {
+  transition: transform 140ms ease;
 }
 
-.install-tab.is-active:hover {
-  transform: none;
+.node-detail__cta:hover .node-detail__cta-arrow {
+  transform: translateX(2px);
 }
 
-.install-tab__dot {
-  font-size: 1em;
-  line-height: 1;
-  filter: saturate(1.15);
+.node-detail__contact {
+  margin: 0.2rem 0 0;
+  font-size: clamp(0.72rem, 0.85vw, 0.8rem);
+  color: var(--text-muted);
 }
+
 
 .corner-cta-stack {
   position: fixed;
