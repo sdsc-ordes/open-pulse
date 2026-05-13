@@ -36,7 +36,7 @@
 
 	# Require Basic Auth on writes only. Reads pass through.
 	basic_auth @writes {
-		import /etc/caddy/users
+		import /etc/caddy/users/*
 	}
 
 	# Everything (matched or not) is forwarded to Oxigraph. The matcher above
