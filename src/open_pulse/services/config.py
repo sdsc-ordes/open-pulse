@@ -38,8 +38,9 @@ DEFAULT_CRAWLER_ENDPOINT = _default("http://crawler:8000", "http://localhost:800
 DEFAULT_CRAWLER_API_TOKEN_ENV = "CRAWLER_API_TOKEN"
 DEFAULT_NEO4J_AUTH_ENV = "NEO4J_AUTH"
 DEFAULT_METADATA_EXTRACTOR_ENDPOINT = _default(
-    "http://extractor:1234", "http://localhost:1234"
+    "http://git-metadata-extractor:1234", "http://localhost:1234"
 )
+DEFAULT_METADATA_EXTRACTOR_API_TOKEN_ENV = "EXTRACTOR_API_TOKEN"
 
 
 class Neo4jServiceConfig(BaseModel):
@@ -81,11 +82,17 @@ class CrawlerServiceConfig(BaseModel):
 class MetadataExtractorServiceConfig(BaseModel):
     """Connection settings for the git-metadata-extractor (gimie) service.
 
-    No client-side auth — the GME server reads ``GITHUB_TOKEN`` from its own
-    environment. Open-pulse only needs the base URL.
+    The GME server reads its own credentials (``GITHUB_TOKEN``, optional
+    ``RCP_TOKEN`` for LLM mode) from its environment. Newer versions of the
+    server also gate every endpoint behind a Bearer token (``API_TOKEN`` on
+    the server, sent as ``Authorization: Bearer …`` by clients). Set
+    ``api_token_env`` to the env var holding the bearer; leave as the
+    default to use ``EXTRACTOR_API_TOKEN``. If the env var is empty at call
+    time the client omits the header (auth-free deploys keep working).
     """
 
     endpoint: str = DEFAULT_METADATA_EXTRACTOR_ENDPOINT
+    api_token_env: str = DEFAULT_METADATA_EXTRACTOR_API_TOKEN_ENV
 
 
 class ServicesConfig(BaseModel):

@@ -129,19 +129,20 @@ overrides:
                                    identity-mapped, so nested `docker compose`
                                    resolves bind paths the same on both sides)
 
-  infra/compose/docker-compose.yml   ┐
-   ├── neo4j  oxigraph  sparql-proxy │ image-only refs; OPEN_PULSE_IMAGE
-   ├── crawler  extractor  selenium  │ pulls from GHCR by default
-   ├── hub  (--profile hub)          │ HUB_AUTH gate
-   └── grimoirelab-db  portainer …  ─┘
+  infra/open-pulse-stack/docker-compose.yml   ┐
+   ├── neo4j  oxigraph  sparql-proxy           │ image-only refs;
+   ├── crawler  extractor  selenium            │ OPEN_PULSE_IMAGE pulls
+   ├── hub  (--profile hub)                    │ from GHCR by default;
+   └── grimoirelab-db  portainer …            ─┘ HUB_AUTH gates the hub
 
-  infra/compose/docker-compose.cli.yml
+  infra/open-pulse-stack/docker-compose.cli.yml
    └── open-pulse-cli (overlay; auto-included when CLI runs inside it)
 
-  infra/services/grimoirelab/docker-compose.yml
+  infra/open-pulse-stack/docker-compose.grimoirelab.yml
    └── full GrimoireLab stack (mariadb, valkey, opensearch, mordred,
        sortinghat, nginx, projects-applier sidecar) — opt in via
-       `open-pulse deploy up --with-grimoire`
+       `open-pulse deploy up --with-grimoire`. Supporting assets at
+       `infra/open-pulse-stack/grimoirelab/`.
 
   data/                                ← single root for all bind mounts
    ├── neo4j/  oxigraph/  …            ← main stack writes here
@@ -158,15 +159,17 @@ uv run pytest -q
 
 # Build the unified image (one image for CLI / orchestrator / hub)
 docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
-echo "OPEN_PULSE_IMAGE=open-pulse:local" >> .env       # otherwise pulls GHCR
+echo "OPEN_PULSE_IMAGE=open-pulse:local" >> infra/.env  # otherwise pulls GHCR
 
 # Bring up the stack (interactive profile picker if no --profile flags)
 ./scripts/op deploy up --profile crawler --profile extractor --profile sparql --profile hub
-# or directly via the host's docker compose:
-docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.cli.yml \
-  --env-file .env --profile hub up -d
+# or directly via the host's docker compose (only infra/.env is loaded):
+docker compose -f infra/open-pulse-stack/docker-compose.yml \
+               -f infra/open-pulse-stack/docker-compose.cli.yml \
+               --env-file infra/.env \
+               --profile hub up -d
 
-# Hub at http://localhost:9090 — log in with admin / $HUB_AUTH
+# Hub at http://localhost:9090 — log in with openpulse / $HUB_AUTH
 
 # Talk to the cli orchestrator from the host (handles git-bash path mangling):
 ./scripts/op deploy ps
@@ -181,13 +184,12 @@ docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compo
 
 | Sub-command | Description |
 | --- | --- |
-| `open-pulse deploy up` | Deploy services via Docker Compose. Without `--profile` flags, opens an interactive selector. Creates `.env` from `infra/env/.env.example` if absent. |
+| `open-pulse deploy up` | Deploy services via Docker Compose. Without `--profile` flags, opens an interactive selector. Compose loads only `<repo>/infra/.env` (auto-seeded from `infra/.env.example` if missing). The tool/client `<repo>/.env` is for the open-pulse Python CLI / hub against external infra and is not a compose input. |
 | `open-pulse deploy down` | Tear down deployed services. `--volumes` / `-v` also removes named volumes. |
 | `open-pulse deploy ps` | Show the status of deployed containers. |
 
 **Profiles:**
 - `default` — Core services only (Neo4j)
-- `analysis` — Core + analysis notebook
 - `crawler` — Open Pulse Crawler API
 - `extractor` — GME extractor + Selenium
 - `sparql` — Oxigraph + sparql-proxy
@@ -196,10 +198,11 @@ docker compose -f infra/compose/docker-compose.yml -f infra/compose/docker-compo
 - `orchestration` — Portainer
 
 **Flags applicable to `up` / `down` / `ps`:**
-- `--with-cli` — Include `infra/compose/docker-compose.cli.yml` (auto-included
-  when the CLI itself runs inside the cli container, via the
-  `OPEN_PULSE_RUNNING_IN_CLI_CONTAINER=1` marker).
-- `--with-grimoire` — Also include `infra/services/grimoirelab/docker-compose.yml`.
+- `--with-cli` — Include `infra/open-pulse-stack/docker-compose.cli.yml`
+  (auto-included when the CLI itself runs inside the cli container, via
+  the `OPEN_PULSE_RUNNING_IN_CLI_CONTAINER=1` marker).
+- `--with-grimoire` — Also include
+  `infra/open-pulse-stack/docker-compose.grimoirelab.yml`.
 
 **Project root resolution** (`_find_project_root`):
 1. `$OPEN_PULSE_PROJECT_ROOT` if set
@@ -310,7 +313,7 @@ read-only at `/data` inside the hub so DuckDB can read other services' files.
 - **CI triggers** (path-scoped):
   - `src/**`, `tests/**`, `pyproject.toml`, `uv.lock` → Python CI
   - `tools/images/**`, `.devcontainer/**`, `pyproject.toml`, `uv.lock`,
-    `infra/compose/docker-compose*.yml` → Docker validation
+    `infra/open-pulse-stack/docker-compose*.yml` → Docker validation
   - `docs-site/**` → docs build
 - **Pre-commit**: `.pre-commit-config.yaml`, Ruff scoped to `src/`
 

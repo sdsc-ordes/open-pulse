@@ -23,7 +23,7 @@ from open_pulse.services.health import probe_endpoints
 
 console = Console()
 
-_COMPOSE_FILE = Path("infra/compose/docker-compose.yml")
+_COMPOSE_FILE = Path("infra/open-pulse-stack/docker-compose.yml")
 
 
 def _find_project_root() -> Path | None:

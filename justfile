@@ -37,6 +37,7 @@ pre-commit-matrix:
 # is its normal resting state; --force-recreate triggers a fresh render.
 regen-grimoire-config:
     docker compose --project-name open-pulse --project-directory "$PWD" \
-        -f infra/services/grimoirelab/docker-compose.yml --env-file .env \
+        -f infra/open-pulse-stack/docker-compose.grimoirelab.yml \
+        --env-file infra/.env \
         up -d --force-recreate --no-deps prepare-grimoire-config
     docker restart open-pulse-mordred-1

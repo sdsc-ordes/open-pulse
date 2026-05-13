@@ -41,7 +41,7 @@ behind this proxy in any deploy that publishes the port.**
 3. **Bring up the stack.** From the repo root:
 
    ```bash
-   docker compose -f infra/compose/docker-compose.yml --profile sparql up -d
+   docker compose -f infra/open-pulse-stack/docker-compose.yml --profile sparql up -d
    ```
 
    Or standalone (Caddy alone, requires Oxigraph reachable as `oxigraph:7878` on the

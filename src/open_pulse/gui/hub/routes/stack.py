@@ -25,7 +25,6 @@ PROFILES: list[dict[str, str]] = [
     {"name": "sparql", "label": "Oxigraph + sparql-proxy"},
     {"name": "hub", "label": "This dashboard"},
     {"name": "grimoirelab", "label": "GrimoireLab DB & worker (main compose)"},
-    {"name": "analysis", "label": "Analysis notebook"},
     {"name": "orchestration", "label": "Portainer"},
 ]
 

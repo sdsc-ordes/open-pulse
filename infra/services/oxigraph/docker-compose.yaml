@@ -9,7 +9,7 @@ services:
     # if you need health (e.g. from the sparql-proxy or `open-pulse health`).
 
     # Standalone deploy publishes the port directly. When run via the main
-    # `infra/compose/docker-compose.yml` stack the port is NOT published — the
+    # `infra/open-pulse-stack/docker-compose.yml` stack the port is NOT published — the
     # sparql-proxy service is the only host-visible entrypoint.
     ports:
       - "${OXIGRAPH_PORT:-7878}:7878"

@@ -66,9 +66,8 @@ updates:
   # Compose-managed images for the local services stack.
   - package-ecosystem: docker-compose
     directories:
-      - "/infra/compose"
+      - "/infra/open-pulse-stack"
       - "/infra/services/oxigraph"
-      - "/infra/services/grimoirelab"
       - "/infra/services/sparql-proxy"
       - "/infra/services/neo4j"
       - "/infra/services/portainer"

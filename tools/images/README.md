@@ -1,7 +1,7 @@
 # tools/images
 
 Container build artifacts for `open-pulse`. The compose files in
-`infra/compose/` only reference image tags — they don't build.
+`infra/open-pulse-stack/` only reference image tags — they don't build.
 
 ## Images
 
@@ -16,9 +16,9 @@ One image installs the `open-pulse[hub]` package + `docker-ce-cli` +
 `docker-compose-plugin`. Default `ENTRYPOINT` is `open-pulse`, default `CMD`
 is `--help`. Compose flips the role:
 
-- **Hub** (`infra/compose/docker-compose.yml`, `--profile hub`):
+- **Hub** (`infra/open-pulse-stack/docker-compose.yml`, `--profile hub`):
   `command: ["gui", "hub", "serve", "--host", "0.0.0.0", "--port", "8000"]`
-- **Orchestrator / CLI container** (`infra/compose/docker-compose.cli.yml`):
+- **Orchestrator / CLI container** (`infra/open-pulse-stack/docker-compose.cli.yml`):
   `entrypoint: ["sleep", "infinity"]` (sits idle so the hub or a host user
   can `docker exec open-pulse-cli open-pulse …`).
 
@@ -30,7 +30,7 @@ From the repo root:
 docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
 ```
 
-Pin it in your `.env`:
+Pin it in `infra/.env`:
 
 ```env
 OPEN_PULSE_IMAGE=open-pulse:local
@@ -46,7 +46,7 @@ works too:
 
 ```bash
 pip install open-pulse[hub]
-HUB_AUTH=$(python -c 'import secrets; print(secrets.token_urlsafe(32))') \
+HUB_AUTH=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=') \
   open-pulse gui hub serve --port 9090
 ```
 

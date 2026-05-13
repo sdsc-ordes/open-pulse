@@ -17,9 +17,12 @@ live under `infra/`; container builds live under `tools/images/`.
 - `src/open_pulse/gui/hub/` — **Open Pulse Hub**: FastAPI dashboard / control
   plane (single shared password, light + dark theme, marquee, file-based
   persistence in SQLite + DuckDB)
-- `infra/compose/` — main stack compose files (image-only, no build context)
-- `infra/services/` — per-service deployment assets (`neo4j`, `oxigraph`,
-  `sparql-proxy`, `portainer`, `grimoirelab/`)
+- `infra/open-pulse-stack/` — the Open Pulse stack: main compose, CLI overlay,
+  and the GrimoireLab compose all live here (`docker-compose.yml`,
+  `docker-compose.cli.yml`, `docker-compose.grimoirelab.yml`, plus the
+  GrimoireLab supporting assets under `grimoirelab/`)
+- `infra/services/` — single-service deployment references (`neo4j`,
+  `oxigraph`, `sparql-proxy`, `portainer`)
 - `tools/images/Dockerfile-open-pulse` — single image used for the CLI, the
   cli-orchestrator container, **and** the hub
 - `config/quest.example.yml` — canonical quest config example
@@ -39,21 +42,43 @@ One image (`open-pulse`) plays two roles via compose overrides — the
 `open-pulse-cli` orchestrator container sits idle awaiting `docker exec`,
 the `open-pulse-hub` container runs the FastAPI dashboard.
 
+### Configuration: where env lives
+
+Two distinct files, two distinct purposes:
+
+- **`<repo>/infra/.env`** — the deployment env. Owns image refs, ports,
+  resource limits, storage paths, and **all** container-side credentials and
+  per-service knobs. When you bring the stack up from `infra/`, compose
+  reads ONLY this file; every service pulls it in via `env_file:`. It is
+  auto-seeded from `infra/.env.example` the first time `op deploy up` runs.
+- **`<repo>/.env`** — the tool/client env. Consumed by the open-pulse
+  Python CLI / hub **only when running on the host against EXTERNAL
+  infrastructure** (i.e. someone else's deployed services). Compose never
+  loads it. It's a manual copy from `.env.example`.
+
+Both are gitignored. The split honours the principle: when launching from
+`infra/`, all env lives in `infra/`; otherwise `<repo>/.env` is just for
+the open-pulse tool acting as a client.
+
+### Bring up the stack
+
 ```bash
 # Build locally (or pull from ghcr.io/sdsc-ordes/open-pulse:latest)
 docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
-echo "OPEN_PULSE_IMAGE=open-pulse:local" >> .env
 
-# Bring up the full pipeline + the hub
+# First run seeds .env and infra/.env from their templates; edit them and
+# re-run.
 ./scripts/op deploy up --profile crawler --profile extractor --profile sparql --profile hub
 
-# Or a host-side compose invocation:
-docker compose -f infra/compose/docker-compose.yml \
-               -f infra/compose/docker-compose.cli.yml \
-               --env-file .env --profile hub up -d
+# Or a host-side compose invocation (note both --env-file flags):
+docker compose -f infra/open-pulse-stack/docker-compose.yml \
+               -f infra/open-pulse-stack/docker-compose.cli.yml \
+               --env-file infra/.env \
+               --profile hub up -d
 ```
 
-Open <http://localhost:9090>, log in with `admin` / `$HUB_AUTH`.
+Open <http://localhost:9090>, log in with `openpulse` / `$HUB_AUTH` (the
+username is free-form; only the password is checked).
 
 The hub talks to the host docker daemon via the bind-mounted socket and
 shells `open-pulse deploy ...` into the cli orchestrator container, so all
@@ -74,13 +99,12 @@ leading-slash arguments).
 | `sparql` | Oxigraph + sparql-proxy |
 | `hub` | Open Pulse Hub dashboard (port 9090) |
 | `grimoirelab` | GrimoireLab DB & worker (within main compose) |
-| `analysis` | Analysis notebook |
 | `orchestration` | Portainer |
 
 The full GrimoireLab stack (Mordred + Sortinghat + OpenSearch + nginx +
-projects-applier sidecar) lives in a separate compose at
-`infra/services/grimoirelab/docker-compose.yml`. Bring it up alongside the
-main stack with `--with-grimoire`:
+projects-applier sidecar) lives alongside the main stack at
+`infra/open-pulse-stack/docker-compose.grimoirelab.yml`. Bring it up
+alongside the main stack with `--with-grimoire`:
 
 ```bash
 ./scripts/op deploy up --profile hub --with-grimoire
@@ -109,7 +133,7 @@ quest:
       endpoint: "bolt://neo4j:7687"
       auth_env: NEO4J_AUTH
     metadata_extractor:
-      endpoint: "http://extractor:1234"
+      endpoint: "http://git-metadata-extractor:1234"
     sparql_store:
       endpoint: "http://sparql-proxy:7878"
       auth_env: SPARQL_AUTH
@@ -181,7 +205,7 @@ Set `HUB_AUTH` (any string) in `.env` to gate the dashboard.
 - Docs index: `docs-site/docs/index.md`
 - Legacy static landing: `docs/`
 - Container build / hub usage: `tools/images/README.md`
-- Compose model: `infra/compose/README.md`
+- Compose model: `infra/open-pulse-stack/README.md`
 
 ## Project Links
 

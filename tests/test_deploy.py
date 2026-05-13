@@ -32,12 +32,12 @@ def test_deploy_up_with_profile_flag(tmp_path: Path) -> None:
         patch.object(deploy_mod, "_find_project_root", return_value=tmp_path),
         patch("subprocess.run", return_value=MagicMock(returncode=0)) as mock_run,
     ):
-        result = runner.invoke(app, ["deploy", "up", "--profile", "analysis"])
+        result = runner.invoke(app, ["deploy", "up", "--profile", "sparql"])
 
     assert result.exit_code == 0
     cmd = mock_run.call_args[0][0]
     assert "--profile" in cmd
-    assert "analysis" in cmd
+    assert "sparql" in cmd
     assert "up" in cmd
     assert "-d" in cmd
 
