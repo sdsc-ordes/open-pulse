@@ -1,6 +1,6 @@
 services:
   oxigraph:
-    image: ghcr.io/oxigraph/oxigraph:0.4.7
+    image: ghcr.io/oxigraph/oxigraph:0.5.8
     container_name: oxigraph-open-pulse
     restart: unless-stopped
 
