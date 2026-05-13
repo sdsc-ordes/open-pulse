@@ -129,12 +129,27 @@
               metadata beyond traditional publication metrics.
             </p>
 
+            <section class="hosted-nodes" aria-labelledby="hosted-nodes-heading">
+              <header class="section-eyebrow">
+                <h2 id="hosted-nodes-heading">Try a hosted instance</h2>
+                <p>No install required — open the node that fits your community.</p>
+              </header>
+              <div class="nodes-grid" id="hosted-nodes-grid" data-loading="true">
+                <p class="nodes-grid__placeholder">Loading hosted instances…</p>
+              </div>
+              <p class="nodes-grid__add">
+                Add your own via PR — see
+                <a href="https://github.com/sdsc-ordes/open-pulse/tree/main/nodes" target="_blank" rel="noopener noreferrer">nodes/README.md</a>.
+              </p>
+            </section>
+
+            <div class="self-deploy-divider" role="separator" aria-label="or self-deploy">
+              <span>or self-deploy</span>
+            </div>
+
             <div class="clone-block">
               <div class="install-tabs" role="tablist" aria-label="Install method">
-                <button class="install-tab is-active" data-target="epfl" type="button" role="tab" aria-selected="true">
-                  <span class="install-tab__dot">🟢</span>EPFL
-                </button>
-                <button class="install-tab" data-target="docker" type="button" role="tab" aria-selected="false">
+                <button class="install-tab is-active" data-target="docker" type="button" role="tab" aria-selected="true">
                   <span class="install-tab__dot">🐳</span>Docker
                 </button>
                 <button class="install-tab" data-target="pip" type="button" role="tab" aria-selected="false">
@@ -144,15 +159,11 @@
                   <span class="install-tab__dot">🛠</span>Source
                 </button>
               </div>
-              <pre><code id="clone-command" data-current="epfl">https://openpulse.epfl.ch</code></pre>
+              <pre><code id="clone-command" data-current="docker">docker pull ghcr.io/sdsc-ordes/open-pulse:v1.0.0</code></pre>
               <button id="clone-copy-btn" type="button" class="copy-btn" aria-label="Copy install command">Copy</button>
             </div>
 
             <div class="hero-cta-row">
-              <a class="cta-btn" href="./env-wizard/">
-                <span>Configure your env</span>
-                <span class="cta-arrow" aria-hidden="true">→</span>
-              </a>
               <a class="cta-btn" href="./env-builder.html">
                 <span>Build a full .env</span>
                 <span class="cta-arrow" aria-hidden="true">→</span>
@@ -322,6 +333,7 @@
   </div>
 
   <script src="./assets/js/animation.js" defer></script>
+  <script src="./assets/js/nodes.js" defer></script>
   <script src="./assets/js/main.js" defer></script>
 </body>
 </html>

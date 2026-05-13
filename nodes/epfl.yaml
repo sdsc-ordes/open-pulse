@@ -1,0 +1,12 @@
+# Open Pulse hosted-instance entry — see ./README.md for the schema.
+
+name: EPFL
+institution: EPFL Open Science
+location: Lausanne, Switzerland
+flag: 🇨🇭
+url: https://openpulse.epfl.ch
+status: live
+description: |
+  Hosted instance covering open-source projects across EPFL and
+  partner research institutions. Open Science programme catalogue.
+contact: aruni.senaratne@epfl.ch

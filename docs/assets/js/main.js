@@ -1,6 +1,5 @@
 (function () {
   const COMMANDS = {
-    epfl: "https://openpulse.epfl.ch",
     docker: "docker pull ghcr.io/sdsc-ordes/open-pulse:v1.0.0",
     pip: "pip install open-pulse-science",
     source: "git clone https://github.com/sdsc-ordes/open-pulse.git",

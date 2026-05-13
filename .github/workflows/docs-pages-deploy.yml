@@ -15,6 +15,8 @@ on:
     paths:
       - "docs/**"
       - "docs-site/**"
+      - "nodes/**"
+      - "scripts/build-nodes.mjs"
       - ".github/workflows/docs-pages-deploy.yml"
   workflow_dispatch:
 
@@ -55,6 +57,13 @@ jobs:
       - name: Install docs dependencies
         working-directory: docs-site
         run: pnpm install --frozen-lockfile
+
+      - name: Regenerate hosted-nodes manifest from nodes/*.yaml
+        # Zero-deps inline parser — see scripts/build-nodes.mjs.
+        # Re-runs on every deploy so the landing reflects the latest
+        # node definitions even if the PR author forgot to commit the
+        # regenerated docs/data/nodes.json.
+        run: node scripts/build-nodes.mjs
 
       - name: Build Docusaurus
         working-directory: docs-site

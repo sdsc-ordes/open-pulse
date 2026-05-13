@@ -22,6 +22,10 @@ infra/services/airflow/src/env_variables.json
 # can't pollute the working tree. Per-service subdirs under the configured
 # OPEN_PULSE_DATA_DIR are also covered by this single rule.
 data/
+# Whitelist the docs landing's data dir (hosts the generated nodes.json
+# and any other static JSON the landing fetches).
+!docs/data/
+!docs/data/**
 infra/services/graphdb/graphdb-data/
 
 # Tentris local data and licenses
