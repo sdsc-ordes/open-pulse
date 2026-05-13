@@ -58,7 +58,7 @@ Default credentials: `openpulse` / `replace-me`. OpenSearch (in the
 ### `.env` wizard
 
 Don't want to hand-edit the file? The static wizard at
-[`/env-wizard/`](/env-wizard/) walks through the questions, generates
+[`/env-wizard/`](pathname:///env-wizard/) walks through the questions, generates
 strong tokens locally with the Web Crypto API (nothing leaves the
 browser), and outputs a complete `infra/.env` you can paste or download.
 
