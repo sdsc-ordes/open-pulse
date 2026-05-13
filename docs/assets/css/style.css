@@ -304,55 +304,82 @@ a:focus-visible {
 }
 
 .install-tabs {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 0.3rem;
-  padding: 0.5rem 0.55rem 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  gap: 0.35rem;
+  padding: 0.7rem 0.8rem 0.55rem;
+  margin: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 6%, transparent) 0%,
+    transparent 100%
+  );
+  border-radius: 12px 12px 0 0;
 }
 
 .install-tab {
   appearance: none;
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
   color: var(--text-muted);
-  font-family: inherit;
-  font-size: clamp(0.72rem, 0.95vw, 0.84rem);
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  font-size: clamp(0.74rem, 0.92vw, 0.86rem);
   font-weight: 600;
-  letter-spacing: 0.01em;
-  padding: 0.34rem 0.7rem 0.46rem;
-  border-radius: 6px 6px 0 0;
+  letter-spacing: 0.005em;
+  padding: 0.42rem 0.85rem;
+  border-radius: 999px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  margin-bottom: -1px;
-  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
+  gap: 0.38rem;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
 
 .install-tab:hover,
 .install-tab:focus-visible {
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+  transform: translateY(-1px);
 }
 
 .install-tab.is-active {
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-  border-bottom-color: transparent;
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-secondary));
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
+    0 4px 12px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.install-tab.is-active:hover {
+  transform: none;
 }
 
 .install-tab__dot {
-  font-size: 0.95em;
+  font-size: 1em;
   line-height: 1;
+  filter: saturate(1.15);
 }
 
-.docs-cta {
+.corner-cta-stack {
   position: fixed;
   top: calc(var(--marquee-h) + 12px);
   right: 14px;
   z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+
+.docs-cta {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -376,6 +403,21 @@ a:focus-visible {
   background: color-mix(in srgb, var(--accent) 32%, transparent);
   border-color: var(--accent);
   transform: translateY(-1px);
+}
+
+.docs-cta--secondary {
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
+  color: var(--text-muted);
+  font-size: clamp(0.7rem, 0.8vw, 0.8rem);
+  padding: 0.35rem 0.78rem;
+}
+
+.docs-cta--secondary:hover,
+.docs-cta--secondary:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .docs-cta__version {
