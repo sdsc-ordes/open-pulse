@@ -76,3 +76,7 @@ node_modules/
 docs-site/build/
 docs-site/.docusaurus/
 docs-site/.cache/
+
+# Backup files (timestamped .bak from sed -i / cp -a operations)
+*.bak
+*.bak.*
