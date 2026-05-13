@@ -1,11 +1,22 @@
 name: docs-pages-deploy
 
+# Publishes the consolidated docs/ directory to GitHub Pages:
+#   - docs/index.html              the project landing
+#   - docs/env-wizard/             the static infra/.env wizard
+#   - docs/env-builder.html        legacy env helper
+#   - docs/assets, docs/statics    landing assets
+#   - docs/docs/                   built Docusaurus site (this workflow
+#                                  populates it from docs-site/)
+
 on:
   push:
     branches:
-      - docs
+      - main
     paths:
+      - "docs/**"
       - "docs-site/**"
+      - "nodes/**"
+      - "scripts/build-nodes.mjs"
       - ".github/workflows/docs-pages-deploy.yml"
   workflow_dispatch:
 
@@ -24,12 +35,9 @@ env:
 
 jobs:
   build:
-    name: Build validated docs artifact
+    name: Build consolidated docs artifact
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: docs-site
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -47,12 +55,31 @@ jobs:
           cache-dependency-path: docs-site/pnpm-lock.yaml
 
       - name: Install docs dependencies
+        working-directory: docs-site
         run: pnpm install --frozen-lockfile
 
-      - name: Build docs
+      - name: Regenerate hosted-nodes manifest from nodes/*.yaml
+        # Zero-deps inline parser — see scripts/build-nodes.mjs.
+        # Re-runs on every deploy so the landing reflects the latest
+        # node definitions even if the PR author forgot to commit the
+        # regenerated docs/data/nodes.json.
+        run: node scripts/build-nodes.mjs
+
+      - name: Build Docusaurus
+        working-directory: docs-site
         env:
           CI: "true"
+          # Pages serves the repo at /open-pulse/, and the consolidated
+          # tree puts Docusaurus output under docs/docs/, so the public
+          # docs path is /open-pulse/docs/.
+          DOCS_BASE_URL: "/open-pulse/docs/"
         run: pnpm build
+
+      - name: Stage Docusaurus build into docs/docs/
+        run: |
+          rm -rf docs/docs
+          mkdir -p docs/docs
+          cp -R docs-site/build/. docs/docs/
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -60,7 +87,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs-site/build
+          path: docs
 
   deploy:
     name: Deploy to GitHub Pages

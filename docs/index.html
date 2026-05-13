@@ -102,6 +102,18 @@
       </div>
     </header>
 
+    <div class="corner-cta-stack">
+      <a class="docs-cta" href="./docs/" aria-label="Open documentation, version 1.0.0">
+        <span class="docs-cta__label">Docs</span>
+        <span class="docs-cta__version">v1.0.0</span>
+        <span class="docs-cta__arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="docs-cta docs-cta--secondary" href="./env-wizard/" aria-label="Open the infra/.env wizard">
+        <span class="docs-cta__label">.env wizard</span>
+        <span class="docs-cta__arrow" aria-hidden="true">→</span>
+      </a>
+    </div>
+
     <main class="viewport" id="main-content">
       <canvas id="constellation-canvas" aria-hidden="true"></canvas>
 
@@ -117,23 +129,56 @@
               metadata beyond traditional publication metrics.
             </p>
 
-            <div class="clone-block">
-              <span class="code-sticker">Public soon</span>
-              <pre><code id="clone-command">git clone https://github.com/sdsc-ordes/open-pulse.git</code></pre>
-              <button id="clone-copy-btn" type="button" class="copy-btn" aria-label="Copy clone command">Copy</button>
+            <div class="installer" id="installer">
+              <div class="installer__super" role="tablist" aria-label="How to use Open Pulse">
+                <button class="super-tab is-active" data-super="nodes" type="button" role="tab" aria-selected="true">
+                  <span class="super-tab__icon" aria-hidden="true">🟢</span>
+                  <span class="super-tab__label">Nodes</span>
+                  <span class="super-tab__hint">Use a hosted one</span>
+                </button>
+                <button class="super-tab" data-super="self-deploy" type="button" role="tab" aria-selected="false">
+                  <span class="super-tab__icon" aria-hidden="true">🛠</span>
+                  <span class="super-tab__label">Self-deploy</span>
+                  <span class="super-tab__hint">Run your own</span>
+                </button>
+              </div>
+
+              <div class="installer__panel" data-super="nodes">
+                <ul class="leaf-tabs" id="nodes-leaf-tabs" role="tablist" aria-label="Available nodes">
+                  <li class="leaf-tabs__loading"><span>Loading…</span></li>
+                </ul>
+                <div class="installer__body" id="nodes-body">
+                  <p class="installer__placeholder">Loading hosted nodes…</p>
+                </div>
+              </div>
+
+              <div class="installer__panel" data-super="self-deploy" hidden>
+                <ul class="leaf-tabs" role="tablist" aria-label="Install methods">
+                  <li>
+                    <button class="leaf-tab is-active" data-leaf="docker" type="button" role="tab" aria-selected="true">
+                      <span class="leaf-tab__icon" aria-hidden="true">🐳</span>
+                      <span class="leaf-tab__label">Docker</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button class="leaf-tab" data-leaf="pip" type="button" role="tab" aria-selected="false">
+                      <span class="leaf-tab__icon" aria-hidden="true">🐍</span>
+                      <span class="leaf-tab__label">pip</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button class="leaf-tab" data-leaf="source" type="button" role="tab" aria-selected="false">
+                      <span class="leaf-tab__icon" aria-hidden="true">🛠</span>
+                      <span class="leaf-tab__label">Source</span>
+                    </button>
+                  </li>
+                </ul>
+                <div class="installer__body" id="self-deploy-body">
+                  <!-- populated by main.js based on the active leaf -->
+                </div>
+              </div>
             </div>
 
-            <div class="hero-cta-row">
-              <a class="cta-btn" href="./env-wizard/">
-                <span>Configure your env</span>
-                <span class="cta-arrow" aria-hidden="true">→</span>
-              </a>
-              <a class="cta-btn" href="./env-builder.html">
-                <span>Build a full .env</span>
-                <span class="cta-arrow" aria-hidden="true">→</span>
-              </a>
-              <span class="cta-hint">Static, browser-only — generates a ready-to-drop <code>infra/.env</code>.</span>
-            </div>
           </section>
 
           <section class="columns" aria-label="Core project information">
@@ -288,7 +333,7 @@
         <a href="mailto:aruni.senaratne@epfl.ch">aruni.senaratne@epfl.ch</a>
       </p>
       <div class="footer-right-group">
-        <p class="footer-right">Last update: February 2026</p>
+        <p class="footer-right">Last update: May 2026</p>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme" aria-live="polite">
           <span class="theme-toggle__icon">☀︎</span>
         </button>
@@ -297,6 +342,7 @@
   </div>
 
   <script src="./assets/js/animation.js" defer></script>
+  <script src="./assets/js/nodes.js" defer></script>
   <script src="./assets/js/main.js" defer></script>
 </body>
 </html>

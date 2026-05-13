@@ -1,3 +1,211 @@
+/* Open Pulse docs theme — aligned with the landing (docs/index.html). */
+
 :root {
-  --ifm-color-primary: #2f6feb;
+  /* Accent — same as the landing's --accent (light variant). */
+  --ifm-color-primary: #2563eb;
+  --ifm-color-primary-dark: #2058d4;
+  --ifm-color-primary-darker: #1d4fbb;
+  --ifm-color-primary-darkest: #1841a0;
+  --ifm-color-primary-light: #4677ef;
+  --ifm-color-primary-lighter: #6691f1;
+  --ifm-color-primary-lightest: #8eaaf5;
+
+  /* Typography */
+  --ifm-font-family-base:
+    "Manrope", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont,
+    "Helvetica Neue", Arial, sans-serif;
+  --ifm-font-family-monospace:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco,
+    Consolas, "Liberation Mono", monospace;
+  --ifm-heading-font-weight: 700;
+  --ifm-font-weight-semibold: 600;
+
+  /* Surface colors — landing's light-mode palette */
+  --ifm-background-color: #f8fafc;
+  --ifm-background-surface-color: #ffffff;
+  --ifm-navbar-background-color: rgba(248, 250, 252, 0.85);
+  --ifm-color-content: #1a1a1a;
+  --ifm-heading-color: #0f172a;
+  --ifm-link-color: #1d4ed8;
+
+  --ifm-code-background: rgba(37, 99, 235, 0.1);
+  --ifm-code-padding-horizontal: 0.4em;
+  --ifm-code-padding-vertical: 0.12em;
+  --ifm-code-border-radius: 4px;
+
+  --ifm-toc-border-color: rgba(15, 23, 42, 0.08);
+  --ifm-hr-border-color: rgba(15, 23, 42, 0.08);
+
+  --op-page-bg:
+    radial-gradient(120% 70% at 50% -10%, rgba(37, 99, 235, 0.13) 0%, rgba(37, 99, 235, 0) 58%),
+    radial-gradient(60% 60% at 90% 90%, rgba(56, 189, 248, 0.08) 0%, rgba(56, 189, 248, 0) 60%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 60%, #f8fafc 100%);
+  --op-marquee-bg: #dbeafe;
+  --op-marquee-fg: #1d4ed8;
+}
+
+html[data-theme="dark"] {
+  /* Accent — same as the landing's --accent (dark variant). */
+  --ifm-color-primary: #4a9eff;
+  --ifm-color-primary-dark: #2c8efd;
+  --ifm-color-primary-darker: #1d86fd;
+  --ifm-color-primary-darkest: #036ce4;
+  --ifm-color-primary-light: #68aeff;
+  --ifm-color-primary-lighter: #77b6ff;
+  --ifm-color-primary-lightest: #a4ccff;
+
+  --ifm-background-color: #0b1019;
+  --ifm-background-surface-color: #121826;
+  --ifm-navbar-background-color: rgba(11, 16, 25, 0.78);
+  --ifm-color-content: #eaeaea;
+  --ifm-heading-color: #eaeaea;
+  --ifm-link-color: #9dc0ff;
+
+  --ifm-code-background: rgba(58, 134, 255, 0.18);
+
+  --ifm-toc-border-color: rgba(255, 255, 255, 0.08);
+  --ifm-hr-border-color: rgba(255, 255, 255, 0.08);
+
+  --op-page-bg:
+    radial-gradient(120% 70% at 50% -15%, rgba(59, 130, 246, 0.32) 0%, rgba(59, 130, 246, 0) 55%),
+    radial-gradient(70% 70% at 8% 88%, rgba(37, 99, 235, 0.18) 0%, rgba(37, 99, 235, 0) 62%),
+    radial-gradient(65% 65% at 92% 24%, rgba(56, 189, 248, 0.14) 0%, rgba(56, 189, 248, 0) 60%),
+    linear-gradient(180deg, #090b11 0%, #0b1019 38%, #080b12 100%);
+  --op-marquee-bg: #0f172a;
+  --op-marquee-fg: #60a5fa;
+}
+
+/* Page background — same radial+linear gradient family as the landing. */
+html, body {
+  background: var(--ifm-background-color);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--op-page-bg);
+  background-attachment: fixed;
+  pointer-events: none;
+}
+
+/* Navbar — translucent so the gradient leaks through, with a soft accent line. */
+.navbar {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid color-mix(in srgb, var(--ifm-color-primary) 16%, transparent);
+}
+
+.navbar__title {
+  font-family: "Manrope", system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+/* "← Open Pulse" link in the navbar gets a subtle pill so the back-to-landing
+   path is obvious. Docusaurus assigns one of the navbar items to be the last
+   right-positioned item; we style by content via :where the label matches. */
+.navbar__items--right .navbar__link[href*="open-pulse"]:not([href*="github"]) {
+  /* fallback selector kept narrow */
+}
+
+.navbar__items--right .navbar__link {
+  font-weight: 600;
+}
+
+/* Heading polish */
+.markdown h1, .markdown h2, .markdown h3 {
+  letter-spacing: -0.01em;
+}
+
+.markdown h1 {
+  font-size: clamp(1.7rem, 2.6vw, 2.25rem);
+}
+
+/* Inline code: match the landing's chip look */
+.markdown code:not(pre code) {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.92em;
+  border: 1px solid color-mix(in srgb, var(--ifm-color-primary) 22%, transparent);
+  background: color-mix(in srgb, var(--ifm-color-primary) 12%, transparent);
+  color: var(--ifm-link-color);
+  border-radius: var(--ifm-code-border-radius);
+  padding: 0.06em 0.4em;
+}
+
+/* Code blocks — Docusaurus uses prism. Tighten the surface to match the
+   landing's clone-block treatment without overriding the syntax theme. */
+.theme-code-block,
+.prism-code {
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--ifm-color-primary) 22%, transparent);
+  box-shadow: 0 0 0 1px rgba(58, 134, 255, 0.06), 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+
+/* Sidebar polish */
+.menu__link {
+  border-radius: 8px;
+  font-weight: 500;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.menu__link--active {
+  background: color-mix(in srgb, var(--ifm-color-primary) 18%, transparent);
+  color: var(--ifm-color-primary-darkest);
+}
+
+.menu__link--active {
+  background: transparent;
+  color: var(--ifm-color-primary);
+  box-shadow: inset 2px 0 0 var(--ifm-color-primary);
+}
+
+html[data-theme="dark"] .menu__link--active {
+  color: var(--ifm-color-primary-light);
+}
+
+/* Tabs (Docusaurus' built-in @theme/Tabs) — match the landing's pill style. */
+.tabs__item {
+  border-radius: 999px !important;
+  font-weight: 600;
+  padding: 0.4rem 0.85rem;
+  margin-right: 0.3rem;
+  border: 1px solid color-mix(in srgb, var(--ifm-color-emphasis-300) 100%, transparent);
+  background: color-mix(in srgb, var(--ifm-background-surface-color) 60%, transparent);
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.tabs__item:hover {
+  border-color: color-mix(in srgb, var(--ifm-color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--ifm-color-primary) 10%, var(--ifm-background-surface-color));
+  transform: translateY(-1px);
+}
+
+.tabs__item--active {
+  border-color: var(--ifm-color-primary) !important;
+  background: transparent !important;
+  color: var(--ifm-color-primary) !important;
+  box-shadow: none;
+}
+
+.tabs {
+  border-bottom: 1px solid color-mix(in srgb, var(--ifm-color-primary) 14%, transparent);
+}
+
+/* Breadcrumbs */
+.breadcrumbs__link {
+  font-weight: 500;
+}
+
+/* Admonitions — softer borders, accent-aware */
+.alert {
+  border-radius: 10px;
+  border-left-width: 4px;
+}
+
+/* Footer (Docusaurus' classic footer if enabled) */
+.footer {
+  --ifm-footer-background-color: transparent;
+  border-top: 1px solid var(--ifm-toc-border-color);
 }
