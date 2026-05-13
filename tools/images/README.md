@@ -8,7 +8,6 @@ Container build artifacts for `open-pulse`. The compose files in
 | File | Image | Purpose |
 | --- | --- | --- |
 | `Dockerfile-open-pulse` | `ghcr.io/sdsc-ordes/open-pulse` | Single image. CLI, orchestrator container, and hub dashboard all run from here — the role is selected by `command:` / `entrypoint:` overrides in compose. |
-| `Dockerfile-airflow` | (legacy) | Airflow workers for older pipelines. |
 
 ## The unified `open-pulse` image
 
