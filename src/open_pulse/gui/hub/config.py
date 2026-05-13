@@ -85,6 +85,12 @@ class Settings:
     sparql_password: str
     """SPARQL Basic-auth password, parsed from SPARQL_AUTH."""
 
+    neo4j_user: str
+    """Neo4j user, parsed from NEO4J_AUTH (`user/password`)."""
+
+    neo4j_password: str
+    """Neo4j password, parsed from NEO4J_AUTH."""
+
 
 def _parse_user_pass(raw: str) -> tuple[str, str]:
     """Split a `user/password` env value (used by SPARQL_AUTH).
@@ -141,4 +147,6 @@ def load_settings() -> Settings:
         applier_auth=os.environ.get("APPLIER_AUTH", "").strip(),
         sparql_user=(_parse_user_pass(os.environ.get("SPARQL_AUTH", ""))[0]),
         sparql_password=(_parse_user_pass(os.environ.get("SPARQL_AUTH", ""))[1]),
+        neo4j_user=(_parse_user_pass(os.environ.get("NEO4J_AUTH", ""))[0]),
+        neo4j_password=(_parse_user_pass(os.environ.get("NEO4J_AUTH", ""))[1]),
     )
