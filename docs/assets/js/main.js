@@ -10,8 +10,6 @@
       prereq: "Docker + Docker Compose",
       command: "docker pull ghcr.io/sdsc-ordes/open-pulse:v1.0.0",
       followUp: "Then `./scripts/op deploy up --profile hub` to bring up the hub.",
-      nextHref: "./docs/getting-started/",
-      nextLabel: "Bring up the stack",
     },
     pip: {
       icon: "🐍",
@@ -21,8 +19,6 @@
       prereq: "Python ≥ 3.11",
       command: "pip install 'open-pulse-science[hub]'",
       followUp: "Then `open-pulse --help` to see the available command groups.",
-      nextHref: "./docs/getting-started/",
-      nextLabel: "First commands",
     },
     source: {
       icon: "🛠",
@@ -33,8 +29,6 @@
       command:
         "git clone https://github.com/sdsc-ordes/open-pulse && \\\n  cd open-pulse && \\\n  docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .",
       followUp: "Then `echo OPEN_PULSE_IMAGE=open-pulse:local >> infra/.env` and bring the stack up.",
-      nextHref: "./docs/getting-started/",
-      nextLabel: "Build & run",
     },
   };
 
@@ -98,7 +92,6 @@
           '<button id="clone-copy-btn" type="button" class="copy-btn" aria-label="Copy install command">Copy</button>',
         '</div>',
         info.followUp ? '<p class="leaf-detail__followup">' + withInlineCode(info.followUp) + '</p>' : '',
-        info.nextHref ? '<a class="leaf-detail__next" href="' + escapeHtml(info.nextHref) + '">' + escapeHtml(info.nextLabel || "Next →") + ' <span aria-hidden="true">→</span></a>' : '',
       '</div>'
     ].join("");
     const copyButton = document.getElementById("clone-copy-btn");

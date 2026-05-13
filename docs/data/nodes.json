@@ -4,6 +4,7 @@
     "institution": "EPFL Open Science",
     "location": "Lausanne, Switzerland",
     "flag": "🇨🇭",
+    "logo": "./statics/Logo_EPFL_2019.svg",
     "url": "https://openpulse.epfl.ch",
     "status": "live",
     "description": "Hosted instance covering open-source projects across EPFL and\npartner research institutions. Open Science programme catalogue.",

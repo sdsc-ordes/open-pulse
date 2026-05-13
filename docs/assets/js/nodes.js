@@ -24,7 +24,19 @@
     const slug = String(node._source || node.name || ("node-" + idx))
       .replace(/\.ya?ml$/i, "")
       .toLowerCase();
-    const flag = node.flag || "🌐";
+    const name = node.name || slug;
+    let mainHtml;
+    if (node.logo) {
+      // Logo already carries the brand name — render it as the only visible
+      // mark and keep the textual label visually-hidden for a11y / search.
+      mainHtml =
+        '<img class="leaf-tab__logo" src="' + escapeHtml(node.logo) + '" alt="' + escapeHtml(name) + '">' +
+        '<span class="leaf-tab__label visually-hidden">' + escapeHtml(name) + '</span>';
+    } else {
+      mainHtml =
+        '<span class="leaf-tab__icon" aria-hidden="true">' + escapeHtml(node.flag || "🌐") + '</span>' +
+        '<span class="leaf-tab__label">' + escapeHtml(name) + '</span>';
+    }
     return [
       '<li>',
         '<button class="leaf-tab' + (idx === 0 ? ' is-active' : '') + '" ',
@@ -32,8 +44,7 @@
           'data-node-index="' + idx + '" ',
           'type="button" role="tab" ',
           'aria-selected="' + (idx === 0 ? "true" : "false") + '">',
-          '<span class="leaf-tab__icon" aria-hidden="true">' + escapeHtml(flag) + '</span>',
-          '<span class="leaf-tab__label">' + escapeHtml(node.name || slug) + '</span>',
+          mainHtml,
         '</button>',
       '</li>'
     ].join("");
@@ -57,12 +68,20 @@
       return '<p class="installer__placeholder">Select a node from the left.</p>';
     }
     const status = String(node.status || "live").toLowerCase();
-    const flag = node.flag || "🌐";
+    let headHtml;
+    if (node.logo) {
+      headHtml =
+        '<img class="node-detail__logo" src="' + escapeHtml(node.logo) + '" alt="' + escapeHtml(node.name || "") + '">' +
+        '<h3 class="node-detail__name visually-hidden">' + escapeHtml(node.name || "") + '</h3>';
+    } else {
+      headHtml =
+        '<span class="node-detail__flag" aria-hidden="true">' + escapeHtml(node.flag || "🌐") + '</span>' +
+        '<h3 class="node-detail__name">' + escapeHtml(node.name || "") + '</h3>';
+    }
     return [
       '<div class="node-detail node-detail--' + escapeHtml(status) + '">',
         '<div class="node-detail__head">',
-          '<span class="node-detail__flag" aria-hidden="true">' + escapeHtml(flag) + '</span>',
-          '<h3 class="node-detail__name">' + escapeHtml(node.name || "") + '</h3>',
+          headHtml,
           '<span class="node-detail__status">' + escapeHtml(status.replace(/-/g, " ")) + '</span>',
         '</div>',
         node.institution ? '<p class="node-detail__meta">' + escapeHtml(node.institution) + (node.location ? ' · ' + escapeHtml(node.location) : '') + '</p>' : '',
@@ -71,7 +90,6 @@
           '<span>Open ' + escapeHtml(hostFromUrl(node.url)) + '</span>',
           '<span class="node-detail__cta-arrow" aria-hidden="true">→</span>',
         '</a>',
-        node.contact ? '<p class="node-detail__contact">Contact: <a href="mailto:' + escapeHtml(node.contact) + '">' + escapeHtml(node.contact) + '</a></p>' : '',
       '</div>'
     ].join("");
   }

@@ -28,7 +28,8 @@ If you'd rather work from a clone:
 | `name` | yes | Short display name (e.g. `EPFL`). |
 | `institution` | yes | Owning institution / programme. |
 | `location` | yes | City, country. |
-| `flag` | no | Single emoji rendered in the card. Defaults to 🌐. |
+| `flag` | no | Single emoji shown when no `logo` is set. Defaults to 🌐. |
+| `logo` | no | Relative path to a logo image (SVG/PNG) inside `docs/`, e.g. `./statics/Logo_EPFL_2019.svg`. Takes precedence over `flag`. |
 | `url` | yes | Full URL the **Open** button points at. Must be `https://`. |
 | `status` | yes | `live`, `beta`, or `coming-soon`. |
 | `description` | yes | One- or two-sentence pitch. Block scalar (`|`) is supported for line breaks. |

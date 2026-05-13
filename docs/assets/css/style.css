@@ -388,7 +388,7 @@ a:focus-visible {
 .installer__panel {
   display: grid;
   grid-template-columns: minmax(11rem, 18ch) 1fr;
-  min-height: 16rem;
+  min-height: 19rem;
 }
 
 .installer__panel[hidden] { display: none; }
@@ -455,14 +455,33 @@ a:focus-visible {
 
 .leaf-tab.is-active {
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 22%, var(--bg-secondary));
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .leaf-tab__icon {
   font-size: 1.05em;
   line-height: 1;
+  width: 1.4em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.leaf-tab__logo {
+  height: 1.1em;
+  max-width: 5em;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
 }
 
 .leaf-tab__label {
@@ -548,6 +567,13 @@ a:focus-visible {
   line-height: 1;
 }
 
+.node-detail__logo {
+  height: 1.7rem;
+  max-width: 7rem;
+  object-fit: contain;
+  display: block;
+}
+
 .node-detail__name {
   margin: 0;
   font-size: clamp(1.15rem, 1.5vw, 1.4rem);
@@ -560,18 +586,17 @@ a:focus-visible {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 0.2em 0.55em;
+  padding: 0.18em 0.6em;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: transparent;
 }
 
 .node-detail--beta .node-detail__status,
 .node-detail--coming-soon .node-detail__status {
   color: var(--text-muted);
-  border-color: color-mix(in srgb, var(--text) 18%, transparent);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-color: color-mix(in srgb, var(--text) 22%, transparent);
 }
 
 .node-detail__meta {
@@ -592,11 +617,11 @@ a:focus-visible {
   align-items: center;
   gap: 0.5rem;
   margin-top: 0.35rem;
-  padding: 0.6rem 1.1rem;
+  padding: 0.55rem 1rem;
   border-radius: 10px;
-  border: 1px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: transparent;
+  color: var(--accent);
   font-weight: 700;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: clamp(0.8rem, 1vw, 0.92rem);
@@ -607,7 +632,8 @@ a:focus-visible {
 
 .node-detail__cta:hover,
 .node-detail__cta:focus-visible {
-  background: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
   transform: translateY(-1px);
 }
 
@@ -655,10 +681,10 @@ a:focus-visible {
 .leaf-detail__prereq {
   font-size: clamp(0.7rem, 0.82vw, 0.78rem);
   color: var(--text-muted);
-  padding: 0.15em 0.55em;
+  padding: 0.18em 0.6em;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
+  background: transparent;
   margin-left: auto;
 }
 
@@ -707,29 +733,6 @@ a:focus-visible {
   line-height: 1.5;
 }
 
-.leaf-detail__next {
-  align-self: flex-start;
-  margin-top: 0.15rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.8rem;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--text);
-  font-weight: 600;
-  font-size: clamp(0.76rem, 0.9vw, 0.85rem);
-  border-radius: 8px;
-  text-decoration: none;
-  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
-}
-
-.leaf-detail__next:hover,
-.leaf-detail__next:focus-visible {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  border-color: var(--accent);
-  transform: translateY(-1px);
-}
 
 
 .corner-cta-stack {

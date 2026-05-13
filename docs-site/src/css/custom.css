@@ -155,8 +155,14 @@ body::before {
   color: var(--ifm-color-primary-darkest);
 }
 
+.menu__link--active {
+  background: transparent;
+  color: var(--ifm-color-primary);
+  box-shadow: inset 2px 0 0 var(--ifm-color-primary);
+}
+
 html[data-theme="dark"] .menu__link--active {
-  color: #ffffff;
+  color: var(--ifm-color-primary-light);
 }
 
 /* Tabs (Docusaurus' built-in @theme/Tabs) — match the landing's pill style. */
@@ -178,11 +184,9 @@ html[data-theme="dark"] .menu__link--active {
 
 .tabs__item--active {
   border-color: var(--ifm-color-primary) !important;
-  background: color-mix(in srgb, var(--ifm-color-primary) 22%, var(--ifm-background-surface-color)) !important;
-  color: var(--ifm-color-content) !important;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--ifm-color-primary) 30%, transparent),
-    0 4px 12px color-mix(in srgb, var(--ifm-color-primary) 22%, transparent);
+  background: transparent !important;
+  color: var(--ifm-color-primary) !important;
+  box-shadow: none;
 }
 
 .tabs {
