@@ -24,6 +24,25 @@ const config = {
     }
   },
 
+  // Match the landing's typography (Manrope + JetBrains Mono).
+  headTags: [
+    {
+      tagName: "link",
+      attributes: { rel: "preconnect", href: "https://fonts.googleapis.com" }
+    },
+    {
+      tagName: "link",
+      attributes: { rel: "preconnect", href: "https://fonts.gstatic.com", crossorigin: "true" }
+    },
+    {
+      tagName: "link",
+      attributes: {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap"
+      }
+    }
+  ],
+
   i18n: {
     defaultLocale: "en",
     locales: ["en"]
