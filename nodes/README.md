@@ -6,13 +6,20 @@ directory. They are rendered on the project landing page
 
 ## Add your node
 
+The fastest path is the
+[node builder](https://sdsc-ordes.github.io/open-pulse/node-builder/) —
+a static, browser-only form that previews the YAML live and opens
+GitHub's file editor with it pre-filled. No clone needed.
+
+If you'd rather work from a clone:
+
 1. Copy `epfl.yaml` to `<your-org>.yaml`.
 2. Fill in the fields (see schema below).
 3. Run `node scripts/build-nodes.mjs` from the repo root to regenerate
-   `docs/data/nodes.json`. CI verifies this is in sync; the build will
-   fail otherwise.
+   `docs/data/nodes.json`.
 4. Open a PR. Once merged, the docs-pages-deploy workflow publishes
-   your node to the landing automatically.
+   your node to the landing automatically (CI re-runs the build
+   script before deploy, so a stale JSON is not fatal).
 
 ## Schema
 

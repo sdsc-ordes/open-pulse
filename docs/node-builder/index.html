@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Pulse — node builder</title>
+  <meta name="description" content="Generate the YAML for a hosted Open Pulse instance and open a PR — entirely in-browser.">
+  <script>
+    // Inherit the landing's theme choice (open-pulse-theme key) before
+    // first paint to avoid flashing the wrong palette.
+    (function () {
+      try {
+        var t = localStorage.getItem("open-pulse-theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  >
+  <style>
+    :root {
+      --bg: #121212;
+      --bg-secondary: #1e1e1e;
+      --fg: #eaeaea;
+      --fg-faint: #b7b7b7;
+      --border-soft: rgba(255, 255, 255, 0.08);
+      --accent: #3a86ff;
+      --accent-fg: #ffffff;
+      --link: #9dc0ff;
+      --code-bg: rgba(10, 14, 22, 0.55);
+      --header-bg:
+        radial-gradient(120% 70% at 50% -10%, rgba(59, 130, 246, 0.28) 0%, rgba(59, 130, 246, 0) 60%),
+        linear-gradient(180deg, #0b1019 0%, #121212 100%);
+      --page-bg:
+        radial-gradient(60% 55% at 50% -5%, rgba(59, 130, 246, 0.16) 0%, rgba(59, 130, 246, 0) 55%),
+        linear-gradient(180deg, #090b11 0%, #0b1019 38%, #080b12 100%);
+    }
+    [data-theme="light"] {
+      --bg: #f5f5f5;
+      --bg-secondary: #ffffff;
+      --fg: #1a1a1a;
+      --fg-faint: #4d4d4d;
+      --border-soft: rgba(15, 23, 42, 0.08);
+      --accent: #2563eb;
+      --accent-fg: #ffffff;
+      --link: #1d4ed8;
+      --code-bg: #ffffff;
+      --header-bg:
+        radial-gradient(120% 70% at 50% -10%, rgba(37, 99, 235, 0.18) 0%, rgba(37, 99, 235, 0) 58%),
+        linear-gradient(180deg, #eef2ff 0%, #f8fafc 100%);
+      --page-bg:
+        linear-gradient(180deg, #f8fafc 0%, #eef2ff 52%, #f8fafc 100%);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Manrope", "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      background-image: var(--page-bg);
+      background-attachment: fixed;
+      color: var(--fg);
+      line-height: 1.5;
+    }
+    a { color: var(--link); }
+    header {
+      padding: 22px 32px 24px;
+      border-bottom: 1px solid var(--border-soft);
+      background: var(--header-bg);
+    }
+    header .back {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      font-size: 13px; color: var(--link); text-decoration: none;
+      margin-bottom: 10px;
+      border-bottom: 1px solid transparent;
+      transition: border-color 180ms ease;
+    }
+    header .back:hover { border-bottom-color: currentColor; }
+    header h1 {
+      margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em;
+    }
+    header h1 code {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+      border-radius: 6px; padding: 0.05em 0.4em;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 0.85em;
+    }
+    header p { margin: 8px 0 0; color: var(--fg-faint); font-size: 14px; max-width: 72ch; }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 0;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    .form-pane { padding: 24px 32px; }
+    .preview-pane {
+      padding: 24px 32px;
+      border-left: 1px solid var(--border-soft);
+      background: var(--code-bg);
+      position: sticky;
+      top: 0;
+      max-height: 100vh;
+      overflow-y: auto;
+    }
+    @media (max-width: 900px) {
+      .preview-pane { border-left: 0; border-top: 1px solid var(--border-soft); position: static; max-height: none; }
+    }
+    section { margin-bottom: 22px; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+    .field .label-hint { color: var(--fg-faint); font-weight: 400; }
+    .field input[type=text], .field input[type=url], .field input[type=email], .field select, .field textarea {
+      width: 100%;
+      padding: 8px 11px;
+      font: inherit;
+      font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      background: var(--bg-secondary);
+      color: var(--fg);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      transition: border-color 140ms ease, box-shadow 140ms ease;
+    }
+    .field input:focus, .field select:focus, .field textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+    }
+    .field textarea { min-height: 96px; resize: vertical; line-height: 1.45; }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 600px) { .field-row { grid-template-columns: 1fr; } }
+    .hint { color: var(--fg-faint); font-size: 12px; margin: 4px 0 0; }
+    .preview-pane h2 {
+      margin: 0 0 0.6rem; font-size: 14px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint);
+    }
+    .preview-pane h2 code {
+      text-transform: none; letter-spacing: 0;
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      padding: 0.05em 0.4em; border-radius: 4px;
+      font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px;
+      color: var(--link);
+    }
+    pre.yaml {
+      font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 12px; line-height: 1.55;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: color-mix(in srgb, var(--fg) 92%, var(--accent) 8%);
+    }
+    .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    button, .button-link {
+      font: inherit; font-size: 13px; font-weight: 600;
+      padding: 7px 14px; border-radius: 8px;
+      border: 1px solid var(--border-soft);
+      background: var(--bg-secondary); color: var(--fg);
+      cursor: pointer; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+    }
+    button:hover, .button-link:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .button-link--primary {
+      background: color-mix(in srgb, var(--accent) 22%, transparent);
+      border-color: var(--accent);
+    }
+    .button-link--primary:hover { background: color-mix(in srgb, var(--accent) 36%, transparent); }
+    .copied-flash { color: var(--accent); font-size: 12px; margin-left: 6px; opacity: 0; transition: opacity 200ms ease; }
+    .copied-flash.is-visible { opacity: 1; }
+
+    .errors {
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border-left: 3px solid #f59e0b;
+      background: color-mix(in srgb, #f59e0b 14%, transparent);
+      color: #f59e0b;
+      font-size: 13px;
+      border-radius: 0 8px 8px 0;
+    }
+    .errors:empty { display: none; }
+    .errors ul { margin: 0.3em 0 0; padding-left: 1.2em; }
+  </style>
+</head>
+<body>
+<header>
+  <a href="../" class="back">← Back to Open Pulse</a>
+  <h1>Open Pulse — node builder</h1>
+  <p>
+    Fill in the form on the left; the YAML for a new entry in
+    <code>nodes/</code> appears on the right. Use <strong>Open PR on GitHub</strong>
+    to drop straight into the file-create flow with the YAML pre-filled.
+    Everything runs in your browser — nothing is sent anywhere.
+  </p>
+</header>
+
+<main>
+  <div class="form-pane">
+    <div class="errors" id="errors"></div>
+
+    <section>
+      <div class="field-row">
+        <div class="field">
+          <label for="slug">Filename slug <span class="label-hint">— becomes <code>nodes/{slug}.yaml</code></span></label>
+          <input type="text" id="slug" placeholder="epfl" autocapitalize="off" autocomplete="off" pattern="[a-z0-9-]+" />
+          <p class="hint">Lowercase letters, numbers and hyphens.</p>
+        </div>
+        <div class="field">
+          <label for="status">Status</label>
+          <select id="status">
+            <option value="live">live</option>
+            <option value="beta">beta</option>
+            <option value="coming-soon">coming-soon</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="field">
+        <label for="name">Name <span class="label-hint">— short, e.g. <code>EPFL</code></span></label>
+        <input type="text" id="name" placeholder="EPFL" />
+      </div>
+      <div class="field">
+        <label for="institution">Institution / programme</label>
+        <input type="text" id="institution" placeholder="EPFL Open Science" />
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="location">Location</label>
+          <input type="text" id="location" placeholder="Lausanne, Switzerland" />
+        </div>
+        <div class="field">
+          <label for="flag">Flag <span class="label-hint">— one emoji</span></label>
+          <input type="text" id="flag" placeholder="🇨🇭" maxlength="8" />
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="field">
+        <label for="url">URL <span class="label-hint">— must start with <code>https://</code></span></label>
+        <input type="url" id="url" placeholder="https://openpulse.epfl.ch" />
+      </div>
+      <div class="field">
+        <label for="description">Description <span class="label-hint">— one or two sentences</span></label>
+        <textarea id="description" placeholder="Hosted instance covering open-source projects across …"></textarea>
+      </div>
+      <div class="field">
+        <label for="contact">Contact <span class="label-hint">— optional, email or handle</span></label>
+        <input type="email" id="contact" placeholder="maintainer@example.org" />
+      </div>
+    </section>
+
+    <div class="actions">
+      <a class="button-link button-link--primary" id="open-pr-btn" href="#" target="_blank" rel="noopener noreferrer">
+        Open PR on GitHub →
+      </a>
+      <button type="button" id="copy-btn">Copy YAML</button>
+      <button type="button" id="download-btn">Download YAML</button>
+      <span class="copied-flash" id="copied-flash" role="status" aria-live="polite">Copied</span>
+    </div>
+    <p class="hint" style="margin-top:0.6rem;">
+      <strong>Open PR on GitHub</strong> deep-links into the GitHub file editor with the YAML pre-filled —
+      review, commit and open a PR right from there.
+    </p>
+  </div>
+
+  <div class="preview-pane">
+    <h2>Preview <code>nodes/<span id="filename-display">…</span>.yaml</code></h2>
+    <pre class="yaml" id="yaml-output"># Fill in the form to generate your node YAML.</pre>
+  </div>
+</main>
+
+<script>
+(function () {
+  const REPO = "sdsc-ordes/open-pulse";
+  const BRANCH = "main";
+  const ids = ["slug","status","name","institution","location","flag","url","description","contact"];
+  const refs = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+  const out = document.getElementById("yaml-output");
+  const fname = document.getElementById("filename-display");
+  const errBox = document.getElementById("errors");
+  const prBtn = document.getElementById("open-pr-btn");
+  const copyBtn = document.getElementById("copy-btn");
+  const downloadBtn = document.getElementById("download-btn");
+  const flash = document.getElementById("copied-flash");
+
+  function escapeQuotes(s) { return String(s).replace(/"/g, '\\"'); }
+  function indent(s, n) {
+    const pad = " ".repeat(n);
+    return s.split("\n").map((l) => l.length ? pad + l : l).join("\n");
+  }
+  function valueFor(key, value) {
+    if (!value) return "";
+    if (key === "description") {
+      const lines = value.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (lines.length > 1 || lines[0].length > 72) {
+        return key + ": |\n" + indent(lines.join("\n"), 2) + "\n";
+      }
+      return key + ": " + lines[0] + "\n";
+    }
+    // Always quote URLs/contacts if they contain `:` to be safe; the
+    // schema's other fields are short single-line strings.
+    if (/[:#]/.test(value)) return key + ': "' + escapeQuotes(value) + '"\n';
+    return key + ": " + value + "\n";
+  }
+
+  function buildYaml(data) {
+    const order = ["name", "institution", "location", "flag", "url", "status", "description", "contact"];
+    let s = "# Open Pulse hosted-instance entry — see ../nodes/README.md for the schema.\n\n";
+    for (const k of order) {
+      if (data[k]) s += valueFor(k, data[k]);
+    }
+    return s;
+  }
+
+  function validate(data) {
+    const errs = [];
+    const req = ["slug","name","institution","location","url","status","description"];
+    for (const k of req) {
+      if (!String(data[k] || "").trim()) errs.push("Missing: " + k);
+    }
+    if (data.slug && !/^[a-z0-9-]+$/.test(data.slug)) errs.push("slug must be lowercase letters/numbers/hyphens");
+    if (data.url && !/^https:\/\//.test(data.url)) errs.push("url must start with https://");
+    if (data.flag && Array.from(data.flag).length > 4) errs.push("flag should be a single emoji");
+    return errs;
+  }
+
+  function renderErrors(errs) {
+    if (!errs.length) { errBox.innerHTML = ""; return; }
+    errBox.innerHTML = "<strong>Before opening the PR, fix:</strong><ul>" +
+      errs.map((e) => "<li>" + e.replace(/</g, "&lt;") + "</li>").join("") + "</ul>";
+  }
+
+  function refresh() {
+    const data = Object.fromEntries(ids.map((id) => [id, refs[id].value.trim()]));
+    const errs = validate(data);
+    renderErrors(errs);
+
+    const slug = data.slug || "your-node";
+    fname.textContent = slug;
+    const yaml = buildYaml(data);
+    out.textContent = yaml.length > 80 ? yaml : "# Fill in the form to generate your node YAML.";
+
+    if (errs.length === 0) {
+      const url = "https://github.com/" + REPO + "/new/" + BRANCH +
+        "?filename=" + encodeURIComponent("nodes/" + slug + ".yaml") +
+        "&value=" + encodeURIComponent(yaml) +
+        "&message=" + encodeURIComponent("feat(nodes): add " + slug + " hosted instance");
+      prBtn.setAttribute("href", url);
+      prBtn.removeAttribute("aria-disabled");
+      prBtn.style.opacity = "1";
+      prBtn.style.pointerEvents = "auto";
+    } else {
+      prBtn.setAttribute("href", "#");
+      prBtn.setAttribute("aria-disabled", "true");
+      prBtn.style.opacity = "0.5";
+      prBtn.style.pointerEvents = "none";
+    }
+  }
+
+  ids.forEach((id) => refs[id].addEventListener("input", refresh));
+
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text); return true;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "absolute"; ta.style.left = "-9999px";
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta); return ok;
+  }
+  function flashCopied() {
+    flash.classList.add("is-visible");
+    setTimeout(() => flash.classList.remove("is-visible"), 1200);
+  }
+
+  copyBtn.addEventListener("click", async () => {
+    const text = out.textContent;
+    if (!text || text.startsWith("#") && text.includes("Fill in")) return;
+    if (await copyText(text)) flashCopied();
+  });
+  downloadBtn.addEventListener("click", () => {
+    const text = out.textContent;
+    if (!text || text.startsWith("#") && text.includes("Fill in")) return;
+    const slug = (refs.slug.value.trim() || "your-node");
+    const blob = new Blob([text], { type: "text/yaml" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = slug + ".yaml";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>
