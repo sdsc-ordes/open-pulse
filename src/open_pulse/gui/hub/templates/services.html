@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block heading %}Services{% endblock %}
+{% block subheading %}Inspect, start, stop, restart containers — and tail the logs.{% endblock %}
+
+{% block content %}
+<div x-data="dashServices()" x-init="refresh(); setInterval(refresh, 8000)" class="space-y-4">
+
+  <div class="flex items-center gap-3">
+    <button @click="refresh()" class="btn btn-ghost">↻ Refresh</button>
+    <span class="card-meta" x-text="lastRefreshed ? 'updated ' + lastRefreshed : ''"></span>
+    <span class="ml-auto card-meta">
+      <span class="pill pill-ok mr-1" x-text="counts.healthy + ' healthy'"></span>
+      <span class="pill pill-warn mr-1" x-show="counts.starting" x-text="counts.starting + ' starting'"></span>
+      <span class="pill pill-bad mr-1"  x-show="counts.bad"      x-text="counts.bad + ' down/unhealthy'"></span>
+    </span>
+  </div>
+
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <table class="data">
+      <thead>
+        <tr>
+          <th style="width: 28%;">Name</th>
+          <th>Image</th>
+          <th>Status</th>
+          <th>Uptime</th>
+          <th>Ports</th>
+          <th style="width: 220px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="s in services" :key="s.name">
+          <tr>
+            <td>
+              <div class="flex items-center gap-2">
+                <span class="dot" :class="dotClass(s)"></span>
+                <span class="font-semibold" x-text="s.name"></span>
+              </div>
+              <div class="card-meta" x-text="s.compose_service || ''"></div>
+            </td>
+            <td><span class="mono" style="font-size: 12px; color: var(--fg-muted);" x-text="s.image"></span></td>
+            <td>
+              <span class="pill" :class="pillClass(s)" x-text="pillLabel(s)"></span>
+            </td>
+            <td><span class="mono" style="font-size: 12px;" x-text="humanizeUptime(s.uptime_seconds)"></span></td>
+            <td>
+              <template x-for="p in s.ports" :key="p"><span class="kbd" style="margin-right: 4px;" x-text="p"></span></template>
+            </td>
+            <td>
+              <div class="flex gap-1.5">
+                <button class="btn btn-primary"
+                        @click="action(s.name,'restart')"
+                        :disabled="busy[s.name]"
+                        title="Restart">⟳</button>
+                <button class="btn"
+                        :class="s.status === 'running' ? 'btn-danger' : 'btn-ok'"
+                        @click="action(s.name, s.status === 'running' ? 'stop' : 'start')"
+                        :disabled="busy[s.name]">
+                  <span x-text="s.status === 'running' ? 'Stop' : 'Start'"></span>
+                </button>
+                <button class="btn btn-ghost" @click="openLogs(s.name)">Logs</button>
+              </div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Logs drawer -->
+  <div x-show="logsOpen" x-cloak
+       class="fixed inset-0 z-30"
+       style="background: rgba(0,0,0,.55);"
+       @click.self="logsOpen = false">
+    <div class="absolute right-0 top-0 h-full"
+         style="width: min(100%, 720px); background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column;">
+      <div class="flex items-center gap-2" style="padding: 14px 18px; border-bottom: 1px solid var(--border);">
+        <span class="font-semibold" x-text="logsName"></span>
+        <span class="card-meta" x-text="'tail ' + tail + ' lines'"></span>
+        <select x-model.number="tail" @change="reloadLogs()" class="ml-auto" style="width: 100px;">
+          <option value="100">100</option><option value="200">200</option>
+          <option value="500">500</option><option value="1000">1000</option>
+        </select>
+        <button class="btn btn-ghost" @click="reloadLogs()">↻</button>
+        <button class="btn btn-ghost" @click="logsOpen = false">✕</button>
+      </div>
+      <pre class="console" style="margin: 16px; flex: 1; overflow: auto;" x-text="logsText"></pre>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function dashServices() {
+  return {
+    services: [],
+    busy: {},
+    lastRefreshed: '',
+    counts: { healthy: 0, starting: 0, bad: 0 },
+    logsOpen: false, logsName: '', tail: 200, logsText: '',
+    async refresh() {
+      const r = await fetch('/api/services/');
+      const j = await r.json();
+      this.services = j.services || [];
+      this.lastRefreshed = new Date().toLocaleTimeString();
+      this.recount();
+    },
+    recount() {
+      let healthy = 0, starting = 0, bad = 0;
+      for (const s of this.services) {
+        if (s.health === 'starting') starting++;
+        else if (s.health === 'unhealthy' || s.status === 'exited') bad++;
+        else if (s.status === 'running') healthy++;
+      }
+      this.counts = { healthy, starting, bad };
+    },
+    async action(name, action) {
+      this.busy = {...this.busy, [name]: true};
+      try {
+        await fetch(`/api/services/${name}/action`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({action}),
+        });
+        await this.refresh();
+      } finally {
+        this.busy = {...this.busy, [name]: false};
+      }
+    },
+    async openLogs(name) {
+      this.logsName = name; this.logsOpen = true; this.logsText = 'loading…';
+      await this.reloadLogs();
+    },
+    async reloadLogs() {
+      const r = await fetch(`/api/services/${this.logsName}/logs?tail=${this.tail}`);
+      const j = await r.json();
+      this.logsText = j.logs || '';
+    },
+    dotClass(s) {
+      if (s.health === 'healthy') return 'healthy';
+      if (s.health === 'unhealthy') return 'unhealthy';
+      if (s.health === 'starting') return 'starting';
+      if (s.status === 'running') return 'healthy';
+      return 'unknown';
+    },
+    pillClass(s) {
+      if (s.health === 'unhealthy' || s.status === 'exited') return 'pill-bad';
+      if (s.health === 'starting') return 'pill-warn';
+      if (s.status === 'running' && (s.health === 'healthy' || s.health === null)) return 'pill-ok';
+      return 'pill-neutral';
+    },
+    pillLabel(s) { return s.health || s.status; },
+    humanizeUptime(sec) {
+      if (sec === null || sec === undefined) return '—';
+      if (sec < 60) return `${sec}s`;
+      if (sec < 3600) return `${Math.floor(sec/60)}m`;
+      if (sec < 86400) return `${Math.floor(sec/3600)}h${String(Math.floor((sec%3600)/60)).padStart(2,'0')}m`;
+      return `${Math.floor(sec/86400)}d${String(Math.floor((sec%86400)/3600)).padStart(2,'0')}h`;
+    },
+  };
+}
+</script>
+{% endblock %}

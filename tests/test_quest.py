@@ -20,10 +20,11 @@ from open_pulse.pipeline.runner import (
     run_pipeline,
     run_single_step,
 )
-from open_pulse.pipeline.tentris_upload import run_tentris_upload
+from open_pulse.pipeline.sparql_upload import run_sparql_upload
 from open_pulse.services.container import ServiceContainer
+from open_pulse.services.crawler import CrawlerService
 from open_pulse.services.neo4j import Neo4jService
-from open_pulse.services.tentris import TentrisService
+from open_pulse.services.sparql_store import SparqlStoreService
 
 runner = CliRunner()
 
@@ -39,13 +40,16 @@ def test_quest_config_defaults() -> None:
     assert cfg.quest.logging.level == "INFO"
     assert cfg.quest.logging.file is None
     assert cfg.quest.services.neo4j.endpoint == "bolt://localhost:7687"
-    assert cfg.quest.services.tentris.endpoint == "http://localhost:7502/sparql"
+    assert cfg.quest.services.sparql_store.endpoint == "http://localhost:7878"
+    assert cfg.quest.services.sparql_store.auth_env == "SPARQL_AUTH"
+    assert cfg.quest.services.crawler.endpoint == "http://localhost:8000"
+    assert cfg.quest.services.crawler.api_token_env == "CRAWLER_API_TOKEN"
     assert cfg.quest.steps.crawler.enabled is True
     assert cfg.quest.steps.crawler.output_dir == ".quest-artifacts/crawler-json"
     assert cfg.quest.steps.neo4j_upload.input_dir == ".quest-artifacts/crawler-json"
     assert cfg.quest.steps.metadata_extractor.input_dir == ".quest-artifacts/crawler-json"
     assert cfg.quest.steps.metadata_extractor.output_dir == ".quest-artifacts/metadata-json"
-    assert cfg.quest.steps.tentris_upload.input_dir == ".quest-artifacts/metadata-json"
+    assert cfg.quest.steps.sparql_upload.input_dir == ".quest-artifacts/metadata-json"
 
 
 def test_quest_config_from_yaml(tmp_path: Path) -> None:
@@ -55,7 +59,7 @@ def test_quest_config_from_yaml(tmp_path: Path) -> None:
             "retry": {"max_attempts": 2, "backoff_seconds": 1},
             "services": {
                 "neo4j": {"endpoint": "bolt://db:7687"},
-                "tentris": {"endpoint": "http://sparql:9000/sparql"},
+                "sparql_store": {"endpoint": "http://sparql:9000/sparql"},
             },
             "steps": {
                 "crawler": {"enabled": False, "output_dir": "data/raw-crawler"},
@@ -77,7 +81,7 @@ def test_quest_config_from_yaml(tmp_path: Path) -> None:
     assert cfg.quest.steps.metadata_extractor.input_dir == "data/raw-crawler"
     assert cfg.quest.steps.metadata_extractor.output_dir == "data/extracted-metadata"
     assert cfg.quest.services.neo4j.endpoint == "bolt://db:7687"
-    assert cfg.quest.services.tentris.endpoint == "http://sparql:9000/sparql"
+    assert cfg.quest.services.sparql_store.endpoint == "http://sparql:9000/sparql"
     assert cfg.quest.steps.metadata_extractor.enabled is True
 
 
@@ -107,6 +111,7 @@ def test_quest_config_rejects_removed_step_endpoints(tmp_path: Path) -> None:
 
 def test_build_tasks_all_enabled() -> None:
     cfg = QuestFileConfig()
+    cfg.quest.steps.apply_grimoire_projects.enabled = True
     tasks = build_tasks(cfg)
     assert [t.name for t in tasks] == list(STEP_NAMES)
 
@@ -114,22 +119,35 @@ def test_build_tasks_all_enabled() -> None:
 def test_build_tasks_skips_disabled() -> None:
     cfg = QuestFileConfig()
     cfg.quest.steps.crawler.enabled = False
-    cfg.quest.steps.tentris_upload.enabled = False
+    cfg.quest.steps.sparql_upload.enabled = False
 
     tasks = build_tasks(cfg)
     names = [t.name for t in tasks]
     assert "crawler" not in names
-    assert "tentris_upload" not in names
+    assert "sparql_upload" not in names
     assert "neo4j_upload" in names
     assert "metadata_extractor" in names
 
 
+def _noop_step(_ctx: dict[str, object]) -> None:
+    """No-op stand-in for steps whose real impl needs network/state in tests."""
+
+
 def test_pipeline_runs_all_steps(tmp_path: Path) -> None:
-    completed = run_pipeline(
-        tmp_path / "quest.yml",
-        checkpoint_dir=tmp_path,
-    )
-    assert completed == ("crawler", "neo4j_upload", "metadata_extractor", "tentris_upload")
+    with patch.dict(
+        "open_pulse.pipeline.runner.STEP_REGISTRY",
+        {
+            "crawler": _noop_step,
+            "neo4j_upload": _noop_step,
+            "metadata_extractor": _noop_step,
+            "sparql_upload": _noop_step,
+        },
+    ):
+        completed = run_pipeline(
+            tmp_path / "quest.yml",
+            checkpoint_dir=tmp_path,
+        )
+    assert completed == ("crawler", "neo4j_upload", "metadata_extractor", "sparql_upload")
 
 
 def test_pipeline_resumes_from_checkpoint(tmp_path: Path) -> None:
@@ -139,16 +157,25 @@ def test_pipeline_resumes_from_checkpoint(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    completed = run_pipeline(
-        tmp_path / "quest.yml",
-        resume=True,
-        checkpoint_dir=tmp_path,
-    )
+    with patch.dict(
+        "open_pulse.pipeline.runner.STEP_REGISTRY",
+        {
+            "crawler": _noop_step,
+            "neo4j_upload": _noop_step,
+            "metadata_extractor": _noop_step,
+            "sparql_upload": _noop_step,
+        },
+    ):
+        completed = run_pipeline(
+            tmp_path / "quest.yml",
+            resume=True,
+            checkpoint_dir=tmp_path,
+        )
     assert completed == (
         "crawler",
         "neo4j_upload",
         "metadata_extractor",
-        "tentris_upload",
+        "sparql_upload",
     )
 
 
@@ -177,16 +204,20 @@ def test_pipeline_retry_on_transient_failure(tmp_path: Path) -> None:
 
     with patch(
         "open_pulse.pipeline.runner.STEP_REGISTRY",
-        {"crawler": flaky, "neo4j_upload": flaky, "metadata_extractor": flaky, "tentris_upload": flaky},
+        {"crawler": flaky, "neo4j_upload": flaky, "metadata_extractor": flaky, "sparql_upload": flaky},
     ):
         completed = run_pipeline(config_file, checkpoint_dir=tmp_path)
 
-    assert "tentris_upload" in completed
+    assert "sparql_upload" in completed
     assert call_count == 2
 
 
 def test_single_step_runs_successfully(tmp_path: Path) -> None:
-    run_single_step(tmp_path / "quest.yml", "crawler")
+    with patch.dict(
+        "open_pulse.pipeline.runner.STEP_REGISTRY",
+        {"crawler": _noop_step},
+    ):
+        run_single_step(tmp_path / "quest.yml", "crawler")
 
 
 def test_single_step_unknown_raises() -> None:
@@ -201,7 +232,7 @@ def test_pipeline_closes_services_on_success(tmp_path: Path) -> None:
                 "crawler": {"enabled": False},
                 "neo4j_upload": {"enabled": False},
                 "metadata_extractor": {"enabled": False},
-                "tentris_upload": {"enabled": False},
+                "sparql_upload": {"enabled": False},
             }
         }
     }
@@ -225,7 +256,7 @@ def test_pipeline_closes_services_on_failure(tmp_path: Path) -> None:
                 "crawler": {"enabled": True},
                 "neo4j_upload": {"enabled": False},
                 "metadata_extractor": {"enabled": False},
-                "tentris_upload": {"enabled": False},
+                "sparql_upload": {"enabled": False},
             }
         }
     }
@@ -248,7 +279,7 @@ def test_pipeline_closes_services_on_failure(tmp_path: Path) -> None:
                 "crawler": fail,
                 "neo4j_upload": fail,
                 "metadata_extractor": fail,
-                "tentris_upload": fail,
+                "sparql_upload": fail,
             },
         ),
         pytest.raises(Exception),
@@ -290,7 +321,7 @@ def test_runner_injects_step_config_into_context(tmp_path: Path) -> None:
                 },
                 "neo4j_upload": {"enabled": False},
                 "metadata_extractor": {"enabled": False},
-                "tentris_upload": {"enabled": False},
+                "sparql_upload": {"enabled": False},
             }
         }
     }
@@ -311,19 +342,25 @@ def test_neo4j_upload_step_requires_services_context() -> None:
         run_neo4j_upload({})
 
 
-def test_tentris_upload_step_requires_services_context() -> None:
+def test_sparql_upload_step_requires_services_context() -> None:
     with pytest.raises(RuntimeError, match="ServiceContainer"):
-        run_tentris_upload({})
+        run_sparql_upload({})
 
 
-def test_upload_steps_use_service_container() -> None:
+def test_service_container_close_all_is_safe() -> None:
+    """ServiceContainer.close_all() shouldn't raise on a fresh container."""
+    from open_pulse.services.metadata_extractor import MetadataExtractorService
+
     services = ServiceContainer(
         neo4j=Neo4jService(endpoint="bolt://localhost:7687"),
-        tentris=TentrisService(endpoint="http://localhost:7502/sparql"),
+        sparql_store=SparqlStoreService(endpoint="http://localhost:7878"),
+        crawler=CrawlerService(
+            endpoint="http://localhost:8000",
+            api_token_env="CRAWLER_API_TOKEN",
+        ),
+        metadata_extractor=MetadataExtractorService(endpoint="http://localhost:1234"),
     )
-    ctx = {"services": services}
-    run_neo4j_upload(ctx)
-    run_tentris_upload(ctx)
+    services.close_all()
 
 
 # -- Quest CLI command tests -------------------------------------------------
@@ -332,7 +369,7 @@ def test_upload_steps_use_service_container() -> None:
 def test_quest_start_runs_pipeline() -> None:
     with patch(
         "open_pulse.commands.quest.run_pipeline",
-        return_value=("crawler", "neo4j_upload", "metadata_extractor", "tentris_upload"),
+        return_value=("crawler", "neo4j_upload", "metadata_extractor", "sparql_upload"),
     ):
         result = runner.invoke(app, ["quest", "start"])
     assert result.exit_code == 0
@@ -343,7 +380,7 @@ def test_quest_start_runs_pipeline() -> None:
 def test_quest_start_with_resume_flag() -> None:
     with patch(
         "open_pulse.commands.quest.run_pipeline",
-        return_value=("crawler", "neo4j_upload", "metadata_extractor", "tentris_upload"),
+        return_value=("crawler", "neo4j_upload", "metadata_extractor", "sparql_upload"),
     ) as mock_run:
         result = runner.invoke(app, ["quest", "start", "--resume"])
 

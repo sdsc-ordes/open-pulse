@@ -18,11 +18,24 @@ dependencies = [
   "pyyaml>=6.0",
   "python-dotenv>=1.1",
   "rich>=13.9",
+  "httpx>=0.27",
+  "neo4j>=5.20",
+  "rdflib>=7.0",
 ]
 
 [project.optional-dependencies]
 grimoire-ui = [
   "streamlit>=1.41",
+]
+hub = [
+  # FastAPI surface for `open-pulse gui hub serve`. Heavy enough that we
+  # don't want it pulled into a CLI-only install.
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.20",
+  "docker>=7.1",
+  "duckdb>=1.1",
 ]
 
 [project.scripts]

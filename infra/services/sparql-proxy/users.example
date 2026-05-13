@@ -1,0 +1,12 @@
+# SPARQL proxy users — example file.
+#
+# Copy this to `users` (gitignored) and replace each line with a real user +
+# bcrypt hash. Each line: `<username> <bcrypt-hash>`.
+#
+# Generate a hash inside the Caddy container:
+#   docker run --rm caddy:2 caddy hash-password --plaintext 'your-password'
+#
+# Then paste the resulting `$2a$14$...` hash here, after the username.
+
+admin $2a$14$EXAMPLE_HASH_REPLACE_ME_WITH_REAL_BCRYPT_HASH_FROM_CADDY_HASHPASSWORD
+loader $2a$14$EXAMPLE_HASH_REPLACE_ME_WITH_REAL_BCRYPT_HASH_FROM_CADDY_HASHPASSWORD

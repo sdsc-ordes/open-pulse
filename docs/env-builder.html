@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open Pulse | .env builder</title>
+  <meta name="description" content="Interactive builder for the Open Pulse infra/.env file. Walks through every variable and generates a ready-to-use config — entirely in-browser.">
+  <meta name="theme-color" content="#0b1019">
+  <link rel="icon" type="image/svg+xml" href="./statics/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  >
+  <link rel="stylesheet" href="./assets/css/style.css">
+  <style>
+    /* ── Layout overrides for the builder page ───────────────────────────── */
+    .builder-shell {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: clamp(1rem, 2.4vw, 2rem) clamp(0.9rem, 2vw, 1.8rem) 3rem;
+      color: var(--text);
+    }
+
+    .builder-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.8rem;
+      margin-bottom: 1.2rem;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: clamp(0.78rem, 1vw, 0.92rem);
+      color: var(--link);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      padding: 0.25rem 0;
+    }
+    .back-link:hover,
+    .back-link:focus-visible { border-bottom-color: currentColor; }
+
+    .builder-title {
+      margin: 0;
+      font-family: "Manrope", "Segoe UI", sans-serif;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-size: clamp(1rem, 1.6vw, 1.35rem);
+      font-weight: 600;
+      color: color-mix(in srgb, var(--text) 82%, var(--accent) 18%);
+      text-shadow: 0 0 14px rgba(58, 134, 255, 0.18);
+    }
+
+    .builder-intro {
+      max-width: 78ch;
+      margin: 0 0 1.6rem;
+      color: var(--text-muted);
+      font-size: clamp(0.82rem, 1.05vw, 0.95rem);
+      line-height: 1.5;
+    }
+    .builder-intro code {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
+      padding: 0.05rem 0.32rem;
+      border-radius: 4px;
+      font-size: 0.92em;
+    }
+
+    .builder-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+      gap: clamp(1rem, 2vw, 1.8rem);
+      align-items: start;
+    }
+
+    .form-pane {
+      display: flex;
+      flex-direction: column;
+      gap: 1.3rem;
+      min-width: 0;
+    }
+
+    .preview-pane {
+      position: sticky;
+      top: 0.8rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+      max-height: calc(100dvh - 1.6rem);
+      min-width: 0;
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 1rem;
+      background: var(--panel-bg);
+      backdrop-filter: blur(6px);
+      box-shadow: var(--shadow);
+    }
+
+    .preview-pane h2 {
+      margin: 0;
+      font-size: clamp(0.78rem, 1vw, 0.92rem);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: color-mix(in srgb, var(--text) 82%, var(--accent) 18%);
+    }
+    .preview-pane .preview-meta {
+      margin: 0;
+      font-size: clamp(0.7rem, 0.9vw, 0.82rem);
+      color: var(--text-muted);
+    }
+
+    .preview-area {
+      flex: 1 1 auto;
+      min-height: 240px;
+      overflow: auto;
+      border-radius: 8px;
+      background: color-mix(in srgb, #050810 88%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+      padding: 0.75rem 0.9rem;
+    }
+    [data-theme="light"] .preview-area {
+      background: color-mix(in srgb, #ffffff 90%, transparent);
+    }
+
+    .preview-area pre {
+      margin: 0;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: clamp(0.7rem, 0.85vw, 0.8rem);
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: color-mix(in srgb, var(--text) 92%, var(--accent) 8%);
+    }
+
+    .preview-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .builder-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 0.95rem;
+      font-family: inherit;
+      font-size: clamp(0.78rem, 0.96vw, 0.88rem);
+      font-weight: 600;
+      border-radius: 8px;
+      border: 1px solid var(--accent);
+      background: color-mix(in srgb, var(--accent) 18%, transparent);
+      color: var(--text);
+      cursor: pointer;
+      transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+    }
+    .builder-btn:hover,
+    .builder-btn:focus-visible {
+      background: color-mix(in srgb, var(--accent) 32%, transparent);
+      transform: translateY(-1px);
+    }
+    .builder-btn.secondary {
+      background: transparent;
+      border-color: var(--panel-border);
+    }
+    .builder-btn.secondary:hover,
+    .builder-btn.secondary:focus-visible {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .builder-btn[disabled] { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+    .status-msg {
+      font-size: clamp(0.72rem, 0.92vw, 0.84rem);
+      color: var(--text-muted);
+      min-height: 1.2em;
+    }
+    .status-msg.ok { color: color-mix(in srgb, var(--accent) 75%, var(--text)); }
+    .status-msg.warn { color: #f59e0b; }
+    .status-msg.err { color: #ef4444; }
+
+    fieldset.section {
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 0.9rem 1.1rem 1.1rem;
+      background: var(--panel-bg);
+      backdrop-filter: blur(4px);
+    }
+    fieldset.section legend {
+      padding: 0 0.4rem;
+      font-family: "Manrope", "Segoe UI", sans-serif;
+      font-size: clamp(0.78rem, 1vw, 0.94rem);
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--text) 78%, var(--accent) 22%);
+    }
+    .section-hint {
+      margin: 0.1rem 0 0.8rem;
+      font-size: clamp(0.72rem, 0.92vw, 0.84rem);
+      color: var(--text-muted);
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      margin-bottom: 0.85rem;
+    }
+    .field:last-child { margin-bottom: 0; }
+
+    .field-label {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.4rem;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: clamp(0.76rem, 0.95vw, 0.86rem);
+      font-weight: 500;
+      color: color-mix(in srgb, var(--text) 92%, var(--accent) 8%);
+    }
+    .badge {
+      font-family: "Manrope", "Segoe UI", sans-serif;
+      font-size: 0.66rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 0.08rem 0.42rem;
+      border-radius: 999px;
+      border: 1px solid currentColor;
+      line-height: 1.4;
+    }
+    .badge.required { color: #f87171; }
+    .badge.optional { color: color-mix(in srgb, var(--text-muted) 75%, var(--accent) 25%); }
+
+    .field-desc {
+      margin: 0;
+      font-size: clamp(0.7rem, 0.88vw, 0.8rem);
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    .field input[type="text"],
+    .field input[type="password"],
+    .field input[type="number"],
+    .field select {
+      width: 100%;
+      padding: 0.45rem 0.65rem;
+      font: inherit;
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: clamp(0.74rem, 0.94vw, 0.84rem);
+      background: color-mix(in srgb, var(--bg) 65%, transparent);
+      color: var(--text);
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      transition: border-color 140ms ease, box-shadow 140ms ease;
+    }
+    .field input:focus,
+    .field select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+    }
+    .field input.invalid { border-color: #ef4444; }
+    .field input.invalid:focus { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25); }
+
+    .field-error {
+      margin: 0;
+      font-size: 0.74rem;
+      color: #f87171;
+      min-height: 1em;
+    }
+
+    .password-row { display: flex; gap: 0.4rem; align-items: stretch; }
+    .password-row input { flex: 1; }
+    .password-row .builder-btn {
+      padding: 0.35rem 0.55rem;
+      font-size: 0.74rem;
+    }
+
+    .validation-summary {
+      margin-top: 0.4rem;
+      padding: 0.55rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid color-mix(in srgb, #f59e0b 45%, transparent);
+      background: color-mix(in srgb, #f59e0b 12%, transparent);
+      color: #fbbf24;
+      font-size: 0.78rem;
+      line-height: 1.45;
+    }
+    .validation-summary[hidden] { display: none; }
+    .validation-summary ul { margin: 0.2rem 0 0; padding-left: 1.2rem; }
+
+    .builder-footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+      color: var(--text-muted);
+      font-size: clamp(0.72rem, 0.9vw, 0.82rem);
+    }
+    .builder-footer a { color: var(--link); }
+
+    @media (max-width: 980px) {
+      .builder-grid { grid-template-columns: 1fr; }
+      .preview-pane {
+        position: static;
+        max-height: none;
+        order: 2;
+      }
+      .form-pane { order: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .builder-btn,
+      .field input,
+      .field select { transition: none !important; }
+      .builder-btn:hover,
+      .builder-btn:focus-visible { transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="builder-shell" id="main-content">
+    <div class="builder-top">
+      <a class="back-link" href="./index.html" aria-label="Back to the Open Pulse landing page">
+        <span aria-hidden="true">&larr;</span>
+        <span>Back to Open Pulse</span>
+      </a>
+      <h1 class="builder-title">Open Pulse &middot; .env builder</h1>
+    </div>
+
+    <p class="builder-intro">
+      Walk through every environment variable used by the Open Pulse stack and download a ready-to-drop
+      <code>infra/.env</code>. Everything runs in your browser &mdash; no values are sent anywhere.
+      Required fields are marked; defaults from <code>infra/.env.example</code> are pre-populated.
+    </p>
+
+    <div class="builder-grid">
+      <form id="env-form" class="form-pane" autocomplete="off" novalidate aria-label="Environment variables form">
+        <!-- Sections injected by JS -->
+      </form>
+
+      <aside class="preview-pane" aria-label="Generated .env preview">
+        <h2>Generated <code style="font-family:'JetBrains Mono',monospace">.env</code></h2>
+        <p class="preview-meta">Live preview &mdash; updates as you type. Save to <code style="font-family:'JetBrains Mono',monospace">&lt;repo&gt;/infra/.env</code>.</p>
+        <div class="preview-area" tabindex="0" aria-live="polite" aria-atomic="false">
+          <pre id="preview" role="document"></pre>
+        </div>
+        <div class="preview-actions">
+          <button type="button" class="builder-btn" id="download-btn" aria-describedby="status-msg">
+            <span aria-hidden="true">&darr;</span>
+            <span>Download .env</span>
+          </button>
+          <button type="button" class="builder-btn secondary" id="copy-btn" aria-describedby="status-msg">
+            <span aria-hidden="true">&#x2398;</span>
+            <span>Copy to clipboard</span>
+          </button>
+        </div>
+        <p class="status-msg" id="status-msg" role="status"></p>
+        <div class="validation-summary" id="validation-summary" hidden aria-live="polite">
+          <strong>Heads-up:</strong>
+          <ul id="validation-list"></ul>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="builder-footer">
+      <p>
+        Variable inventory and descriptions are pulled from
+        <a href="https://github.com/sdsc-ordes/open-pulse/blob/main/infra/.env.example" target="_blank" rel="noopener noreferrer"><code style="font-family:'JetBrains Mono',monospace">infra/.env.example</code></a>.
+        See the project <a href="https://github.com/sdsc-ordes/open-pulse" target="_blank" rel="noopener noreferrer">README</a> for the deployment workflow.
+      </p>
+    </footer>
+  </main>
+
+  <script>
+    'use strict';
+
+    // ── Variable inventory ─────────────────────────────────────────────────
+    // Descriptions are trimmed from comments adjacent to each var in
+    // infra/.env.example. `type`: text | password | number | select | boolean.
+    // `required` is true if the var must be present in a usable .env.
+    const SECTIONS = [
+      {
+        id: 'storage',
+        title: 'Storage paths',
+        hint: 'Where the stack keeps state on disk. Use absolute Linux paths on Linux hosts.',
+        fields: [
+          {
+            name: 'OPEN_PULSE_DATA_DIR',
+            label: 'OPEN_PULSE_DATA_DIR',
+            desc: 'Host directory that backs every persistent service. Absolute path (e.g. /home/me/open-pulse/data). Auto-substituted by the CLI when seeding the template.',
+            type: 'text', required: true, default: './data',
+            validate: 'absolute-path',
+          },
+          {
+            name: 'OPEN_PULSE_HOST_PATH',
+            label: 'OPEN_PULSE_HOST_PATH',
+            desc: 'Absolute host path of this repo. Used by the CLI orchestrator container so its bind-mount root matches the host filesystem.',
+            type: 'text', required: true, default: '',
+            placeholder: '/home/me/open-pulse',
+            validate: 'absolute-path',
+          },
+          {
+            name: 'GRIMOIRE_DATA_DIR',
+            label: 'GRIMOIRE_DATA_DIR',
+            desc: 'Overrides the grimoirelab data root. Defaults to ${OPEN_PULSE_DATA_DIR}/grimoirelab.',
+            type: 'text', required: false, default: '',
+            validate: 'absolute-path-or-empty',
+          },
+        ],
+      },
+      {
+        id: 'images',
+        title: 'Image references',
+        hint: 'Pin specific image tags or point at locally built images.',
+        fields: [
+          {
+            name: 'OPEN_PULSE_IMAGE',
+            label: 'OPEN_PULSE_IMAGE',
+            desc: 'Single image used for the CLI orchestrator AND the hub. Override to pin a tag or use a locally built image.',
+            type: 'text', required: true, default: 'ghcr.io/sdsc-ordes/open-pulse:latest',
+          },
+          {
+            name: 'CRAWLER_IMAGE',
+            label: 'CRAWLER_IMAGE',
+            desc: 'Override to pin a specific crawler image tag.',
+            type: 'text', required: false, default: 'ghcr.io/sdsc-ordes/open-pulse-crawler:develop',
+          },
+          {
+            name: 'EXTRACTOR_IMAGE',
+            label: 'EXTRACTOR_IMAGE',
+            desc: 'Override to pin a specific extractor (gimie / git-metadata-extractor) image tag.',
+            type: 'text', required: false, default: 'ghcr.io/imaging-plaza/git-metadata-extractor:develop',
+          },
+          {
+            name: 'OPEN_PULSE_APPLIER_IMAGE',
+            label: 'OPEN_PULSE_APPLIER_IMAGE',
+            desc: 'Applier sidecar image. Not published — build locally from infra/open-pulse-stack/grimoirelab/applier and pin the tag.',
+            type: 'text', required: false, default: 'open-pulse-applier:local',
+          },
+        ],
+      },
+      {
+        id: 'neo4j',
+        title: 'Neo4j (default profile)',
+        hint: 'Graph DB. Heap ≤ 50% of mem_limit so the rest is free for off-heap (page cache, GC, native).',
+        fields: [
+          { name: 'NEO4J_HTTP_PORT', label: 'NEO4J_HTTP_PORT', desc: 'Host port for the Neo4j Browser HTTP UI.', type: 'number', required: true, default: '7474', validate: 'port' },
+          { name: 'NEO4J_BOLT_PORT', label: 'NEO4J_BOLT_PORT', desc: 'Host port for the Bolt protocol (driver connections).', type: 'number', required: true, default: '7687', validate: 'port' },
+          {
+            name: 'NEO4J_AUTH', label: 'NEO4J_AUTH',
+            desc: 'user/password. Default convention is replace-me for the password — change before any non-local deployment.',
+            type: 'text', required: true, default: 'neo4j/replace-me',
+          },
+          { name: 'NEO4J_PLUGINS', label: 'NEO4J_PLUGINS', desc: 'JSON array of Neo4j plugin names to install on first boot.', type: 'text', required: false, default: '["graph-data-science","apoc"]' },
+          { name: 'NEO4J_UNRESTRICTED', label: 'NEO4J_UNRESTRICTED', desc: 'Procedure pattern allowed unrestricted access (default: apoc.*).', type: 'text', required: false, default: 'apoc.*' },
+          { name: 'NEO4J_ALLOWLIST', label: 'NEO4J_ALLOWLIST', desc: 'Procedure pattern allow-listed for execution (default: apoc.*).', type: 'text', required: false, default: 'apoc.*' },
+          { name: 'NEO4J_HEAP', label: 'NEO4J_HEAP', desc: 'JVM heap size. Keep ≤ 50% of NEO4J_MEM_LIMIT.', type: 'text', required: false, default: '1g' },
+          { name: 'NEO4J_PAGECACHE', label: 'NEO4J_PAGECACHE', desc: 'Neo4j off-heap page cache size.', type: 'text', required: false, default: '512m' },
+          { name: 'NEO4J_MEM_LIMIT', label: 'NEO4J_MEM_LIMIT', desc: 'Container memory ceiling (mem_limit in compose).', type: 'text', required: false, default: '2g' },
+          { name: 'NEO4J_CPUS', label: 'NEO4J_CPUS', desc: 'Container CPU limit (cpus in compose).', type: 'text', required: false, default: '2.0' },
+        ],
+      },
+      {
+        id: 'sparql',
+        title: 'SPARQL stack (--profile sparql)',
+        hint: 'Oxigraph triplestore + Caddy auth proxy. Writes are gated by HTTP Basic.',
+        fields: [
+          {
+            name: 'OXIGRAPH_PORT', label: 'OXIGRAPH_PORT',
+            desc: 'Only used by the standalone compose at infra/services/oxigraph/. In the main stack, Oxigraph is reachable only via the sparql-proxy.',
+            type: 'number', required: false, default: '7878', validate: 'port',
+          },
+          { name: 'SPARQL_PROXY_PORT', label: 'SPARQL_PROXY_PORT', desc: 'Host port for the Caddy auth proxy in front of Oxigraph.', type: 'number', required: true, default: '7878', validate: 'port' },
+          {
+            name: 'SPARQL_AUTH', label: 'SPARQL_AUTH',
+            desc: 'username/password — HTTP Basic for SPARQL writes through Caddy. Match the user(s) in infra/services/sparql-proxy/users.',
+            type: 'text', required: true, default: 'openpulse/replace-me',
+          },
+        ],
+      },
+      {
+        id: 'crawler',
+        title: 'Crawler (--profile crawler)',
+        hint: 'GitHub crawler API. Needs a GitHub PAT to be useful.',
+        fields: [
+          { name: 'CRAWLER_PORT', label: 'CRAWLER_PORT', desc: 'Host port for the crawler API (commented out by default — service uses an internal port).', type: 'number', required: false, default: '8000', validate: 'port' },
+          { name: 'CRAWLER_API_TOKEN', label: 'CRAWLER_API_TOKEN', desc: 'Bearer token clients send to the crawler API.', type: 'password', required: true, default: 'replace-me' },
+          {
+            name: 'CRAWLER_GITHUB_TOKEN', label: 'CRAWLER_GITHUB_TOKEN',
+            desc: 'GitHub PAT(s) the crawler uses to call the GitHub API. Comma-separated for multi-token rotation. Required when --profile crawler is active.',
+            type: 'password', required: false, default: '',
+          },
+        ],
+      },
+      {
+        id: 'extractor',
+        title: 'Extractor (--profile extractor)',
+        hint: 'git-metadata-extractor (gimie). Needs at least one LLM provider key and a GitHub PAT to be useful.',
+        fields: [
+          { name: 'EXTRACTOR_PORT', label: 'EXTRACTOR_PORT', desc: 'Host port for the extractor service (commented out by default — service uses an internal port).', type: 'number', required: false, default: '1234', validate: 'port' },
+          { name: 'EXTRACTOR_MODEL', label: 'EXTRACTOR_MODEL', desc: 'Default LLM model id used by the extractor.', type: 'text', required: false, default: 'gpt-4o-mini' },
+          {
+            name: 'EXTRACTOR_PROVIDER', label: 'EXTRACTOR_PROVIDER',
+            desc: 'LLM provider the extractor talks to.',
+            type: 'select', required: false, default: 'openai',
+            options: [
+              { value: 'openai', label: 'openai' },
+              { value: 'openrouter', label: 'openrouter' },
+              { value: 'rcp', label: 'rcp' },
+            ],
+          },
+          { name: 'EXTRACTOR_MAX_CACHE_ENTRIES', label: 'EXTRACTOR_MAX_CACHE_ENTRIES', desc: 'Maximum entries kept in the in-memory extraction cache.', type: 'number', required: false, default: '5000' },
+          { name: 'EXTRACTOR_MAX_SELENIUM_SESSIONS', label: 'EXTRACTOR_MAX_SELENIUM_SESSIONS', desc: 'Concurrent Selenium sessions allowed (browser-driven scraping).', type: 'number', required: false, default: '1' },
+          { name: 'EXTRACTOR_WORKERS', label: 'EXTRACTOR_WORKERS', desc: 'Async worker count for the extractor service.', type: 'number', required: false, default: '2' },
+          {
+            name: 'EXTRACTOR_API_TOKEN', label: 'EXTRACTOR_API_TOKEN',
+            desc: 'Server-side bearer the extractor v2 path requires (HTTP 503 if empty). Self-check; the open-pulse client does not actually send this.',
+            type: 'password', required: true, default: 'replace-me',
+          },
+          { name: 'EXTRACTOR_OPENAI_API_KEY', label: 'EXTRACTOR_OPENAI_API_KEY', desc: 'OpenAI API key for the extractor. At least one LLM provider key required when --profile extractor is active.', type: 'password', required: false, default: '' },
+          { name: 'EXTRACTOR_OPENROUTER_API_KEY', label: 'EXTRACTOR_OPENROUTER_API_KEY', desc: 'OpenRouter API key (alternative LLM provider).', type: 'password', required: false, default: '' },
+          { name: 'EXTRACTOR_GITHUB_TOKEN', label: 'EXTRACTOR_GITHUB_TOKEN', desc: 'GitHub PAT — required (the extractor calls GitHub for every repo).', type: 'password', required: false, default: '' },
+          { name: 'EXTRACTOR_GITLAB_TOKEN', label: 'EXTRACTOR_GITLAB_TOKEN', desc: 'Optional: GitLab PAT for non-GitHub sources.', type: 'password', required: false, default: '' },
+          { name: 'EXTRACTOR_INFOSCIENCE_TOKEN', label: 'EXTRACTOR_INFOSCIENCE_TOKEN', desc: 'Optional: EPFL Infoscience token for the Infoscience source.', type: 'password', required: false, default: '' },
+          { name: 'V2_PROVIDER_CACHE_PATH', label: 'V2_PROVIDER_CACHE_PATH', desc: 'On-disk path for the extractor v2 provider cache DB.', type: 'text', required: false, default: '/app/data/.cache/v2/providers.db' },
+          {
+            name: 'V2_USE_MOCK_PROVIDERS', label: 'V2_USE_MOCK_PROVIDERS',
+            desc: 'When true, the v2 runtime uses mock providers instead of calling out — useful for development and tests.',
+            type: 'boolean', required: false, default: 'false',
+          },
+          { name: 'RCP_TOKEN', label: 'RCP_TOKEN', desc: 'Token for the RCP LLM-as-a-service provider (alternative to OpenAI/OpenRouter).', type: 'password', required: false, default: '' },
+          { name: 'HF_TOKEN', label: 'HF_TOKEN', desc: 'Hugging Face token used by some v2 providers / RAG indices.', type: 'password', required: false, default: '' },
+          { name: 'OPENALEX_MAILTO', label: 'OPENALEX_MAILTO', desc: 'Contact email sent to OpenAlex with API requests (polite pool).', type: 'text', required: false, default: '' },
+          { name: 'INDEX_QDRANT_URL', label: 'INDEX_QDRANT_URL', desc: 'Qdrant endpoint for RAG indices (devcontainer service name by default).', type: 'text', required: false, default: 'http://gme-qdrant:6333' },
+        ],
+      },
+      {
+        id: 'hub',
+        title: 'Hub (--profile hub)',
+        hint: 'Web dashboard. Most users want this.',
+        fields: [
+          { name: 'HUB_PORT', label: 'HUB_PORT', desc: 'Host port for the hub dashboard.', type: 'number', required: true, default: '9090', validate: 'port' },
+          {
+            name: 'HUB_AUTH', label: 'HUB_AUTH',
+            desc: 'Login password for the dashboard. Username is free-form (only the password is checked).',
+            type: 'password', required: true, default: 'replace-me',
+          },
+          { name: 'HUB_NEO4J_BROWSER_URL', label: 'HUB_NEO4J_BROWSER_URL', desc: 'User-facing URL of the Neo4j Browser (host-published port).', type: 'text', required: false, default: 'http://localhost:7474' },
+          { name: 'HUB_SPARQL_BROWSER_URL', label: 'HUB_SPARQL_BROWSER_URL', desc: 'User-facing URL of the SPARQL store (Oxigraph behind sparql-proxy).', type: 'text', required: false, default: 'http://localhost:7878' },
+          { name: 'HUB_OPENSEARCH_DASHBOARDS_URL', label: 'HUB_OPENSEARCH_DASHBOARDS_URL', desc: 'User-facing URL of OpenSearch Dashboards.', type: 'text', required: false, default: 'http://localhost:5601' },
+        ],
+      },
+      {
+        id: 'portainer',
+        title: 'Portainer (--profile orchestration)',
+        hint: 'Optional container management UI. 7508 is reserved by Kibiter — pick a different port.',
+        fields: [
+          { name: 'PORTAINER_PORT', label: 'PORTAINER_PORT', desc: 'Host port for the Portainer UI. 7508 is reserved by Kibiter — pick a different port.', type: 'number', required: false, default: '9000', validate: 'port' },
+          { name: 'PORTAINER_HASHED_PASSWORD', label: 'PORTAINER_HASHED_PASSWORD', desc: 'bcrypt hash of the initial admin password. Note the doubled $$ — compose escaping.', type: 'text', required: false, default: '$$2y$$10$$replace-with-bcrypt-hash' },
+        ],
+      },
+      {
+        id: 'grimoirelab-db',
+        title: 'GrimoireLab DB (lightweight pair)',
+        hint: 'Minimal DB credentials used by the lightweight --profile grimoirelab stack.',
+        fields: [
+          { name: 'GRIMOIRELAB_DB_USER', label: 'GRIMOIRELAB_DB_USER', desc: 'Database user for the lightweight grimoirelab pair.', type: 'text', required: false, default: 'openpulse' },
+          { name: 'GRIMOIRELAB_DB_PASSWORD', label: 'GRIMOIRELAB_DB_PASSWORD', desc: 'Database password for the lightweight grimoirelab pair.', type: 'password', required: false, default: 'replace-me' },
+          { name: 'GRIMOIRELAB_DB_NAME', label: 'GRIMOIRELAB_DB_NAME', desc: 'Database name for the lightweight grimoirelab pair.', type: 'text', required: false, default: 'grimoirelab' },
+        ],
+      },
+      {
+        id: 'grimoirelab-full',
+        title: 'Full GrimoireLab stack (--with-grimoire)',
+        hint: 'Heavy ingestion stack: MySQL, OpenSearch, SortingHat, nginx. OpenSearch enforces uppercase + lowercase + digit + special, min 8 chars.',
+        fields: [
+          { name: 'APPLIER_AUTH', label: 'APPLIER_AUTH', desc: 'Bearer token for the projects-applier sidecar.', type: 'password', required: false, default: 'replace-me' },
+          { name: 'MYSQL_ROOT_PASSWORD', label: 'MYSQL_ROOT_PASSWORD', desc: 'Root password for the MariaDB instance.', type: 'password', required: false, default: 'replace-me' },
+          {
+            name: 'MYSQL_ALLOW_EMPTY_PASSWORD', label: 'MYSQL_ALLOW_EMPTY_PASSWORD',
+            desc: 'Whether MariaDB allows an empty root password on init.',
+            type: 'select', required: false, default: 'no',
+            options: [{ value: 'no', label: 'no' }, { value: 'yes', label: 'yes' }],
+          },
+          { name: 'OPENSEARCH_USERNAME', label: 'OPENSEARCH_USERNAME', desc: 'OpenSearch security plugin forces the admin user name to admin.', type: 'text', required: false, default: 'admin' },
+          {
+            name: 'OPENSEARCH_PASSWORD', label: 'OPENSEARCH_PASSWORD',
+            desc: 'OpenSearch enforces strong passwords (uppercase + lowercase + digit + special, min 8). Replace-Me-1! satisfies the regex; rotate before non-local deployment.',
+            type: 'password', required: false, default: 'Replace-Me-1!',
+            validate: 'opensearch-pw',
+          },
+          {
+            name: 'OPENSEARCH_INITIAL_ADMIN_PASSWORD', label: 'OPENSEARCH_INITIAL_ADMIN_PASSWORD',
+            desc: 'Initial admin password for OpenSearch. Same strength rules as OPENSEARCH_PASSWORD.',
+            type: 'password', required: false, default: 'Replace-Me-1!',
+            validate: 'opensearch-pw',
+          },
+          { name: 'OPENSEARCH_JAVA_OPTS', label: 'OPENSEARCH_JAVA_OPTS', desc: 'JVM options for the OpenSearch node (heap sizing typically).', type: 'text', required: false, default: '-Xms1g -Xmx1g' },
+          { name: 'SORTINGHAT_SECRET_KEY', label: 'SORTINGHAT_SECRET_KEY', desc: 'Django secret key for SortingHat. Rotate before non-local deployment.', type: 'password', required: false, default: 'replace-me' },
+          { name: 'SORTINGHAT_HOST', label: 'SORTINGHAT_HOST', desc: 'Hostname SortingHat is reachable at on the compose network.', type: 'text', required: false, default: 'nginx' },
+          { name: 'SORTINGHAT_PORT', label: 'SORTINGHAT_PORT', desc: 'Port SortingHat listens on inside the network.', type: 'number', required: false, default: '8000', validate: 'port' },
+          { name: 'SORTINGHAT_DB_HOST', label: 'SORTINGHAT_DB_HOST', desc: 'DB host SortingHat connects to.', type: 'text', required: false, default: 'mariadb' },
+          { name: 'SORTINGHAT_DB_PORT', label: 'SORTINGHAT_DB_PORT', desc: 'DB port SortingHat connects to.', type: 'number', required: false, default: '3306', validate: 'port' },
+          { name: 'SORTINGHAT_DB_DATABASE', label: 'SORTINGHAT_DB_DATABASE', desc: 'Database name SortingHat uses.', type: 'text', required: false, default: 'sortinghat_db' },
+          { name: 'SORTINGHAT_DB_USER', label: 'SORTINGHAT_DB_USER', desc: 'MariaDB init uses root for schema creation; keep as-is.', type: 'text', required: false, default: 'root' },
+          { name: 'SORTINGHAT_DB_PASSWORD', label: 'SORTINGHAT_DB_PASSWORD', desc: 'DB password SortingHat uses (matches MYSQL_ROOT_PASSWORD).', type: 'password', required: false, default: 'replace-me' },
+          { name: 'SORTINGHAT_REDIS_HOST', label: 'SORTINGHAT_REDIS_HOST', desc: 'Redis/Valkey host SortingHat uses for caching/queues.', type: 'text', required: false, default: 'valkey' },
+          { name: 'SORTINGHAT_REDIS_PASSWORD', label: 'SORTINGHAT_REDIS_PASSWORD', desc: 'Redis/Valkey password.', type: 'password', required: false, default: 'replace-me' },
+          { name: 'SORTINGHAT_SUPERUSER_USERNAME', label: 'SORTINGHAT_SUPERUSER_USERNAME', desc: 'Initial Django superuser created for SortingHat.', type: 'text', required: false, default: 'openpulse' },
+          { name: 'SORTINGHAT_SUPERUSER_PASSWORD', label: 'SORTINGHAT_SUPERUSER_PASSWORD', desc: 'Password for the initial SortingHat superuser.', type: 'password', required: false, default: 'replace-me' },
+          { name: 'KIBANA_HOST', label: 'KIBANA_HOST', desc: 'In-network URL of OpenSearch Dashboards (Kibiter compatibility variable).', type: 'text', required: false, default: 'http://opensearch-dashboards:5601/' },
+          {
+            name: 'GRIMOIRE_ENABLE_GIT_PULL', label: 'GRIMOIRE_ENABLE_GIT_PULL',
+            desc: 'Whether Mordred pulls git history on each intake cron tick.',
+            type: 'boolean', required: false, default: 'true',
+          },
+          { name: 'GRIMOIRE_INTAKE_CRON_SCHEDULE', label: 'GRIMOIRE_INTAKE_CRON_SCHEDULE', desc: 'Cron expression for the GrimoireLab intake sidecar.', type: 'text', required: false, default: '*/5 * * * *' },
+          { name: 'GRIMOIRE_GITHUB_TOKEN', label: 'GRIMOIRE_GITHUB_TOKEN', desc: 'Optional: separate PAT for the grimoire intake cron sidecar.', type: 'password', required: false, default: '' },
+        ],
+      },
+      {
+        id: 'analysis',
+        title: 'Analysis notebook (--profile analysis)',
+        hint: 'Optional Jupyter notebook profile for ad-hoc analysis.',
+        fields: [
+          { name: 'ANALYSIS_NOTEBOOK_PORT', label: 'ANALYSIS_NOTEBOOK_PORT', desc: 'Host port for the analysis Jupyter notebook.', type: 'number', required: false, default: '8888', validate: 'port' },
+        ],
+      },
+    ];
+
+    // ── State ─────────────────────────────────────────────────────────────
+    const state = Object.create(null);
+    const fieldIndex = Object.create(null); // name → field def
+    SECTIONS.forEach(section => {
+      section.fields.forEach(f => {
+        state[f.name] = f.default;
+        fieldIndex[f.name] = f;
+      });
+    });
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+    function el(tag, attrs = {}, ...children) {
+      const node = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (v === null || v === undefined || v === false) continue;
+        if (k === 'class') node.className = v;
+        else if (k === 'text') node.textContent = v;
+        else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
+        else if (k === 'html') node.innerHTML = v;
+        else node.setAttribute(k, v === true ? '' : String(v));
+      }
+      for (const c of children) {
+        if (c == null) continue;
+        node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+      }
+      return node;
+    }
+
+    function inputIdFor(name) { return 'fld-' + name; }
+    function errorIdFor(name) { return 'err-' + name; }
+
+    // ── Form rendering ────────────────────────────────────────────────────
+    function buildForm() {
+      const form = document.getElementById('env-form');
+      for (const section of SECTIONS) {
+        const fs = el('fieldset', { class: 'section', id: 'section-' + section.id });
+        fs.appendChild(el('legend', { text: section.title }));
+        if (section.hint) fs.appendChild(el('p', { class: 'section-hint', text: section.hint }));
+
+        for (const f of section.fields) {
+          const fieldId = inputIdFor(f.name);
+          const errId = errorIdFor(f.name);
+          const wrap = el('div', { class: 'field' });
+
+          const label = el('label', { class: 'field-label', for: fieldId });
+          label.appendChild(el('span', { text: f.label }));
+          label.appendChild(el('span', {
+            class: 'badge ' + (f.required ? 'required' : 'optional'),
+            text: f.required ? 'required' : 'optional',
+          }));
+          wrap.appendChild(label);
+
+          if (f.desc) wrap.appendChild(el('p', { class: 'field-desc', id: 'desc-' + f.name, text: f.desc }));
+
+          let input;
+          if (f.type === 'select' || f.type === 'boolean') {
+            input = el('select', { id: fieldId, name: f.name, 'aria-describedby': 'desc-' + f.name + ' ' + errId });
+            const opts = f.type === 'boolean'
+              ? [{ value: 'true', label: 'true' }, { value: 'false', label: 'false' }]
+              : f.options;
+            for (const opt of opts) {
+              const o = el('option', { value: opt.value, text: opt.label });
+              if (String(opt.value) === String(state[f.name])) o.selected = true;
+              input.appendChild(o);
+            }
+          } else {
+            const isPwd = f.type === 'password';
+            const inputType = f.type === 'number' ? 'number' : (isPwd ? 'password' : 'text');
+            input = el('input', {
+              id: fieldId, name: f.name, type: inputType,
+              value: state[f.name], placeholder: f.placeholder || f.default || '',
+              'aria-describedby': 'desc-' + f.name + ' ' + errId,
+              autocomplete: 'off', spellcheck: 'false',
+            });
+            if (f.validate === 'port') {
+              input.setAttribute('min', '1');
+              input.setAttribute('max', '65535');
+              input.setAttribute('inputmode', 'numeric');
+            }
+          }
+          input.addEventListener('input', () => onFieldChange(f.name, input));
+          input.addEventListener('change', () => onFieldChange(f.name, input));
+
+          if (f.type === 'password') {
+            const row = el('div', { class: 'password-row' });
+            row.appendChild(input);
+            const reveal = el('button', {
+              type: 'button', class: 'builder-btn secondary',
+              'aria-label': 'Show or hide ' + f.label,
+              title: 'Show / hide',
+              onclick: () => {
+                input.type = input.type === 'password' ? 'text' : 'password';
+              },
+            }, el('span', { 'aria-hidden': 'true', text: '\u{1F441}' }));
+            row.appendChild(reveal);
+            wrap.appendChild(row);
+          } else {
+            wrap.appendChild(input);
+          }
+
+          wrap.appendChild(el('p', { class: 'field-error', id: errId, role: 'alert' }));
+          fs.appendChild(wrap);
+        }
+        form.appendChild(fs);
+      }
+    }
+
+    function onFieldChange(name, inputEl) {
+      state[name] = inputEl.value;
+      validateField(name, inputEl);
+      render();
+    }
+
+    // ── Validation ────────────────────────────────────────────────────────
+    function validateField(name, inputEl) {
+      const f = fieldIndex[name];
+      const errEl = document.getElementById(errorIdFor(name));
+      const value = (state[name] || '').toString();
+      let err = '';
+
+      if (f.required && value.trim() === '') {
+        err = 'This field is required.';
+      } else if (f.validate === 'port') {
+        if (value === '' && !f.required) {
+          // ok
+        } else {
+          const n = Number(value);
+          if (!Number.isInteger(n) || n < 1 || n > 65535) err = 'Port must be an integer in 1–65535.';
+        }
+      } else if (f.validate === 'absolute-path') {
+        if (value.trim() === '' && !f.required) {
+          // ok
+        } else if (!isPlausibleAbsolutePath(value)) {
+          err = 'Use an absolute path (e.g. /home/me/open-pulse or D:/open-pulse).';
+        }
+      } else if (f.validate === 'absolute-path-or-empty') {
+        if (value.trim() !== '' && !isPlausibleAbsolutePath(value)) {
+          err = 'Use an absolute path, or leave empty for the default.';
+        }
+      } else if (f.validate === 'opensearch-pw') {
+        if (value && !isOpenSearchPasswordOk(value)) {
+          err = 'OpenSearch requires uppercase + lowercase + digit + special, min 8.';
+        }
+      }
+
+      inputEl.classList.toggle('invalid', !!err);
+      errEl.textContent = err;
+      return err;
+    }
+
+    function isPlausibleAbsolutePath(p) {
+      const v = (p || '').trim();
+      if (!v) return false;
+      // POSIX: starts with /. Windows drive letter: C:/ or C:\ or /c/ form.
+      if (v.startsWith('/')) return true;
+      if (/^[A-Za-z]:[\\/]/.test(v)) return true;
+      return false;
+    }
+
+    function isOpenSearchPasswordOk(p) {
+      if (p.length < 8) return false;
+      const hasUpper = /[A-Z]/.test(p);
+      const hasLower = /[a-z]/.test(p);
+      const hasDigit = /[0-9]/.test(p);
+      const hasSpecial = /[^A-Za-z0-9]/.test(p);
+      return hasUpper && hasLower && hasDigit && hasSpecial;
+    }
+
+    function validateAll() {
+      const issues = [];
+      for (const section of SECTIONS) {
+        for (const f of section.fields) {
+          const inp = document.getElementById(inputIdFor(f.name));
+          if (!inp) continue;
+          const err = validateField(f.name, inp);
+          if (err) issues.push({ name: f.name, err });
+        }
+      }
+      const box = document.getElementById('validation-summary');
+      const list = document.getElementById('validation-list');
+      list.innerHTML = '';
+      if (issues.length === 0) {
+        box.hidden = true;
+      } else {
+        for (const i of issues) {
+          const li = el('li');
+          li.appendChild(el('code', { text: i.name, style: 'font-family:\"JetBrains Mono\",monospace' }));
+          li.appendChild(document.createTextNode(' — ' + i.err));
+          list.appendChild(li);
+        }
+        box.hidden = false;
+      }
+      return issues;
+    }
+
+    // ── .env rendering ────────────────────────────────────────────────────
+    function sectionHeader(title) {
+      const target = 78;
+      const prefix = '# ── ' + title + ' ';
+      const fill = '─'.repeat(Math.max(3, target - prefix.length));
+      return prefix + fill;
+    }
+
+    function shouldEmit(field, value) {
+      // Always emit required fields (even if blank — keeps the shape correct).
+      if (field.required) return true;
+      // Otherwise skip blanks.
+      return (value !== undefined && value !== null && String(value).trim() !== '');
+    }
+
+    function buildEnv() {
+      const out = [];
+      out.push('# ── Open Pulse — infra/.env (generated by the builder) ────────────');
+      out.push('# Drop this file at <repo>/infra/.env. Compose loads only this file when');
+      out.push('# bringing the stack up. Rotate the placeholders before any non-local use.');
+      out.push('');
+
+      for (const section of SECTIONS) {
+        const lines = [];
+        for (const f of section.fields) {
+          const v = state[f.name];
+          if (!shouldEmit(f, v)) continue;
+          lines.push(f.name + '=' + (v == null ? '' : String(v)));
+        }
+        if (lines.length === 0) continue;
+        out.push(sectionHeader(section.title));
+        out.push(...lines);
+        out.push('');
+      }
+      return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+    }
+
+    function render() {
+      document.getElementById('preview').textContent = buildEnv();
+      // Don't run validation summary on every keystroke (noisy); update only
+      // when a field becomes valid that was previously invalid. Cheap path:
+      // re-validate just the changed field, summarise on demand.
+      const issues = collectIssuesQuiet();
+      const box = document.getElementById('validation-summary');
+      const list = document.getElementById('validation-list');
+      list.innerHTML = '';
+      if (issues.length === 0) {
+        box.hidden = true;
+      } else {
+        for (const i of issues) {
+          const li = el('li');
+          li.appendChild(el('code', { text: i.name }));
+          li.appendChild(document.createTextNode(' — ' + i.err));
+          list.appendChild(li);
+        }
+        box.hidden = false;
+      }
+    }
+
+    function collectIssuesQuiet() {
+      // Read current inputs' .invalid + .field-error text without mutating.
+      const issues = [];
+      for (const section of SECTIONS) {
+        for (const f of section.fields) {
+          const errEl = document.getElementById(errorIdFor(f.name));
+          if (errEl && errEl.textContent) {
+            issues.push({ name: f.name, err: errEl.textContent });
+          }
+        }
+      }
+      return issues;
+    }
+
+    // ── Actions ───────────────────────────────────────────────────────────
+    function setStatus(msg, kind) {
+      const el = document.getElementById('status-msg');
+      el.textContent = msg || '';
+      el.className = 'status-msg' + (kind ? ' ' + kind : '');
+      if (msg) setTimeout(() => {
+        if (el.textContent === msg) {
+          el.textContent = '';
+          el.className = 'status-msg';
+        }
+      }, 3500);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      buildForm();
+      render();
+
+      document.getElementById('download-btn').addEventListener('click', () => {
+        const issues = validateAll();
+        if (issues.length > 0) {
+          setStatus('Fix the highlighted fields, then download.', 'warn');
+          return;
+        }
+        const text = buildEnv();
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = '.env'; document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+        setStatus('Downloaded .env', 'ok');
+      });
+
+      document.getElementById('copy-btn').addEventListener('click', async () => {
+        const issues = validateAll();
+        const text = buildEnv();
+        try {
+          await navigator.clipboard.writeText(text);
+          if (issues.length > 0) {
+            setStatus('Copied — but some fields look off. Check the highlighted ones.', 'warn');
+          } else {
+            setStatus('Copied to clipboard.', 'ok');
+          }
+        } catch (e) {
+          setStatus('Clipboard blocked — select & copy from the preview.', 'err');
+        }
+      });
+    });
+  </script>
+</body>
+</html>

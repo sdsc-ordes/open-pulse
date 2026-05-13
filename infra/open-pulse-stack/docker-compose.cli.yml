@@ -1,0 +1,46 @@
+services:
+  open-pulse-cli:
+    # Single open-pulse image, idled with `sleep infinity`. The hub talks to
+    # the host docker daemon via /var/run/docker.sock and `docker exec`s into
+    # this container to run `open-pulse deploy …`. For local dev, build the
+    # image with:
+    #   docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
+    # then set OPEN_PULSE_IMAGE=open-pulse:local in your .env.
+    image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse:latest}"
+    container_name: open-pulse-cli
+    restart: unless-stopped
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    # Bind-mount the repo at the *same absolute path* as on the host so paths
+    # in nested `docker compose` calls resolve identically inside and outside
+    # the container. OPEN_PULSE_HOST_PATH must be set to the host repo root.
+    working_dir: "${OPEN_PULSE_HOST_PATH:?OPEN_PULSE_HOST_PATH must be set to the absolute host path of the repo}"
+    # Pull the deployment env (`infra/.env`) into the container's environment
+    # so quests run inside the orchestrator can see CRAWLER_API_TOKEN,
+    # NEO4J_AUTH, SPARQL_AUTH, etc. without per-step plumbing. The
+    # tool/client `<repo>/.env` is intentionally not loaded here — it's for
+    # running open-pulse against EXTERNAL infra, not for the in-stack CLI.
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      WORKSPACE_DIR: "${OPEN_PULSE_HOST_PATH}"
+      # Marker the CLI uses to detect it's running inside this container so
+      # nested `docker compose` calls auto-include this overlay (avoids
+      # spurious "orphan container" warnings).
+      OPEN_PULSE_RUNNING_IN_CLI_CONTAINER: "1"
+    volumes:
+      # Long-form syntax — avoids the "too many colons" parser error when
+      # OPEN_PULSE_HOST_PATH is a Windows path (e.g. `D:/open-pulse`).
+      - type: bind
+        source: ${OPEN_PULSE_HOST_PATH}
+        target: ${OPEN_PULSE_HOST_PATH}
+      # Shared data dir — same host dir the hub mounts at /data/hub. Lets
+      # quest runs spawned in here write logs/checkpoints where the hub can
+      # see them, regardless of where OPEN_PULSE_DATA_DIR points on disk.
+      - ${OPEN_PULSE_DATA_DIR:-./data}:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Override the image's default ENTRYPOINT (which runs `open-pulse`) so
+    # the container idles and accepts `docker exec`.
+    entrypoint: ["sleep", "infinity"]

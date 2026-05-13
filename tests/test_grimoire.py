@@ -48,7 +48,7 @@ def test_grimoire_prepare_config_custom_endpoints(tmp_path: Path) -> None:
             "prepare-config",
             "--neo4j",
             "bolt://db:7687",
-            "--tentris",
+            "--sparql",
             "http://sparql:9000/sparql",
             "--output",
             str(output),

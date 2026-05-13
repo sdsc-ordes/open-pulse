@@ -20,29 +20,34 @@ permissions:
   contents: read
 
 concurrency:
-  group: docs-build-${{ github.workflow }}-${{ github.ref }}
+  group: docs-build-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # Force JS actions onto Node 24 ahead of the June 2026 GHA default flip.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   build:
     name: Docusaurus build and link checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: docs-site
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@a0ea98b2dc7d387a59324835f7421c1d5f8357b4  # v6.0.5
         with:
           version: 9
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: docs-site/pnpm-lock.yaml
 

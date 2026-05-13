@@ -1,0 +1,507 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Open Pulse Hub — design tokens
+   Two themes share the same variable names so every component "just works".
+   The light theme mirrors the existing projects-ui (Apple-ish, neutral grays,
+   cobalt accent). The dark theme is the original ink/brand-blue Hub look.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root,
+[data-theme="light"] {
+  --bg:            #f7f7f9;
+  --bg-grad:       radial-gradient(circle at 12% -10%, rgba(51,91,255,.10), transparent 45%),
+                   radial-gradient(circle at 88% 110%, rgba(28,124,79,.07), transparent 50%);
+  --surface:       #ffffff;
+  --surface-opaque:#ffffff;     /* solid version of --surface; for chrome (marquee, sidebar) */
+  --surface-soft:  #fafafb;
+  --surface-sunk:  #f1f1f4;
+  --border:        #e3e3e8;
+  --border-strong: #c8c8d0;
+  --fg:            #1d1d1f;
+  --fg-muted:      #6a6a73;
+  --fg-faint:      #9b9ba5;
+  --accent:        #335bff;
+  --accent-fg:     #ffffff;
+  --accent-soft:   #e7ecff;
+  --ok:            #1c7c4f;
+  --ok-soft:       #e8f5ee;
+  --ok-border:     #b6e0c7;
+  --warn:          #b6700b;
+  --warn-soft:     #fbf0d9;
+  --warn-border:   #efd3a0;
+  --bad:           #b3261e;
+  --bad-soft:      #fbe8e8;
+  --bad-border:    #f0b9b6;
+  --kbd-bg:        #f3f3f5;
+  --code-bg:       #f7f7fa;
+  --shadow-sm:     0 1px 2px rgba(15,23,42,.05);
+  --shadow:        0 4px 16px rgba(15,23,42,.06);
+}
+
+[data-theme="dark"] {
+  --bg:            #060912;
+  --bg-grad:       radial-gradient(circle at 20% 0%, rgba(56,189,248,.12), transparent 40%),
+                   radial-gradient(circle at 80% 60%, rgba(99,102,241,.10), transparent 50%);
+  --surface:       rgba(15,23,42,.65);
+  --surface-opaque:#0f172a;     /* solid; the marquee + sidebar use this so they
+                                   don't disappear into the body's translucent gradient */
+  --surface-soft:  rgba(15,23,42,.55);
+  --surface-sunk:  rgba(2,6,23,.7);
+  --border:        #1f2937;
+  --border-strong: #2a3647;
+  --fg:            #e2e8f0;
+  --fg-muted:      #94a3b8;
+  --fg-faint:      #64748b;
+  --accent:        #38bdf8;
+  --accent-fg:     #0a0f1c;
+  --accent-soft:   rgba(56,189,248,.15);
+  --ok:            #22c55e;
+  --ok-soft:       rgba(34,197,94,.15);
+  --ok-border:     rgba(34,197,94,.30);
+  --warn:          #f59e0b;
+  --warn-soft:     rgba(245,158,11,.15);
+  --warn-border:   rgba(245,158,11,.30);
+  --bad:           #ef4444;
+  --bad-soft:      rgba(239,68,68,.15);
+  --bad-border:    rgba(239,68,68,.30);
+  --kbd-bg:        #1e293b;
+  --code-bg:       rgba(0,0,0,.45);
+  --shadow-sm:     0 1px 2px rgba(0,0,0,.4);
+  --shadow:        0 8px 32px rgba(0,0,0,.5);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  background-image: var(--bg-grad), linear-gradient(180deg, var(--bg) 0%, var(--bg) 100%);
+  background-attachment: fixed;
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* ── Marquee ──────────────────────────────────────────────────────────── */
+.marquee {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  /* Opaque surface — the body has a radial-gradient backdrop in both themes
+     and a translucent --surface here would let it bleed through, making the
+     strip look like part of the page (the dark-mode complaint). */
+  background: var(--surface-opaque);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  height: 36px;
+}
+.marquee-track {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  height: 36px;
+  animation: marquee-scroll 50s linear infinite;
+  will-change: transform;
+}
+.marquee:hover .marquee-track { animation-play-state: paused; }
+/* Each .marquee-list is one full pass of the items. Two identical lists sit
+   side-by-side; gap == padding-right so the seam where list-2 starts looks
+   like any other inter-item gap. translateX(-50%) lands list-2 exactly
+   where list-1 was, then the animation restart is visually invisible. */
+.marquee-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 28px;
+  padding-right: 28px;
+  height: 36px;
+}
+.marquee-list:first-child { padding-left: 28px; }  /* lead-in only on the first copy */
+.marquee-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  letter-spacing: 0.02em;
+}
+.marquee-label { text-transform: uppercase; font-weight: 600; }
+.marquee-value { color: var(--fg); font-variant-numeric: tabular-nums; }
+.marquee-dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }
+.marquee-dot.ok      { background: var(--ok);    box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 60%, transparent); }
+.marquee-dot.warn    { background: var(--warn);  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 60%, transparent); }
+.marquee-dot.bad     { background: var(--bad);   box-shadow: 0 0 8px color-mix(in srgb, var(--bad) 60%, transparent); }
+.marquee-dot.neutral { background: var(--accent); }
+/* The track has 6 copies of the items side-by-side, so one loop = -100/6 % =
+   one copy width. That keeps the perceived scroll speed identical to the old
+   2-copy setup while filling ultrawide screens with content. */
+@keyframes marquee-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(calc(-100% / 6)); }
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────── */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface-opaque);   /* match the marquee — opaque chrome */
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 36px;
+  height: calc(100vh - 36px);
+}
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.brand-pulse {
+  width: 10px; height: 10px; border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  animation: brand-pulse 2.5s ease-in-out infinite;
+}
+@keyframes brand-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 30%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 15%, transparent); }
+}
+.brand-name { font-weight: 700; letter-spacing: -0.01em; }
+.brand-tag  { margin-left: auto; font-size: 11px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.08em; }
+
+.sidebar-nav { padding: 8px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+/* Two-tier nav: explore group sits at the top, admin group anchors to the
+   bottom (margin-top: auto) so it always rides just above the foot. The
+   tiny uppercase label on each group makes the boundary obvious without a
+   hard divider line. */
+.sidebar-group { display: flex; flex-direction: column; gap: 2px; }
+.sidebar-group-admin {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.sidebar-group-label {
+  padding: 10px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--fg-faint);
+}
+/* External link variants — Ontology + each dashboard. The compact arrow
+   on the right hand side is the affordance that this leaves the hub. */
+.sidebar-link-ext .ext-arrow {
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.sidebar-link-ext:hover .ext-arrow { color: var(--accent); }
+/* Dashboard rows are taller — they include a tech badge + a one-line
+   summary so users know which surface is which. */
+.sidebar-link-dash {
+  align-items: flex-start;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.sidebar-link-dash .dash-meta { flex: 1; min-width: 0; }
+.sidebar-link-dash .dash-head { display: flex; align-items: baseline; gap: 6px; }
+.sidebar-link-dash .dash-name { font-weight: 600; color: var(--fg); }
+.sidebar-link-dash .dash-tech {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.sidebar-link-dash .dash-summary {
+  font-size: 11px;
+  color: var(--fg-faint);
+  margin-top: 1px;
+  line-height: 1.35;
+  white-space: normal;
+}
+.sidebar-nav { overflow-y: auto; }    /* let the nav scroll if 3 groups overflow */
+.sidebar-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px; font-weight: 500;
+  color: var(--fg-muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.sidebar-link:hover { background: var(--surface-sunk); color: var(--fg); }
+.sidebar-link.is-active {
+  background: var(--accent-soft);
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.sidebar-foot {
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex; align-items: center; gap: 12px;
+  font-size: 12px;
+}
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-sunk);
+  border-radius: 6px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.theme-toggle:hover { background: var(--surface); color: var(--fg); }
+.logout-btn {
+  background: none; border: 0; padding: 6px 0;
+  color: var(--fg-muted); font-size: 12px; cursor: pointer;
+}
+.logout-btn:hover { color: var(--fg); }
+
+/* ── Main / page chrome ──────────────────────────────────────────────── */
+.main { flex: 1; min-width: 0; }
+.page-header {
+  position: sticky;
+  top: 36px;
+  z-index: 10;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  padding: 18px 32px;
+  display: flex; align-items: baseline; gap: 16px;
+}
+.page-heading h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.page-heading p  { margin: 2px 0 0; font-size: 13px; color: var(--fg-muted); }
+.page-heading p code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+.page-actions { margin-left: auto; font-size: 12px; color: var(--fg-faint); }
+.page-body { padding: 24px 32px 64px; }
+
+/* ── Cards ───────────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color .15s, box-shadow .2s, transform .2s;
+}
+.card:hover { border-color: var(--border-strong); }
+.card.elev   { box-shadow: var(--shadow); }
+.card.tone-ok   { border-left: 3px solid var(--ok); }
+.card.tone-warn { border-left: 3px solid var(--warn); }
+.card.tone-bad  { border-left: 3px solid var(--bad); }
+.card.tone-info { border-left: 3px solid var(--accent); }
+
+.card-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--fg-muted); font-weight: 600; }
+.card-meta  { font-size: 12px; color: var(--fg-faint); }
+
+/* Big stat numbers */
+.stat-value { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; color: var(--fg); font-variant-numeric: tabular-nums; }
+.stat-value.muted { color: var(--fg-faint); }
+.stat-trend { font-size: 12px; color: var(--fg-muted); }
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--fg);
+  border-radius: 6px;
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.btn:hover:not(:disabled) { background: var(--surface-sunk); border-color: var(--border-strong); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(.95); border-color: var(--accent); background: var(--accent); }
+.btn-ok {
+  background: var(--ok-soft); color: var(--ok); border-color: var(--ok-border);
+}
+.btn-danger {
+  background: var(--bad-soft); color: var(--bad); border-color: var(--bad-border);
+}
+.btn-ghost {
+  background: transparent; border-color: transparent; color: var(--fg-muted);
+}
+.btn-ghost:hover { background: var(--surface-sunk); color: var(--fg); border-color: var(--border); }
+
+/* ── Form atoms ──────────────────────────────────────────────────────── */
+input, select, textarea {
+  background: var(--surface-soft);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font: 13px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+textarea, .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+input::placeholder, textarea::placeholder { color: var(--fg-faint); }
+
+/* Tailwind's `forms` plugin styles `input[type="text"]` etc. with white
+   backgrounds at higher specificity than our base `input` rule. The
+   `[data-theme]` attribute selector here adds the specificity needed to
+   win, and we set explicit dark surfaces + light text for readability. */
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: #0f172a;        /* opaque dark surface so the field stands out */
+  color: var(--fg);            /* light text */
+  border-color: var(--border);
+}
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: var(--fg-faint);
+}
+[data-theme="dark"] input:focus,
+[data-theme="dark"] select:focus,
+[data-theme="dark"] textarea:focus {
+  background: #111c2e;         /* one notch lighter when focused */
+  border-color: var(--accent);
+}
+
+/* Checkboxes / radios — Tailwind's `forms` plugin defaults to a white
+   background which disappears on the dark surface. Tint them to match
+   the rest of the form chrome. The `forms` plugin paints the checkmark
+   via `background-image: <inline-svg>` once `:checked`, so we only need
+   to swap the *fill* (background-color) per state. */
+[data-theme="dark"] input[type="checkbox"],
+[data-theme="dark"] input[type="radio"] {
+  background-color: #0f172a;
+  border-color: #475569;
+}
+[data-theme="dark"] input[type="checkbox"]:hover,
+[data-theme="dark"] input[type="radio"]:hover {
+  border-color: var(--accent);
+}
+[data-theme="dark"] input[type="checkbox"]:checked,
+[data-theme="dark"] input[type="radio"]:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+[data-theme="dark"] input[type="checkbox"]:focus,
+[data-theme="dark"] input[type="radio"]:focus {
+  /* Don't carry over the lighter `#111c2e` from the generic input rule —
+     for these square controls it makes the empty state look weirdly
+     filled. Keep the same dark surface, just emphasise the ring. */
+  background-color: #0f172a;
+}
+[data-theme="dark"] input[type="checkbox"]:checked:focus,
+[data-theme="dark"] input[type="radio"]:checked:focus {
+  background-color: var(--accent);
+}
+
+.kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  font: 11px/1.4 ui-monospace, "SF Mono", Consolas, monospace;
+  background: var(--kbd-bg);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+pre.console {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font: 12px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
+  color: var(--fg);
+  overflow: auto;
+  margin: 0;
+  white-space: pre;
+}
+
+/* ── Health pills + status dots ──────────────────────────────────────── */
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 999px; background: var(--fg-faint); flex-shrink: 0; }
+.dot.healthy   { background: var(--ok);   box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 50%, transparent); }
+.dot.unhealthy { background: var(--bad);  box-shadow: 0 0 8px color-mix(in srgb, var(--bad) 50%, transparent); }
+.dot.starting  { background: var(--warn); animation: dot-pulse 1.6s ease-in-out infinite; }
+.dot.unknown   { background: var(--fg-faint); }
+@keyframes dot-pulse { 0%,100% { opacity: .6 } 50% { opacity: 1 } }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em;
+  border: 1px solid transparent;
+}
+.pill-ok   { background: var(--ok-soft);   color: var(--ok);   border-color: var(--ok-border); }
+.pill-warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-border); }
+.pill-bad  { background: var(--bad-soft);  color: var(--bad);  border-color: var(--bad-border); }
+.pill-info { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.pill-neutral { background: var(--surface-sunk); color: var(--fg-muted); border-color: var(--border); }
+
+/* ── Tables ──────────────────────────────────────────────────────────── */
+table.data { width: 100%; border-collapse: collapse; }
+table.data th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase; letter-spacing: .08em;
+  color: var(--fg-muted);
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+table.data td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--fg);
+}
+table.data tr:last-child td { border-bottom: 0; }
+table.data tr:hover td { background: var(--surface-sunk); }
+
+/* ── Tabs (legacy aid for projects/databases) ────────────────────────── */
+.tab-bar {
+  display: flex; gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.tab-bar button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  cursor: pointer;
+  margin: 0;
+}
+.tab-bar button.active { color: var(--fg); border-bottom-color: var(--accent); }
+.tab-bar button:hover:not(.active) { color: var(--fg); }
+
+/* ── Tile / grid utilities ───────────────────────────────────────────── */
+.tile { /* legacy class kept for older templates */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.grid-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+
+[x-cloak] { display: none !important; }

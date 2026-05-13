@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Tiny wrapper to run the open-pulse CLI inside the open-pulse-cli container
+# from the host. Sets MSYS_NO_PATHCONV=1 so git-bash on Windows doesn't mangle
+# leading-slash arguments (e.g. /c/Users/...) into Windows-style paths before
+# they reach the container.
+#
+# Usage: scripts/op <args>...
+#        scripts/op --help
+#        scripts/op deploy ps
+#        scripts/op services grimoire apply --sparql http://oxigraph:7878
+#
+# Use -t when the command is interactive (default off so output is pipeable).
+
+set -euo pipefail
+
+CONTAINER=${OPEN_PULSE_CLI_CONTAINER:-open-pulse-cli}
+
+if [ -t 0 ] && [ -t 1 ]; then
+  TTY_FLAGS=(-it)
+else
+  TTY_FLAGS=()
+fi
+
+MSYS_NO_PATHCONV=1 exec docker exec "${TTY_FLAGS[@]}" "$CONTAINER" open-pulse "$@"

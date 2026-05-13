@@ -52,9 +52,7 @@ def main() -> None:
 
     st.subheader("1. Data source")
     neo4j_endpoint = st.text_input("Neo4j endpoint", value="bolt://localhost:7687")
-    tentris_endpoint = st.text_input(
-        "Tentris SPARQL endpoint", value="http://localhost:7502/sparql"
-    )
+    sparql_endpoint = st.text_input("SPARQL endpoint", value="http://localhost:7878")
 
     st.subheader("2. Repository selection")
     st.info(
@@ -67,7 +65,7 @@ def main() -> None:
 
         path = generate_config(
             neo4j_endpoint=neo4j_endpoint,
-            tentris_endpoint=tentris_endpoint,
+            sparql_endpoint=sparql_endpoint,
         )
         st.success(f"Configuration written to `{path}`.")
 
