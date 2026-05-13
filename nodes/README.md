@@ -32,7 +32,7 @@ If you'd rather work from a clone:
 | `logo` | no | Relative path to a logo image (SVG/PNG) inside `docs/`, e.g. `./statics/Logo_EPFL_2019.svg`. Takes precedence over `flag`. |
 | `url` | yes | Full URL the **Open** button points at. Must be `https://`. |
 | `status` | yes | `live`, `beta`, or `coming-soon`. |
-| `description` | yes | One- or two-sentence pitch. Block scalar (`|`) is supported for line breaks. |
+| `description` | yes | One- or two-sentence pitch. Multi-line block scalars are supported. |
 | `contact` | no | Email or handle of the maintainer. |
 
 Files are sorted alphabetically by filename; pick the filename

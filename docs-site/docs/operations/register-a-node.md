@@ -52,5 +52,5 @@ for the field-by-field reference.
 | `flag` | no | `🇨🇭` |
 | `url` | yes | `https://openpulse.epfl.ch` |
 | `status` | yes | `live` / `beta` / `coming-soon` |
-| `description` | yes | One- or two-sentence pitch (block scalar `|` supported). |
+| `description` | yes | One- or two-sentence pitch. Multi-line block scalars are supported. |
 | `contact` | no | Email or handle of the maintainer. |
