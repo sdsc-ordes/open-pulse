@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/python:1-3.11-bookworm
+FROM mcr.microsoft.com/devcontainers/python:3.14-bookworm
 
 ARG UV_VERSION=0.8.15
 ARG NODE_MAJOR=20
