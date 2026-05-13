@@ -17,6 +17,7 @@ The fastest path is to let `op deploy` seed the env and bring up the hub:
 
 ```bash
 docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
+echo "OPEN_PULSE_IMAGE=open-pulse:local" >> infra/.env  # otherwise pulls GHCR
 ./scripts/op deploy up --profile crawler --profile extractor --profile sparql --profile hub
 ```
 
@@ -30,8 +31,15 @@ docker compose -f infra/open-pulse-stack/docker-compose.yml \
                up -d
 ```
 
-Then open <http://localhost:9090>, log in with `openpulse` /
-`$HUB_AUTH` (the username is free-form; only the password is checked).
+Add `-f infra/open-pulse-stack/docker-compose.grimoirelab.yml` (or pass
+`--with-grimoire` to `op deploy up`) to also bring up the full
+GrimoireLab stack (mariadb, valkey, opensearch, mordred, sortinghat,
+nginx, and the projects-applier sidecar).
+
+Then open <http://localhost:7507> (the default on EPFL hosts; older
+installs and `infra/.env.example` still ship 9090 — set `HUB_PORT` in
+`infra/.env` to override). Log in with `openpulse` / `$HUB_AUTH` (the
+username is free-form; only the password is checked).
 
 ## Configuration
 
@@ -65,7 +73,9 @@ uv run pytest -q
 ## Quest config quick reference
 
 A quest declares a `services:` block listing every endpoint the pipeline
-talks to, plus a `steps:` block enabling pipeline stages.
+talks to, plus a `steps:` block enabling pipeline stages. Service
+endpoints live ONLY under `quest.services.*` — step-level `endpoint`
+fields are no longer supported.
 
 ```yaml
 quest:
@@ -92,8 +102,14 @@ quest:
       enabled: true
       max_repos: 8
     sparql_upload: { enabled: true }
+    # apply_grimoire_projects is off by default; enable to push a
+    # projects.json built from Neo4j to the GrimoireLab applier sidecar.
+    apply_grimoire_projects: { enabled: false }
 ```
 
 Endpoint defaults adapt to where the CLI runs (compose-network names
 inside the stack, `localhost` from the host) — quests written for in-stack
 execution can omit the entire `services:` block.
+
+See [Services](../services/index.md) for the client API surface and
+[Analysis](../analysis/index.md) for the step semantics.
