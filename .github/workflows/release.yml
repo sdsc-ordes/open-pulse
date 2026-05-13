@@ -67,11 +67,17 @@ jobs:
           docker save "open-pulse/devcontainer:${GITHUB_REF_NAME}" -o "release-artifacts/devcontainer-${GITHUB_REF_NAME}.tar"
           (cd release-artifacts && sha256sum *.tar > SHA256SUMS.txt)
 
-      - name: Build open-pulse wheel artifact
+      - name: Build open-pulse wheel + sdist artifact
         run: |
           python -m pip install "build==${{ env.PYTHON_BUILD_VERSION }}"
           mkdir -p release-artifacts/python
-          python -m build --wheel --outdir release-artifacts/python
+          python -m build --sdist --wheel --outdir release-artifacts/python
+
+      - name: Upload Python distributions for downstream jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: release-artifacts/python/*
 
       - name: Create draft GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
@@ -81,4 +87,26 @@ jobs:
           files: |
             release-artifacts/*.tar
             release-artifacts/SHA256SUMS.txt
-            release-artifacts/python/*.whl
+            release-artifacts/python/*
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build-release-assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/open-pulse-science
+    permissions:
+      id-token: write  # OIDC token for Trusted Publisher; no API key needed.
+    steps:
+      - name: Download Python distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

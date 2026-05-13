@@ -290,7 +290,7 @@ read-only at `/data` inside the hub so DuckDB can read other services' files.
   assets ship as package data. Deploy / runtime configs live in
   `infra/services/<name>/`. Container build artifacts live in `tools/images/`.
 - **Single image.** `tools/images/Dockerfile-open-pulse` builds
-  `open-pulse[hub]` + `docker-ce-cli` + `docker-compose-plugin`. Compose
+  `open-pulse-science[hub]` + `docker-ce-cli` + `docker-compose-plugin`. Compose
   flips the role with `command:` / `entrypoint:` overrides:
   - hub service → `command: ["gui","hub","serve","--host","0.0.0.0","--port","8000"]`
   - cli orchestrator → `entrypoint: ["sleep","infinity"]` (with the host repo
@@ -326,9 +326,9 @@ read-only at `/data` inside the hub so DuckDB can read other services' files.
 
 ### Optional dependency groups
 
-- `grimoire-ui` (`pip install open-pulse[grimoire-ui]`): `streamlit` for the
+- `grimoire-ui` (`pip install open-pulse-science[grimoire-ui]`): `streamlit` for the
   GrimoireLab Streamlit UI.
-- `hub` (`pip install open-pulse[hub]`): `fastapi`, `uvicorn`, `jinja2`,
+- `hub` (`pip install open-pulse-science[hub]`): `fastapi`, `uvicorn`, `jinja2`,
   `python-multipart`, `docker`, `duckdb` for the FastAPI hub dashboard.
   Already pulled by the unified container image.
 

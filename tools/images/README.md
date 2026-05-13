@@ -11,7 +11,7 @@ Container build artifacts for `open-pulse`. The compose files in
 
 ## The unified `open-pulse` image
 
-One image installs the `open-pulse[hub]` package + `docker-ce-cli` +
+One image installs the `open-pulse-science[hub]` package + `docker-ce-cli` +
 `docker-compose-plugin`. Default `ENTRYPOINT` is `open-pulse`, default `CMD`
 is `--help`. Compose flips the role:
 
@@ -44,7 +44,7 @@ package. Templates and static assets are package data, so a host install
 works too:
 
 ```bash
-pip install open-pulse[hub]
+pip install open-pulse-science[hub]
 HUB_AUTH=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=') \
   open-pulse gui hub serve --port 9090
 ```
