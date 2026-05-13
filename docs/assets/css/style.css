@@ -625,6 +625,112 @@ a:focus-visible {
   color: var(--text-muted);
 }
 
+/* Self-deploy leaf detail (description + prereqs + command + next) */
+.leaf-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.leaf-detail__heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.leaf-detail__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.leaf-detail__title {
+  margin: 0;
+  font-size: clamp(1rem, 1.25vw, 1.15rem);
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+
+.leaf-detail__prereq {
+  font-size: clamp(0.7rem, 0.82vw, 0.78rem);
+  color: var(--text-muted);
+  padding: 0.15em 0.55em;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  margin-left: auto;
+}
+
+.leaf-detail__prereq code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.95em;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  padding: 0 0.3em;
+  border-radius: 4px;
+  color: var(--link);
+  margin: 0 0.05em;
+}
+
+@media (max-width: 640px) {
+  .leaf-detail__prereq { margin-left: 0; }
+}
+
+.leaf-detail__summary {
+  margin: 0;
+  font-size: clamp(0.82rem, 1vw, 0.92rem);
+  line-height: 1.5;
+  color: var(--text);
+  opacity: 0.92;
+}
+
+.leaf-detail__summary code,
+.leaf-detail__followup code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.95em;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  padding: 0.02em 0.32em;
+  border-radius: 4px;
+  color: var(--link);
+}
+
+.leaf-detail__cmd {
+  position: relative;
+}
+
+.leaf-detail__followup {
+  margin: 0;
+  font-size: clamp(0.74rem, 0.88vw, 0.82rem);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.leaf-detail__next {
+  align-self: flex-start;
+  margin-top: 0.15rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
+  font-weight: 600;
+  font-size: clamp(0.76rem, 0.9vw, 0.85rem);
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.leaf-detail__next:hover,
+.leaf-detail__next:focus-visible {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
 
 .corner-cta-stack {
   position: fixed;
