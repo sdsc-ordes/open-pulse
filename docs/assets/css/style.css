@@ -303,6 +303,503 @@ a:focus-visible {
   overflow: hidden;
 }
 
+
+/* Installer: two-level tabbed selector (super tabs + left-rail leaf tabs).
+   Replaces the previous hosted-nodes grid + clone-block tabs. */
+.installer {
+  width: min(100%, 88ch);
+  margin: clamp(0.9rem, 1.7vh, 1.35rem) auto 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      125deg,
+      color-mix(in srgb, var(--bg-secondary) 84%, transparent) 0%,
+      color-mix(in srgb, var(--bg-secondary) 62%, transparent) 100%
+    );
+  box-shadow:
+    0 0 0 1px rgba(58, 134, 255, 0.08),
+    0 0 24px rgba(30, 64, 175, 0.18);
+  overflow: hidden;
+  text-align: left;
+}
+
+.installer__super {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 8%, transparent) 0%,
+    transparent 100%
+  );
+}
+
+.super-tab {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.6rem 1rem 0.7rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  font-size: clamp(0.84rem, 1.05vw, 0.96rem);
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  border-radius: 10px 10px 0 0;
+  cursor: pointer;
+  margin-bottom: -1px;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.super-tab:hover,
+.super-tab:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.super-tab.is-active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-secondary) 90%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--bg-secondary) 90%, transparent);
+}
+
+.super-tab__icon {
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+.super-tab__hint {
+  font-weight: 500;
+  font-size: 0.78em;
+  opacity: 0.7;
+  margin-left: 0.2rem;
+}
+
+@media (max-width: 600px) {
+  .super-tab__hint { display: none; }
+}
+
+.installer__panel {
+  display: grid;
+  grid-template-columns: minmax(11rem, 18ch) 1fr;
+  min-height: 19rem;
+}
+
+.installer__panel[hidden] { display: none; }
+
+@media (max-width: 640px) {
+  .installer__panel { grid-template-columns: 1fr; }
+}
+
+.leaf-tabs {
+  list-style: none;
+  margin: 0;
+  padding: 0.75rem 0.5rem;
+  border-right: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: color-mix(in srgb, var(--bg-secondary) 30%, transparent);
+}
+
+.leaf-tabs__loading {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  padding: 0.45rem 0.7rem;
+}
+
+@media (max-width: 640px) {
+  .leaf-tabs {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+    padding: 0.55rem 0.6rem;
+  }
+}
+
+.leaf-tab,
+.leaf-tab--add {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  font-size: clamp(0.78rem, 0.95vw, 0.88rem);
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.leaf-tab:hover,
+.leaf-tab:focus-visible,
+.leaf-tab--add:hover,
+.leaf-tab--add:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.leaf-tab.is-active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.leaf-tab__icon {
+  font-size: 1.05em;
+  line-height: 1;
+  width: 1.4em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.leaf-tab__logo {
+  height: 1.1em;
+  max-width: 5em;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
+}
+
+.leaf-tab__label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leaf-tab--add {
+  margin-top: auto;
+  border: 1px dashed color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--link);
+  font-weight: 700;
+  justify-content: space-between;
+}
+
+.leaf-tab--add:hover,
+.leaf-tab--add:focus-visible {
+  border-color: var(--accent);
+}
+
+.leaf-tab--add .leaf-tab__icon {
+  font-size: 1.2em;
+  font-weight: 700;
+}
+
+.installer__body {
+  position: relative;
+  padding: clamp(0.9rem, 1.6vh, 1.3rem) clamp(1rem, 1.8vw, 1.6rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.installer__body pre {
+  margin: 0;
+  padding: 0.78rem 4.3rem 0.78rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  overflow: hidden;
+  position: relative;
+}
+
+.installer__body code {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: clamp(0.78rem, 1.05vw, 0.95rem);
+  color: color-mix(in srgb, var(--text) 90%, var(--accent) 10%);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.installer__body .copy-btn {
+  position: absolute;
+  top: clamp(0.95rem, 1.65vh, 1.35rem);
+  right: clamp(1.1rem, 2vw, 1.7rem);
+}
+
+.installer__placeholder {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* Node detail panel — rendered on the right when a node leaf is active */
+.node-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.node-detail__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.node-detail__flag {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.node-detail__logo {
+  height: 1.7rem;
+  max-width: 7rem;
+  object-fit: contain;
+  display: block;
+}
+
+.node-detail__name {
+  margin: 0;
+  font-size: clamp(1.15rem, 1.5vw, 1.4rem);
+  font-weight: 800;
+  letter-spacing: -0.005em;
+}
+
+.node-detail__status {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.18em 0.6em;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+  background: transparent;
+}
+
+.node-detail--beta .node-detail__status,
+.node-detail--coming-soon .node-detail__status {
+  color: var(--text-muted);
+  border-color: color-mix(in srgb, var(--text) 22%, transparent);
+}
+
+.node-detail__meta {
+  margin: 0;
+  font-size: clamp(0.78rem, 0.95vw, 0.86rem);
+  color: var(--text-muted);
+}
+
+.node-detail__desc {
+  margin: 0.2rem 0;
+  font-size: clamp(0.85rem, 1.05vw, 0.95rem);
+  color: var(--text);
+  opacity: 0.95;
+}
+
+.node-detail__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  padding: 0.55rem 1rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: clamp(0.8rem, 1vw, 0.92rem);
+  text-decoration: none;
+  align-self: flex-start;
+  transition: background-color 140ms ease, transform 140ms ease, border-color 140ms ease;
+}
+
+.node-detail__cta:hover,
+.node-detail__cta:focus-visible {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.node-detail__cta-arrow {
+  transition: transform 140ms ease;
+}
+
+.node-detail__cta:hover .node-detail__cta-arrow {
+  transform: translateX(2px);
+}
+
+.node-detail__contact {
+  margin: 0.2rem 0 0;
+  font-size: clamp(0.72rem, 0.85vw, 0.8rem);
+  color: var(--text-muted);
+}
+
+/* Self-deploy leaf detail (description + prereqs + command + next) */
+.leaf-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.leaf-detail__heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.leaf-detail__icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.leaf-detail__title {
+  margin: 0;
+  font-size: clamp(1rem, 1.25vw, 1.15rem);
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+
+.leaf-detail__prereq {
+  font-size: clamp(0.7rem, 0.82vw, 0.78rem);
+  color: var(--text-muted);
+  padding: 0.18em 0.6em;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
+  background: transparent;
+  margin-left: auto;
+}
+
+.leaf-detail__prereq code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.95em;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  padding: 0 0.3em;
+  border-radius: 4px;
+  color: var(--link);
+  margin: 0 0.05em;
+}
+
+@media (max-width: 640px) {
+  .leaf-detail__prereq { margin-left: 0; }
+}
+
+.leaf-detail__summary {
+  margin: 0;
+  font-size: clamp(0.82rem, 1vw, 0.92rem);
+  line-height: 1.5;
+  color: var(--text);
+  opacity: 0.92;
+}
+
+.leaf-detail__summary code,
+.leaf-detail__followup code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.95em;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  padding: 0.02em 0.32em;
+  border-radius: 4px;
+  color: var(--link);
+}
+
+.leaf-detail__cmd {
+  position: relative;
+}
+
+.leaf-detail__followup {
+  margin: 0;
+  font-size: clamp(0.74rem, 0.88vw, 0.82rem);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+
+
+.corner-cta-stack {
+  position: fixed;
+  top: calc(var(--marquee-h) + 12px);
+  right: 14px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+
+.docs-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  font-size: clamp(0.74rem, 0.85vw, 0.84rem);
+  font-weight: 600;
+  text-decoration: none;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  transition: background-color 140ms ease, transform 140ms ease, border-color 140ms ease;
+}
+
+.docs-cta:hover,
+.docs-cta:focus-visible {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.docs-cta--secondary {
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
+  color: var(--text-muted);
+  font-size: clamp(0.7rem, 0.8vw, 0.8rem);
+  padding: 0.35rem 0.78rem;
+}
+
+.docs-cta--secondary:hover,
+.docs-cta--secondary:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.docs-cta__version {
+  opacity: 0.75;
+  font-weight: 500;
+}
+
+.docs-cta__arrow {
+  transition: transform 140ms ease;
+}
+
+.docs-cta:hover .docs-cta__arrow {
+  transform: translateX(2px);
+}
+
 .clone-block code {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: clamp(0.77rem, 1.18vw, 1rem);

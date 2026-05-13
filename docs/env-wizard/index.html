@@ -1,48 +1,104 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Open Pulse — infra/.env wizard</title>
+  <script>
+    // Sync with the landing's theme choice (open-pulse-theme key) before
+    // first paint so we don't flash the wrong palette.
+    (function () {
+      try {
+        var t = localStorage.getItem('open-pulse-theme');
+        if (t === 'light' || t === 'dark') {
+          document.documentElement.setAttribute('data-theme', t);
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  >
   <style>
     :root {
-      --bg: #fafafa;
-      --fg: #1a1a1a;
-      --fg-faint: #595959;
-      --border: #d0d0d0;
-      --accent: #1e6bb8;
+      --bg: #121212;
+      --bg-secondary: #1e1e1e;
+      --fg: #eaeaea;
+      --fg-faint: #b7b7b7;
+      --border: rgba(58, 134, 255, 0.26);
+      --border-soft: rgba(255, 255, 255, 0.08);
+      --accent: #3a86ff;
+      --accent-soft: #1f3b57;
       --accent-fg: #ffffff;
-      --code-bg: #f0f0f0;
+      --link: #9dc0ff;
+      --code-bg: rgba(10, 14, 22, 0.55);
+      --warn-bg: rgba(212, 184, 112, 0.12);
+      --warn-fg: #d4b870;
+      --header-bg:
+        radial-gradient(120% 70% at 50% -10%, rgba(59, 130, 246, 0.28) 0%, rgba(59, 130, 246, 0) 60%),
+        linear-gradient(180deg, #0b1019 0%, #121212 100%);
+      --page-bg:
+        radial-gradient(60% 55% at 50% -5%, rgba(59, 130, 246, 0.16) 0%, rgba(59, 130, 246, 0) 55%),
+        linear-gradient(180deg, #090b11 0%, #0b1019 38%, #080b12 100%);
+    }
+    [data-theme="light"] {
+      --bg: #f5f5f5;
+      --bg-secondary: #ffffff;
+      --fg: #1a1a1a;
+      --fg-faint: #4d4d4d;
+      --border: rgba(37, 99, 235, 0.25);
+      --border-soft: rgba(15, 23, 42, 0.08);
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --accent-fg: #ffffff;
+      --link: #1d4ed8;
+      --code-bg: #ffffff;
       --warn-bg: #fff7e0;
       --warn-fg: #6b4f00;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #1a1a1a;
-        --fg: #e6e6e6;
-        --fg-faint: #999;
-        --border: #3a3a3a;
-        --accent: #4a9eff;
-        --accent-fg: #0f0f0f;
-        --code-bg: #0f0f0f;
-        --warn-bg: #2a2008;
-        --warn-fg: #d4b870;
-      }
+      --header-bg:
+        radial-gradient(120% 70% at 50% -10%, rgba(37, 99, 235, 0.18) 0%, rgba(37, 99, 235, 0) 58%),
+        linear-gradient(180deg, #eef2ff 0%, #f8fafc 100%);
+      --page-bg:
+        linear-gradient(180deg, #f8fafc 0%, #eef2ff 52%, #f8fafc 100%);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-family: "Manrope", "Segoe UI", Roboto, sans-serif;
       background: var(--bg);
+      background-image: var(--page-bg);
+      background-attachment: fixed;
       color: var(--fg);
       line-height: 1.5;
     }
+    a { color: var(--link); }
     header {
-      padding: 24px 32px;
-      border-bottom: 1px solid var(--border);
+      padding: 22px 32px 24px;
+      border-bottom: 1px solid var(--border-soft);
+      background: var(--header-bg);
     }
-    header h1 { margin: 0; font-size: 22px; font-weight: 600; }
-    header p { margin: 6px 0 0; color: var(--fg-faint); font-size: 14px; }
+    header .back {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      font-size: 13px; color: var(--link); text-decoration: none;
+      margin-bottom: 10px;
+      border-bottom: 1px solid transparent;
+      transition: border-color 180ms ease;
+    }
+    header .back:hover { border-bottom-color: currentColor; }
+    header h1 {
+      margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em;
+    }
+    header h1 code {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+      border-radius: 6px; padding: 0.05em 0.4em;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 0.85em;
+    }
+    header p { margin: 8px 0 0; color: var(--fg-faint); font-size: 14px; max-width: 72ch; }
     main {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -54,7 +110,7 @@
     .form-pane { padding: 24px 32px; }
     .preview-pane {
       padding: 24px 32px;
-      border-left: 1px solid var(--border);
+      border-left: 1px solid var(--border-soft);
       background: var(--code-bg);
       position: sticky;
       top: 0;
@@ -62,63 +118,83 @@
       overflow-y: auto;
     }
     @media (max-width: 900px) {
-      .preview-pane { border-left: 0; border-top: 1px solid var(--border); position: static; max-height: none; }
+      .preview-pane { border-left: 0; border-top: 1px solid var(--border-soft); position: static; max-height: none; }
     }
     section { margin-bottom: 28px; }
-    section h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+    section h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; letter-spacing: 0.005em; }
     section .hint { color: var(--fg-faint); font-size: 13px; margin: 0 0 12px; }
     .field { margin-bottom: 12px; }
     .field label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
     .field .label-hint { color: var(--fg-faint); font-weight: 400; }
     .field input[type=text], .field input[type=password], .field select {
       width: 100%;
-      padding: 7px 10px;
+      padding: 8px 11px;
       font: inherit;
-      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
       font-size: 13px;
-      background: var(--bg);
+      background: var(--bg-secondary);
       color: var(--fg);
-      border: 1px solid var(--border);
-      border-radius: 4px;
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      transition: border-color 140ms ease, box-shadow 140ms ease;
+    }
+    .field input:focus, .field select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
     }
     .field input[readonly] { background: var(--code-bg); color: var(--fg-faint); }
     .field-row { display: flex; gap: 8px; align-items: center; }
     .field-row input { flex: 1; }
     .checkbox-group label {
       display: flex; align-items: flex-start; gap: 8px;
-      padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px;
-      margin-bottom: 6px; cursor: pointer; font-weight: 500; font-size: 13px;
+      padding: 10px 12px;
+      border: 1px solid var(--border-soft);
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      margin-bottom: 6px; cursor: pointer; font-weight: 600; font-size: 13px;
+      transition: border-color 140ms ease, background-color 140ms ease;
     }
-    .checkbox-group label:hover { border-color: var(--accent); }
-    .checkbox-group input[type=checkbox] { margin-top: 3px; }
+    .checkbox-group label:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary)); }
+    .checkbox-group input[type=checkbox] { margin-top: 3px; accent-color: var(--accent); }
     .checkbox-group .desc { font-weight: 400; color: var(--fg-faint); font-size: 12px; }
     button {
-      font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 4px;
-      border: 1px solid var(--border); background: var(--bg); color: var(--fg);
+      font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 8px;
+      border: 1px solid var(--border-soft); background: var(--bg-secondary); color: var(--fg);
       cursor: pointer;
+      font-weight: 600;
+      transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
     }
-    button:hover { border-color: var(--accent); }
-    button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-    button.primary:hover { filter: brightness(1.1); }
+    button:hover { border-color: var(--accent); transform: translateY(-1px); }
+    button.primary {
+      background: color-mix(in srgb, var(--accent) 22%, transparent);
+      color: var(--fg);
+      border-color: var(--accent);
+    }
+    button.primary:hover {
+      background: color-mix(in srgb, var(--accent) 36%, transparent);
+    }
     pre.preview {
-      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
       font-size: 12px;
-      line-height: 1.5;
+      line-height: 1.55;
       margin: 0;
       white-space: pre-wrap;
       word-break: break-all;
+      color: color-mix(in srgb, var(--fg) 90%, var(--accent) 10%);
     }
     .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
     .warn {
-      padding: 8px 10px; border-left: 3px solid var(--warn-fg);
+      padding: 10px 12px; border-left: 3px solid var(--warn-fg);
       background: var(--warn-bg); color: var(--warn-fg);
-      font-size: 13px; border-radius: 0 4px 4px 0; margin-bottom: 12px;
+      font-size: 13px; border-radius: 0 8px 8px 0; margin-bottom: 12px;
     }
     .copied { color: var(--accent); font-size: 12px; margin-left: 6px; }
   </style>
 </head>
 <body>
 <header>
+  <a href="../" class="back">← Back to Open Pulse</a>
   <h1>Open Pulse — <code>infra/.env</code> wizard</h1>
   <p>Answer the questions on the left; the generated file appears on the right. Everything runs in your browser — no values are sent anywhere.</p>
 </header>

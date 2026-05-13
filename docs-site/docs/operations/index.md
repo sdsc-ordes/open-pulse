@@ -10,5 +10,6 @@ Use this section for operational procedures, branch responsibilities, and releas
 Start with:
 
 - [Branch model](./branch-model.md)
+- [Register a hosted node](./register-a-node.md)
 - [Migration from static docs landing](./migration-from-static-docs.md)
 - [Release checklist](./release-checklist.md)
