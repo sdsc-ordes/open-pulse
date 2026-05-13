@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
+from open_pulse import __version__
 from open_pulse.cli import app
 
 runner = CliRunner()
@@ -17,7 +18,7 @@ def test_cli_help_exits_cleanly() -> None:
 def test_version_flag() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "0.1.0" in result.output
+    assert __version__ in result.output
 
 
 def test_deploy_subcommand_appears_in_help() -> None:
