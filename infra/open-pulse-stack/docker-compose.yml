@@ -96,7 +96,8 @@ services:
     # Pull the deployment env so any per-service knob set in infra/.env
     # reaches the container without an explicit mapping in `environment:`.
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       # Defaults are empty so other profiles can be brought up without these
       # set. The crawler container fails fast on first request when either
@@ -138,7 +139,8 @@ services:
     # any other per-service knob set in infra/.env — reach the container
     # without needing an explicit mapping in `environment:`.
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       # The v2 extract path refuses to operate (HTTP 503 "Auth not
       # configured: API_TOKEN is unset") if API_TOKEN is empty server-side.
@@ -319,7 +321,8 @@ services:
     # Pull the deployment env so any per-service knob set in infra/.env
     # reaches the container without needing an explicit mapping below.
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       HUB_AUTH: "${HUB_AUTH:?HUB_AUTH must be set in infra/.env (e.g. openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
       HUB_DATA_DIR: /data/hub

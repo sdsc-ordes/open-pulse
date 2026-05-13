@@ -22,7 +22,8 @@ services:
     # tool/client `<repo>/.env` is intentionally not loaded here — it's for
     # running open-pulse against EXTERNAL infra, not for the in-stack CLI.
     env_file:
-      - ../.env
+      - path: ../.env
+        required: false
     environment:
       WORKSPACE_DIR: "${OPEN_PULSE_HOST_PATH}"
       # Marker the CLI uses to detect it's running inside this container so
