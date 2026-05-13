@@ -209,3 +209,134 @@ html[data-theme="dark"] .menu__link--active {
   --ifm-footer-background-color: transparent;
   border-top: 1px solid var(--ifm-toc-border-color);
 }
+
+/* ==========================================================================
+   Geek polish — ported from the legacy open-pulse-documentation theme.
+   Kept subtle: grid bg, section markers, gradient titles, stagger entry.
+   ========================================================================== */
+
+/* Animated grid overlay on top of the radial gradient. The grid uses the
+   accent color at very low alpha so it reads as scaffolding, not noise. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--ifm-color-primary) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--ifm-color-primary) 7%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  background-position: 0 0;
+  opacity: 0.55;
+  animation: op-grid-pulse 14s ease-in-out infinite;
+  mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 95%);
+  -webkit-mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 95%);
+}
+
+html[data-theme="dark"] body::after {
+  opacity: 0.7;
+}
+
+@keyframes op-grid-pulse {
+  0%, 100% { opacity: var(--op-grid-opa, 0.55); }
+  50%      { opacity: calc(var(--op-grid-opa, 0.55) * 0.65); }
+}
+
+/* `//` section marker on H2 — terminal-style cue without overloading. */
+.markdown h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45ch;
+}
+
+.markdown h2::before {
+  content: "//";
+  color: var(--ifm-color-primary);
+  font-weight: 400;
+  font-family: var(--ifm-font-family-monospace);
+  letter-spacing: 0;
+  opacity: 0.85;
+}
+
+/* Gradient text on page titles (H1). Reads as the headline of the page,
+   and ties the title color back to the accent. */
+.markdown > header > h1,
+.markdown h1:first-child {
+  background: linear-gradient(135deg, var(--ifm-heading-color) 0%, var(--ifm-color-primary) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.015em;
+}
+
+/* Tiny live-status dot in the navbar title — "system online" cue. */
+.navbar__title {
+  display: inline-flex;
+  align-items: center;
+}
+
+.navbar__title::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 0.55rem;
+  border-radius: 50%;
+  background: #22c55e;
+  vertical-align: middle;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55);
+  animation: op-status-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes op-status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+  50%      { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+}
+
+/* Stagger fade-in for the top-level children of the markdown body — gives
+   each page a tiny entry choreography without scroll-listening JS. */
+.theme-doc-markdown .markdown > * {
+  animation: op-fade-up 380ms ease both;
+}
+
+.theme-doc-markdown .markdown > *:nth-child(1) { animation-delay: 0ms; }
+.theme-doc-markdown .markdown > *:nth-child(2) { animation-delay: 40ms; }
+.theme-doc-markdown .markdown > *:nth-child(3) { animation-delay: 80ms; }
+.theme-doc-markdown .markdown > *:nth-child(4) { animation-delay: 120ms; }
+.theme-doc-markdown .markdown > *:nth-child(5) { animation-delay: 160ms; }
+.theme-doc-markdown .markdown > *:nth-child(n+6) { animation-delay: 200ms; }
+
+@keyframes op-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Card-lift for any element with the `card` class (community pages, feature
+   lists). Subtle hover with an accent-tinted ring. */
+.card {
+  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--ifm-color-primary) 50%, transparent);
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.08),
+    0 0 0 1px color-mix(in srgb, var(--ifm-color-primary) 14%, transparent);
+}
+
+html[data-theme="dark"] .card:hover {
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.4),
+    0 0 16px color-mix(in srgb, var(--ifm-color-primary) 22%, transparent);
+}
+
+/* Reduced motion: kill all the animated bits. */
+@media (prefers-reduced-motion: reduce) {
+  body::after,
+  .navbar__title::before,
+  .theme-doc-markdown .markdown > * {
+    animation: none !important;
+  }
+}
