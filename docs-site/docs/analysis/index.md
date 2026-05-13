@@ -18,7 +18,9 @@ The analysis pipeline is exposed through `open-pulse quest`.
 1. `crawler`
 2. `neo4j_upload`
 3. `metadata_extractor`
-4. `tentris_upload`
+4. `sparql_upload`
+5. `apply_grimoire_projects` (optional — pushes a projects.json built from
+   the SPARQL store to the GrimoireLab projects-applier sidecar)
 
 ## Execution model
 
@@ -30,9 +32,13 @@ The analysis pipeline is exposed through `open-pulse quest`.
 
 ## Step integration contract
 
-Pipeline steps that need external systems should access them via:
+Pipeline steps that need external systems should access them via the
+run-scoped service container injected as `context["services"]`:
 
 - `context["services"].neo4j`
-- `context["services"].tentris`
+- `context["services"].sparql_store`
+- `context["services"].crawler`
+- `context["services"].metadata_extractor`
 
-This keeps integrations centralized in `open_pulse.services` instead of embedding connection logic inside step modules.
+This keeps integrations centralized in `open_pulse.services` instead of
+embedding connection logic inside step modules.

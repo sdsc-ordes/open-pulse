@@ -3,14 +3,14 @@ name: Compose Validate
 on:
   pull_request:
     paths:
-      - "infra/compose/**"
+      - "infra/open-pulse-stack/**"
       - ".github/workflows/docker-validate.yml"
   push:
     branches:
       - main
       - "release/**"
     paths:
-      - "infra/compose/**"
+      - "infra/open-pulse-stack/**"
       - ".github/workflows/docker-validate.yml"
 
 permissions:
@@ -33,8 +33,9 @@ jobs:
       fail-fast: false
       matrix:
         compose_files:
-          - "-f infra/compose/docker-compose.yml"
-          - "-f infra/compose/docker-compose.yml -f infra/compose/docker-compose.cli.yml"
+          - "-f infra/open-pulse-stack/docker-compose.yml"
+          - "-f infra/open-pulse-stack/docker-compose.yml -f infra/open-pulse-stack/docker-compose.cli.yml"
+          - "-f infra/open-pulse-stack/docker-compose.yml -f infra/open-pulse-stack/docker-compose.grimoirelab.yml"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5

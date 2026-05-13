@@ -5,7 +5,7 @@ for local-dev and self-hosted deploys. Native JSON-LD parsing, RocksDB-backed pe
 storage, no license file needed.
 
 This directory holds a **standalone** compose for running Oxigraph by itself. The full
-Open Pulse stack wires Oxigraph in via `infra/compose/docker-compose.yml` under the
+Open Pulse stack wires Oxigraph in via `infra/open-pulse-stack/docker-compose.yml` under the
 `sparql` profile, behind the Caddy auth proxy at `infra/services/sparql-proxy/`.
 
 ## Quick start (standalone)
@@ -23,7 +23,7 @@ Default port `7878`. Override with `OXIGRAPH_PORT` in the environment.
 From the `open-pulse/` repo root:
 
 ```bash
-docker compose -f infra/compose/docker-compose.yml --profile sparql up -d
+docker compose -f infra/open-pulse-stack/docker-compose.yml --profile sparql up -d
 ```
 
 Then read/write through the proxy at `http://localhost:7878/...`. See

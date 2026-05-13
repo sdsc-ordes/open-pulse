@@ -17,12 +17,12 @@ infra/services/airflow/src/env_variables.json
 **/airflow/plugins/
 **/airflow/logs/
 
-# Docker/database runtime data
-/data/
-infra/services/graphdb/data/
+# Docker/database runtime data — ignore any `data/` dir at any level so an
+# accidental relative-path resolution (e.g. `infra/open-pulse-stack/data/`)
+# can't pollute the working tree. Per-service subdirs under the configured
+# OPEN_PULSE_DATA_DIR are also covered by this single rule.
+data/
 infra/services/graphdb/graphdb-data/
-infra/services/neo4j/data/
-infra/services/portainer/data/
 
 # Tentris local data and licenses
 infra/services/tentris-server/data/

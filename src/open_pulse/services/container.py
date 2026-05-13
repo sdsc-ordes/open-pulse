@@ -45,6 +45,7 @@ class ServiceContainer:
             ),
             metadata_extractor=MetadataExtractorService(
                 endpoint=services.metadata_extractor.endpoint,
+                api_token_env=services.metadata_extractor.api_token_env,
             ),
         )
 

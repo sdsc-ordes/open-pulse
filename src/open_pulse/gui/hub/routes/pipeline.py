@@ -501,11 +501,13 @@ def run_quest(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str,
 
     if detach:
         # Spawn the runner asynchronously and redirect its full output to a
-        # known file under data/hub/runs/. We also write the runner's PID
-        # to a sibling .pid file so /api/pipeline/run-stop can SIGTERM it.
+        # known file under /data/hub/runs/. The cli compose mounts the same
+        # OPEN_PULSE_DATA_DIR the hub uses at /data, so this path is
+        # symmetric: hub reads it from /data/hub/runs (HUB_DATA_DIR=/data/hub),
+        # cli writes it here. Decouples the cli's working dir from the
+        # hub's data dir so OPEN_PULSE_DATA_DIR can be anywhere on disk.
         run_id = uuid.uuid4().hex[:12]
-        cli_workspace = cli.attrs.get("Config", {}).get("WorkingDir") or "/workspace"
-        log_dir = f"{cli_workspace}/data/hub/runs"
+        log_dir = "/data/hub/runs"
         log_filename = _run_log_filename(path, run_id)
         log_path_in_cli = f"{log_dir}/{log_filename}"
         pid_path_in_cli = f"{log_dir}/{Path(log_filename).stem}.pid"

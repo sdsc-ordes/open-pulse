@@ -11,13 +11,17 @@ Speaks two endpoints:
   ``RCP_TOKEN``; emits framed JSON-LD with explicit ``@context`` + ``@graph``.
 
 Auth model: the GME server reads ``GITHUB_TOKEN`` (and optionally
-``RCP_TOKEN`` for LLM mode) from its own environment. This client carries
-no Bearer token of its own.
+``RCP_TOKEN`` for LLM mode) from its own environment. Newer versions also
+gate every endpoint behind a Bearer token (``API_TOKEN`` on the server).
+This client sends ``Authorization: Bearer <env>`` when ``api_token_env``
+resolves to a non-empty value, and omits the header otherwise so older
+auth-free deploys keep working.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 from urllib.parse import quote
@@ -45,9 +49,19 @@ class ExtractJobTimeoutError(TimeoutError):
 class MetadataExtractorService:
     """Lightweight HTTP client for the git-metadata-extractor API."""
 
-    def __init__(self, endpoint: str) -> None:
+    def __init__(self, endpoint: str, api_token_env: str | None = None) -> None:
         self.endpoint = endpoint.rstrip("/")
+        self.api_token_env = api_token_env
         self._client = httpx.Client(timeout=_HTTP_TIMEOUT)
+
+    def _auth_headers(self) -> dict[str, str]:
+        """Bearer headers when the configured env var resolves; else empty."""
+        if not self.api_token_env:
+            return {}
+        token = os.environ.get(self.api_token_env, "").strip()
+        if not token:
+            return {}
+        return {"Authorization": f"Bearer {token}"}
 
     # -- Health probe ------------------------------------------------------
 
@@ -102,7 +116,7 @@ class MetadataExtractorService:
         params = {"force_refresh": "true" if force_refresh else "false"}
 
         try:
-            resp = self._client.get(url, params=params)
+            resp = self._client.get(url, params=params, headers=self._auth_headers())
         except httpx.HTTPError as exc:
             raise RuntimeError(
                 f"metadata_extractor: HTTP error fetching {repo_url}: {exc}"
@@ -141,7 +155,7 @@ class MetadataExtractorService:
             "agent_runtime": agent_runtime,
         }
         try:
-            resp = self._client.post(url, json=body)
+            resp = self._client.post(url, json=body, headers=self._auth_headers())
         except httpx.HTTPError as exc:
             raise RuntimeError(
                 f"metadata_extractor v2: HTTP error submitting {source_url}: {exc}"
@@ -162,7 +176,7 @@ class MetadataExtractorService:
         """GET ``/v2/jobs/{job_id}``. Returns the raw V2ExtractJob dict."""
         url = f"{self.endpoint}{_V2_JOB_PATH}/{job_id}"
         try:
-            resp = self._client.get(url)
+            resp = self._client.get(url, headers=self._auth_headers())
         except httpx.HTTPError as exc:
             raise RuntimeError(
                 f"metadata_extractor v2: HTTP error polling {job_id}: {exc}"

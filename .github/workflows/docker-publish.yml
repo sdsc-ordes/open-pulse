@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - develop
     paths:
       - "src/**"
       - "pyproject.toml"
@@ -28,7 +29,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  # Path matches the OPEN_PULSE_IMAGE default in infra/compose/docker-compose.yml.
+  # Path matches the OPEN_PULSE_IMAGE default in infra/open-pulse-stack/docker-compose.yml.
   # Org is sdsc-ordes; package_name within the org is "open-pulse".
   IMAGE_NAME: sdsc-ordes/open-pulse
   PACKAGE_NAME: open-pulse

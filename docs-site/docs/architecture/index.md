@@ -8,8 +8,8 @@ slug: /architecture
 ## Repository boundaries
 
 - `src/open_pulse/`: CLI and runtime code
-- `infra/services/`: service deployment assets
-- `infra/compose/`: compose topology documentation
+- `infra/open-pulse-stack/`: the Open Pulse stack (main + cli + grimoirelab)
+- `infra/services/`: single-service deployment references
 
 ## Runtime structure
 

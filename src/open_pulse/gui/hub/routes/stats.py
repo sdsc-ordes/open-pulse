@@ -102,13 +102,13 @@ async def _neo4j_counts() -> dict[str, int | None]:
     except ImportError:
         return {"nodes": None, "rels": None}
 
-    # Reasonable default — the local stack uses neo4j/openpulse-dev-password
-    # unless overridden in NEO4J_AUTH; we don't have that secret in the hub by
+    # Reasonable default — the local stack uses neo4j/replace-me unless
+    # overridden in NEO4J_AUTH; we don't have that secret in the hub by
     # design (auth is a hub-side concern), so we attempt with the conventional
     # dev password and fall back gracefully on auth failure.
     import os
 
-    auth_default = os.environ.get("HUB_NEO4J_PASSWORD", "openpulse-dev-password")
+    auth_default = os.environ.get("HUB_NEO4J_PASSWORD", "replace-me")
     try:
         driver = GraphDatabase.driver(settings.neo4j_url, auth=("neo4j", auth_default))
         try:

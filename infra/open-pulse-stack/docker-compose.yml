@@ -7,7 +7,7 @@ services:
       - "${NEO4J_HTTP_PORT:-7474}:7474"
       - "${NEO4J_BOLT_PORT:-7687}:7687"
     environment:
-      NEO4J_AUTH: "${NEO4J_AUTH:-neo4j/openpulse-dev-password}"
+      NEO4J_AUTH: "${NEO4J_AUTH:-neo4j/replace-me}"
       NEO4J_PLUGINS: '${NEO4J_PLUGINS:-["graph-data-science","apoc"]}'
       NEO4J_dbms_security_procedures_unrestricted: "${NEO4J_UNRESTRICTED:-apoc.*}"
       NEO4J_dbms_security_procedures_allowlist: "${NEO4J_ALLOWLIST:-apoc.*}"
@@ -36,26 +36,6 @@ services:
     mem_limit: ${NEO4J_MEM_LIMIT:-2g}
     cpus: ${NEO4J_CPUS:-2.0}
 
-  analysis-notebook:
-    image: python:3.12-slim
-    container_name: open-pulse-analysis
-    profiles:
-      - analysis
-    depends_on:
-      neo4j:
-        condition: service_healthy
-    command: ["python", "-m", "http.server", "8888"]
-    ports:
-      - "${ANALYSIS_NOTEBOOK_PORT:-8888}:8888"
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8888')\" >/dev/null 2>&1 || exit 1"]
-      interval: 20s
-      timeout: 10s
-      retries: 5
-      start_period: 10s
-    mem_limit: ${ANALYSIS_NOTEBOOK_MEM_LIMIT:-512m}
-    cpus: ${ANALYSIS_NOTEBOOK_CPUS:-1.0}
-
   grimoirelab-db:
     image: postgres:16-alpine
     container_name: grimoirelab-db
@@ -63,8 +43,8 @@ services:
       - grimoirelab
     restart: unless-stopped
     environment:
-      POSTGRES_USER: "${GRIMOIRELAB_DB_USER:-grimoire}"
-      POSTGRES_PASSWORD: "${GRIMOIRELAB_DB_PASSWORD:-grimoire}"
+      POSTGRES_USER: "${GRIMOIRELAB_DB_USER:-openpulse}"
+      POSTGRES_PASSWORD: "${GRIMOIRELAB_DB_PASSWORD:-replace-me}"
       POSTGRES_DB: "${GRIMOIRELAB_DB_NAME:-grimoirelab}"
     volumes:
       - ${OPEN_PULSE_DATA_DIR:-./data}/grimoirelab-db:/var/lib/postgresql/data
@@ -113,9 +93,17 @@ services:
     container_name: open-pulse-crawler
     profiles:
       - crawler
+    # Pull the deployment env so any per-service knob set in infra/.env
+    # reaches the container without an explicit mapping in `environment:`.
+    env_file:
+      - ../.env
     environment:
-      API_TOKEN: "${CRAWLER_API_TOKEN:?CRAWLER_API_TOKEN must be set in .env}"
-      GITHUB_TOKEN: "${CRAWLER_GITHUB_TOKEN:?CRAWLER_GITHUB_TOKEN must be set in .env}"
+      # Defaults are empty so other profiles can be brought up without these
+      # set. The crawler container fails fast on first request when either
+      # is empty — keep the validation in the service, not in compose's
+      # parse-time interpolation (which fires for every profile).
+      API_TOKEN: "${CRAWLER_API_TOKEN:-}"
+      GITHUB_TOKEN: "${CRAWLER_GITHUB_TOKEN:-}"
     ports:
       - "${CRAWLER_PORT:-8000}:8000"
     restart: unless-stopped
@@ -134,26 +122,46 @@ services:
     mem_limit: ${CRAWLER_MEM_LIMIT:-768m}
     cpus: ${CRAWLER_CPUS:-1.0}
 
-  extractor:
+  git-metadata-extractor:
     image: ${EXTRACTOR_IMAGE:-ghcr.io/imaging-plaza/git-metadata-extractor:latest}
-    container_name: open-pulse-extractor
+    container_name: git-metadata-extractor
     profiles:
       - extractor
     restart: unless-stopped
     depends_on:
       selenium:
         condition: service_healthy
+      gme-qdrant:
+        condition: service_healthy
+    # Pull the deployment env so V2_*, RCP_TOKEN, OPENALEX_MAILTO, HF_TOKEN,
+    # EPFL_GRAPH_*, ORCID_*, INDEX_QDRANT_URL, GRIMOIRE_GITHUB_TOKEN — and
+    # any other per-service knob set in infra/.env — reach the container
+    # without needing an explicit mapping in `environment:`.
+    env_file:
+      - ../.env
     environment:
+      # The v2 extract path refuses to operate (HTTP 503 "Auth not
+      # configured: API_TOKEN is unset") if API_TOKEN is empty server-side.
+      # Mirror the crawler's pattern: pull a dedicated env var. The
+      # open-pulse client doesn't actually send a bearer, but the server
+      # requires this be set as a self-check.
+      API_TOKEN: "${EXTRACTOR_API_TOKEN:-}"
       # At least one LLM provider must be set; the app picks based on PROVIDER.
       OPENAI_API_KEY: "${EXTRACTOR_OPENAI_API_KEY:-}"
       OPENROUTER_API_KEY: "${EXTRACTOR_OPENROUTER_API_KEY:-}"
-      GITHUB_TOKEN: "${EXTRACTOR_GITHUB_TOKEN:?EXTRACTOR_GITHUB_TOKEN must be set in .env}"
+      # See the crawler block above — soft default keeps other profiles
+      # buildable. Extractor itself errors when this is empty.
+      GITHUB_TOKEN: "${EXTRACTOR_GITHUB_TOKEN:-}"
       GITLAB_TOKEN: "${EXTRACTOR_GITLAB_TOKEN:-}"
       INFOSCIENCE_TOKEN: "${EXTRACTOR_INFOSCIENCE_TOKEN:-}"
       MODEL: "${EXTRACTOR_MODEL:-gpt-4o-mini}"
       PROVIDER: "${EXTRACTOR_PROVIDER:-openai}"
       SELENIUM_REMOTE_URL: "http://selenium:4444/wd/hub"
       CACHE_DB_PATH: "/app/data/api_cache.db"
+      # Per-provider RAG indices (openalex, zenodo, hf, ror, …) — bind-mounted
+      # below at /app/index so they live alongside qdrant/storage as a peer
+      # under OPEN_PULSE_DATA_DIR (not nested under /app/data).
+      INDEX_DATA_DIR: "/app/index"
       MAX_CACHE_ENTRIES: "${EXTRACTOR_MAX_CACHE_ENTRIES:-5000}"
       MAX_SELENIUM_SESSIONS: "${EXTRACTOR_MAX_SELENIUM_SESSIONS:-1}"
       WORKERS: "${EXTRACTOR_WORKERS:-2}"
@@ -164,7 +172,20 @@ services:
     ports:
       - "${EXTRACTOR_PORT:-1234}:1234"
     volumes:
+      # Sqlite cache (api_cache.db etc.) — bound at /app/data per
+      # CACHE_DB_PATH above. Drop a previous run's api_cache.db at
+      # ${OPEN_PULSE_DATA_DIR}/extractor/api_cache.db to skip warm-up.
       - ${OPEN_PULSE_DATA_DIR:-./data}/extractor:/app/data
+      # V2 RAG provider cache. V2_PROVIDER_CACHE_PATH is `.cache/v2/providers.db`
+      # relative to the extractor's working dir (/app), so the file lives at
+      # /app/.cache/v2/providers.db inside the container. Persist it on the
+      # host so the cache survives container recreation. Drop a previous
+      # run's providers.db at ${OPEN_PULSE_DATA_DIR}/extractor-cache/v2/.
+      - ${OPEN_PULSE_DATA_DIR:-./data}/extractor-cache:/app/.cache
+      # Per-provider RAG indices the V2 path reads from. INDEX_DATA_DIR
+      # above points the extractor here; the on-disk layout (subdir per
+      # provider: openalex, zenodo, hf, ror, etc.) matches what gme writes.
+      - ${OPEN_PULSE_DATA_DIR:-./data}/index:/app/index
     healthcheck:
       # The extractor doesn't expose a dedicated /healthz; GET / returns the API
       # root and is the only system-level endpoint defined in src/api.py.
@@ -176,6 +197,35 @@ services:
       start_period: 30s
     mem_limit: ${EXTRACTOR_MEM_LIMIT:-1536m}
     cpus: ${EXTRACTOR_CPUS:-2.0}
+
+  # Vector store the extractor's V2 RAG path talks to. Container name
+  # `gme-qdrant` matches the default INDEX_QDRANT_URL (http://gme-qdrant:6333)
+  # the extractor expects. Bind-mount layout matches the gme repo's own
+  # devcontainer compose so on-disk Qdrant data is portable between the two.
+  gme-qdrant:
+    image: qdrant/qdrant:latest
+    container_name: gme-qdrant
+    profiles:
+      - extractor
+    restart: unless-stopped
+    expose:
+      - "6333"
+      - "6334"
+    volumes:
+      - ${OPEN_PULSE_DATA_DIR:-./data}/qdrant/storage:/qdrant/storage
+    healthcheck:
+      # The qdrant image has no curl/wget. bash is present and supports the
+      # /dev/tcp pseudo-device, so we just verify the API port accepts TCP.
+      # start_period is generous because qdrant blocks the listener until
+      # every collection's shards are recovered from disk; with the user's
+      # ~30 collections that takes 60–120s on first start.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 180s
+    mem_limit: ${QDRANT_MEM_LIMIT:-1g}
+    cpus: ${QDRANT_CPUS:-1.0}
 
   selenium:
     image: selenium/standalone-chromium:latest
@@ -232,9 +282,9 @@ services:
     ports:
       - "${SPARQL_PROXY_PORT:-7878}:7878"
     volumes:
-      - ./infra/services/sparql-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./infra/services/sparql-proxy/users:/etc/caddy/users:ro
-      - ./infra/services/sparql-proxy/projects-ui:/etc/caddy/projects-ui:ro
+      - ../services/sparql-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../services/sparql-proxy/users:/etc/caddy/users:ro
+      - ../services/sparql-proxy/projects-ui:/etc/caddy/projects-ui:ro
       - ${OPEN_PULSE_DATA_DIR:-./data}/sparql-proxy/data:/data
       - ${OPEN_PULSE_DATA_DIR:-./data}/sparql-proxy/config:/config
     healthcheck:
@@ -259,8 +309,12 @@ services:
     restart: unless-stopped
     ports:
       - "${HUB_PORT:-9090}:8000"
+    # Pull the deployment env so any per-service knob set in infra/.env
+    # reaches the container without needing an explicit mapping below.
+    env_file:
+      - ../.env
     environment:
-      HUB_AUTH: "${HUB_AUTH:?HUB_AUTH must be set in .env (e.g. python -c 'import secrets; print(secrets.token_urlsafe(32))')}"
+      HUB_AUTH: "${HUB_AUTH:?HUB_AUTH must be set in infra/.env (e.g. openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
       HUB_DATA_DIR: /data/hub
       HUB_APPLIER_URL: "${HUB_APPLIER_URL:-http://projects-applier:8000}"
       HUB_SPARQL_URL: "${HUB_SPARQL_URL:-http://sparql-proxy:7878}"
