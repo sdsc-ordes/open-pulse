@@ -1,0 +1,36 @@
+name: release-please
+
+# Open a release PR that tracks every conventional commit landing on
+# main. Merging the release PR pushes a `vX.Y.Z` tag, which then triggers
+# release.yml (the existing build + PyPI publish workflow). Release notes
+# and the GitHub Release itself are created by release.yml; this workflow
+# only owns the version bump, changelog, and tag.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Match the rest of the workflows ahead of the June 2026 GHA default flip.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  release-please:
+    name: Update release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
