@@ -1,15 +1,21 @@
 // @ts-check
 
+const OPEN_PULSE_VERSION = "1.0.0";
+
 /** @type {import('@docusaurus/types').Config} */
 const config = {
-  title: "Open Pulse Docs",
-  tagline: "Documentation source of truth",
+  title: "Open Pulse",
+  tagline: "Monitor the health of your open-source ecosystem.",
 
   url: "https://example.com",
   baseUrl: "/",
 
   organizationName: "open-pulse",
   projectName: "open-pulse-1",
+
+  customFields: {
+    openPulseVersion: OPEN_PULSE_VERSION
+  },
 
   onBrokenLinks: "throw",
   markdown: {
@@ -30,10 +36,9 @@ const config = {
       ({
         docs: {
           sidebarPath: require.resolve("./sidebars.js"),
-          routeBasePath: "/"
+          routeBasePath: "/docs"
         },
         blog: false,
-        pages: false,
         theme: {
           customCss: require.resolve("./src/css/custom.css")
         }
@@ -44,11 +49,32 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
+      announcementBar: {
+        id: "v1-launch",
+        content:
+          '🎉 <b>Open Pulse v' + OPEN_PULSE_VERSION + '</b> is live — ' +
+          'try the hosted instance at <a target="_blank" rel="noopener" href="https://openpulse.epfl.ch">openpulse.epfl.ch</a> ' +
+          'or <code>pip install open-pulse-science</code>.',
+        backgroundColor: "#1e6bb8",
+        textColor: "#ffffff",
+        isCloseable: true
+      },
       navbar: {
-        title: "Open Pulse Docs",
+        title: "Open Pulse",
         items: [
-          { to: "/getting-started", label: "Getting Started", position: "left" },
-          { to: "/operations/branch-model", label: "Branch Model", position: "left" }
+          { to: "/docs/getting-started", label: "Getting Started", position: "left" },
+          { to: "/docs/operations/branch-model", label: "Branch Model", position: "left" },
+          {
+            to: "/docs",
+            label: "Docs · v" + OPEN_PULSE_VERSION,
+            position: "right",
+            className: "navbar__item--docs-cta"
+          },
+          {
+            href: "https://github.com/sdsc-ordes/open-pulse",
+            label: "GitHub",
+            position: "right"
+          }
         ]
       }
     })

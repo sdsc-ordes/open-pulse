@@ -1,73 +1,11 @@
 ---
 title: Open Pulse Documentation
-slug: /
 ---
-
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
 
 # Open Pulse Documentation
 
-Monitor the health of your open-source ecosystem — a unified CLI,
-orchestrator, and FastAPI hub over a crawler → graph → SPARQL pipeline.
-This site is the source of truth for Open Pulse docs.
-
-## Get started
-
-Pick the variant that fits your case. The EPFL-hosted instance is the
-fastest path; no install needed.
-
-<Tabs groupId="install" queryString defaultValue="epfl">
-  <TabItem value="epfl" label="🟢 EPFL (preferred)">
-
-Open Pulse runs as a managed instance at EPFL. No install required.
-
-```text
-https://openpulse.epfl.ch
-```
-
-Request access via the EPFL Open Source channel.
-
-  </TabItem>
-  <TabItem value="docker" label="🐳 Docker">
-
-Pull the latest image from GHCR:
-
-```bash
-docker pull ghcr.io/sdsc-ordes/open-pulse:v1.0.0
-```
-
-Then bring up the stack with [`op deploy`](./getting-started/index.md#bring-up-the-stack).
-
-  </TabItem>
-  <TabItem value="pip" label="🐍 pip">
-
-Install from PyPI:
-
-```bash
-pip install open-pulse-science          # core CLI
-pip install 'open-pulse-science[hub]'   # + hub dashboard
-```
-
-The Python module remains `open_pulse`; the CLI entry point is `open-pulse`.
-
-  </TabItem>
-  <TabItem value="source" label="🛠 Source">
-
-Clone and build from source:
-
-```bash
-git clone https://github.com/sdsc-ordes/open-pulse
-cd open-pulse
-docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
-echo "OPEN_PULSE_IMAGE=open-pulse:local" >> infra/.env
-./scripts/op deploy up --profile hub
-```
-
-  </TabItem>
-</Tabs>
-
-Continue with the [full Getting Started guide →](./getting-started/index.md)
+This site is the source of truth for Open Pulse docs. For installation
+options, see the [landing page](/).
 
 ## What changed recently
 

@@ -11,22 +11,29 @@
       --fg-faint: #595959;
       --border: #d0d0d0;
       --accent: #1e6bb8;
+      --accent-dark: #1a60a6;
       --accent-fg: #ffffff;
       --code-bg: #f0f0f0;
       --warn-bg: #fff7e0;
       --warn-fg: #6b4f00;
+      --header-bg-from: #f5f8fc;
+      --header-bg-to: #ffffff;
+      --radius: 6px;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #1a1a1a;
+        --bg: #18191a;
         --fg: #e6e6e6;
         --fg-faint: #999;
         --border: #3a3a3a;
         --accent: #4a9eff;
+        --accent-dark: #2c8efd;
         --accent-fg: #0f0f0f;
         --code-bg: #0f0f0f;
         --warn-bg: #2a2008;
         --warn-fg: #d4b870;
+        --header-bg-from: #1a1f2a;
+        --header-bg-to: #18191a;
       }
     }
     * { box-sizing: border-box; }
@@ -38,11 +45,14 @@
       line-height: 1.5;
     }
     header {
-      padding: 24px 32px;
+      padding: 28px 32px 24px;
       border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, var(--header-bg-from) 0%, var(--header-bg-to) 100%);
     }
-    header h1 { margin: 0; font-size: 22px; font-weight: 600; }
-    header p { margin: 6px 0 0; color: var(--fg-faint); font-size: 14px; }
+    header .back { display: inline-block; font-size: 13px; color: var(--accent); text-decoration: none; margin-bottom: 8px; }
+    header .back:hover { text-decoration: underline; }
+    header h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+    header p { margin: 8px 0 0; color: var(--fg-faint); font-size: 14px; max-width: 70ch; }
     main {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -79,21 +89,21 @@
       background: var(--bg);
       color: var(--fg);
       border: 1px solid var(--border);
-      border-radius: 4px;
+      border-radius: var(--radius);
     }
     .field input[readonly] { background: var(--code-bg); color: var(--fg-faint); }
     .field-row { display: flex; gap: 8px; align-items: center; }
     .field-row input { flex: 1; }
     .checkbox-group label {
       display: flex; align-items: flex-start; gap: 8px;
-      padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px;
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
       margin-bottom: 6px; cursor: pointer; font-weight: 500; font-size: 13px;
     }
     .checkbox-group label:hover { border-color: var(--accent); }
     .checkbox-group input[type=checkbox] { margin-top: 3px; }
     .checkbox-group .desc { font-weight: 400; color: var(--fg-faint); font-size: 12px; }
     button {
-      font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 4px;
+      font: inherit; font-size: 13px; padding: 6px 12px; border-radius: var(--radius);
       border: 1px solid var(--border); background: var(--bg); color: var(--fg);
       cursor: pointer;
     }
@@ -119,6 +129,7 @@
 </head>
 <body>
 <header>
+  <a href="/" class="back">← Back to Open Pulse</a>
   <h1>Open Pulse — <code>infra/.env</code> wizard</h1>
   <p>Answer the questions on the left; the generated file appears on the right. Everything runs in your browser — no values are sent anywhere.</p>
 </header>

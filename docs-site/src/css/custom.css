@@ -1,3 +1,106 @@
 :root {
-  --ifm-color-primary: #2f6feb;
+  --ifm-color-primary: #1e6bb8;
+  --ifm-color-primary-dark: #1a60a6;
+  --ifm-color-primary-darker: #185b9c;
+  --ifm-color-primary-darkest: #144b81;
+  --ifm-color-primary-light: #2779c7;
+  --ifm-color-primary-lighter: #2c7fcd;
+  --ifm-color-primary-lightest: #4b94d6;
+
+  --op-hero-bg-from: #f5f8fc;
+  --op-hero-bg-to: #ffffff;
+  --op-section-quiet-bg: #f7f8fa;
+}
+
+[data-theme="dark"] {
+  --ifm-color-primary: #4a9eff;
+  --ifm-color-primary-dark: #2c8efd;
+  --ifm-color-primary-darker: #1d86fd;
+  --ifm-color-primary-darkest: #036ce4;
+  --ifm-color-primary-light: #68aeff;
+  --ifm-color-primary-lighter: #77b6ff;
+  --ifm-color-primary-lightest: #a4ccff;
+
+  --op-hero-bg-from: #1a1f2a;
+  --op-hero-bg-to: var(--ifm-background-color);
+  --op-section-quiet-bg: #1d2230;
+}
+
+/* Announcement bar: <code> needs a subtle wash to stay legible
+   on the colored background (both light and dark themes). */
+div[class*='announcementBar_'] code {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: inherit;
+  border: 0;
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  font-size: 0.95em;
+}
+
+/* Top navbar: visually distinct CTA for the docs button */
+.navbar__item--docs-cta.navbar__link {
+  background: var(--ifm-color-primary);
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 0.35rem 0.9rem;
+  margin-right: 0.5rem;
+  font-weight: 600;
+}
+
+.navbar__item--docs-cta.navbar__link:hover {
+  background: var(--ifm-color-primary-dark);
+  color: #ffffff;
+}
+
+/* Landing hero */
+.op-hero {
+  padding: 4rem 1.5rem 3rem;
+  text-align: center;
+  background: linear-gradient(180deg, var(--op-hero-bg-from) 0%, var(--op-hero-bg-to) 100%);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.op-hero__title {
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  margin: 0 0 0.6rem;
+  letter-spacing: -0.02em;
+  color: var(--ifm-heading-color);
+}
+
+.op-hero__tagline {
+  font-size: 1.15rem;
+  color: var(--ifm-color-emphasis-700);
+  max-width: 720px;
+  margin: 0 auto 2rem;
+  line-height: 1.55;
+}
+
+.op-hero__ctas {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.op-hero__ctas .button {
+  min-width: 12rem;
+}
+
+/* Sections under the hero */
+.op-section {
+  padding: 3rem 1.5rem;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.op-section--quiet {
+  background: var(--op-section-quiet-bg);
+  max-width: none;
+  margin-top: 2rem;
+}
+
+.op-section--quiet > * {
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
 }
