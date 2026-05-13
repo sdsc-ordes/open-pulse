@@ -83,25 +83,25 @@ open-pulse/
     hub/{app.db,scratch.duckdb}
 
   infra/
-    compose/
+    .env.example              # Deployment env template (auto-seeded → infra/.env)
+    open-pulse-stack/         # Compose stack — all files reference image tags (no build)
       docker-compose.yml      # Main stack (neo4j, oxigraph, sparql-proxy,
                               #             crawler, extractor, hub, …)
       docker-compose.cli.yml  # Overlay for the open-pulse-cli orchestrator
+      docker-compose.grimoirelab.yml  # Overlay for the full GrimoireLab stack
+      grimoirelab/            # GrimoireLab assets (applier sidecar, config templates,
+                              # sigils, scripts)
+        applier/{Dockerfile,main.py}  # FastAPI applier sidecar
+        config/ · python-scripts/ · scripts/ · README.md
       README.md
-    services/                 # Per-service deployment assets
+    services/                 # Per-service standalone recipes (opt-in, not used by op deploy)
       neo4j/ · oxigraph/ · portainer/ · sparql-proxy/
-        sparql-proxy/projects-ui/      # Standalone BYOK projects.json builder
-      grimoirelab/            # Full GrimoireLab stack (own compose, applier sidecar)
-        docker-compose.yml
-        applier/{Dockerfile,main.py}   # FastAPI applier sidecar
-        config/  scripts/  README.md  .env.dist
-    env/.env.example          # Root compose environment template
+        sparql-proxy/projects-ui/     # Standalone BYOK projects.json builder
 
   tools/
     images/
       Dockerfile-open-pulse   # SINGLE image: CLI + orchestrator + hub
                               # → ghcr.io/sdsc-ordes/open-pulse:latest
-      Dockerfile-airflow      # (legacy)
       README.md               # How to build / publish / run the image
 
   dev/                        # Carlos's planning workspace
