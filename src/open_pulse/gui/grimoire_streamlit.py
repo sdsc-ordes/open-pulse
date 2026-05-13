@@ -6,7 +6,7 @@ set the ``GRIMOIRE_UI_PASSWORD`` environment variable **or** add it to
 
 Requires the ``grimoire-ui`` optional dependency group::
 
-    pip install open-pulse[grimoire-ui]
+    pip install open-pulse-science[grimoire-ui]
 """
 
 from __future__ import annotations

@@ -16,7 +16,7 @@ def grimoire_ui() -> None:
     """Launch the Streamlit Grimoire configuration UI.
 
     Requires the ``grimoire-ui`` optional dependency group
-    (``pip install open-pulse[grimoire-ui]``).
+    (``pip install open-pulse-science[grimoire-ui]``).
     """
     try:
         import streamlit  # noqa: F401
@@ -24,7 +24,7 @@ def grimoire_ui() -> None:
         console.print(
             "[red bold]Error:[/red bold] Streamlit is not installed.\n"
             "Install the grimoire-ui extra:  "
-            "[bold]pip install open-pulse\\[grimoire-ui][/bold]"
+            "[bold]pip install open-pulse-science\\[grimoire-ui][/bold]"
         )
         raise typer.Exit(code=1) from None
 
@@ -44,7 +44,7 @@ def hub_serve(
     """Run the Open Pulse Hub dashboard.
 
     Single-password gate via ``HUB_AUTH``. Requires the ``hub`` optional
-    dependency group (``pip install open-pulse[hub]``) and a docker socket
+    dependency group (``pip install open-pulse-science[hub]``) and a docker socket
     bind-mounted at ``/var/run/docker.sock`` for service control.
     """
     try:
@@ -53,7 +53,7 @@ def hub_serve(
         console.print(
             "[red bold]Error:[/red bold] uvicorn is not installed.\n"
             "Install the hub extra:  "
-            "[bold]pip install open-pulse\\[hub][/bold]"
+            "[bold]pip install open-pulse-science\\[hub][/bold]"
         )
         raise typer.Exit(code=1) from None
 
