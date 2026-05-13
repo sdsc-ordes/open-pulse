@@ -232,7 +232,7 @@ services:
     #   docker build -t open-pulse-applier:local infra/open-pulse-stack/grimoirelab/applier
     # then set OPEN_PULSE_APPLIER_IMAGE in .env, otherwise the published
     # GHCR tag is pulled.
-    image: "${OPEN_PULSE_APPLIER_IMAGE:-ghcr.io/sdsc-ordes/open-pulse/projects-applier:latest}"
+    image: "${OPEN_PULSE_APPLIER_IMAGE:-ghcr.io/sdsc-ordes/open-pulse-applier:latest}"
     env_file:
       - ../.env
     environment:
