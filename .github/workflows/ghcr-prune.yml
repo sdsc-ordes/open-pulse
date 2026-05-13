@@ -21,7 +21,6 @@ permissions:
 
 env:
   ORG: sdsc-ordes
-  PACKAGE_NAME: open-pulse
   # Grace periods so an in-flight build or a just-closed PR isn't pruned mid-run.
   PR_TAG_AGE_DAYS: "7"
   UNTAGGED_AGE_DAYS: "14"
@@ -37,12 +36,22 @@ concurrency:
 
 jobs:
   prune:
-    name: Prune pr-* tags and untagged versions
+    name: Prune ${{ matrix.package }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # One job per package — independent failures don't stop the others, and
+    # each gets its own summary panel. Add new packages by extending this list.
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - open-pulse
+          - open-pulse-applier
     steps:
       - name: Prune package versions
         uses: actions/github-script@v8
+        env:
+          PACKAGE_NAME: ${{ matrix.package }}
         with:
           script: |
             const org = process.env.ORG;
@@ -154,7 +163,7 @@ jobs:
             }
 
             await core.summary
-              .addHeading('GHCR prune summary')
+              .addHeading(`GHCR prune summary — ${packageName}`)
               .addList([
                 `Mode: ${shouldDelete ? 'apply' : 'dry-run'}${pruneShaNow ? ' + prune_sha_now' : ''}`,
                 `Package: ${org}/${packageName}`,
@@ -168,4 +177,4 @@ jobs:
               ])
               .write();
 
-            console.log(`\nScanned ${scanned} · Deleted ${deleted} · Skipped ${skipped} · Failed ${failed}`);
+            console.log(`\n[${packageName}] Scanned ${scanned} · Deleted ${deleted} · Skipped ${skipped} · Failed ${failed}`);
