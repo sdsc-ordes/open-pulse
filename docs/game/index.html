@@ -37,7 +37,7 @@
       <h1 class="case-title">The Star-Builders Mystery</h1>
       <p class="case-brief">
         <span class="brief-time">2087-03-14 · 09:47 UTC</span> —
-        Repository <code>void-engine</code> appeared on the Open Source
+        Repository <code>eldritch-engine</code> appeared on the Open Source
         Registry seven days ago. Fifty-thousand stars. Three trending
         boards. Zero verifiable history. Reputation systems are
         amplifying it across the federation. <strong>The Bureau needs a
@@ -95,20 +95,59 @@
     </div>
   </div>
 
-  <!-- Submission modal -->
+  <!-- Submission modal — drag pieces into the three verdict slots -->
   <div class="modal" id="submit-modal" role="dialog" aria-modal="true" aria-labelledby="submit-title" hidden>
     <div class="modal-card submit-card">
       <header class="modal-head">
-        <h2 id="submit-title">Pick your three strongest pieces of evidence</h2>
+        <h2 id="submit-title">Assemble your verdict</h2>
         <button class="modal-close" id="submit-close" type="button" aria-label="Cancel submission">×</button>
       </header>
       <p class="submit-instructions">
-        Select exactly three. The Bureau will read your selection as the
-        proof your verdict rests on.
+        Drag exactly three pieces of evidence into the slots — or tap a
+        card and then tap a slot. The Bureau will read your selection
+        as the proof your verdict rests on.
       </p>
-      <ul class="evidence-picker" id="evidence-picker"></ul>
+
+      <ol class="slots-row" id="slots-row">
+        <li class="slot" data-slot="0" aria-label="Slot 1"></li>
+        <li class="slot" data-slot="1" aria-label="Slot 2"></li>
+        <li class="slot" data-slot="2" aria-label="Slot 3"></li>
+      </ol>
+
+      <div class="coverage" aria-label="Coverage of selected evidence">
+        <p class="coverage-title">Coverage map</p>
+        <div class="coverage-grid">
+          <div class="cov-col" data-kind="popularity">
+            <p class="cov-label">Popularity</p>
+            <div class="cov-pips" data-pips="0">
+              <span class="pip"></span><span class="pip"></span>
+            </div>
+            <p class="cov-tip">Is the surface story trustworthy?</p>
+          </div>
+          <div class="cov-col" data-kind="provenance">
+            <p class="cov-label">Provenance</p>
+            <div class="cov-pips" data-pips="0">
+              <span class="pip"></span><span class="pip"></span>
+            </div>
+            <p class="cov-tip">Who and since when?</p>
+          </div>
+          <div class="cov-col" data-kind="structure">
+            <p class="cov-label">Structure</p>
+            <div class="cov-pips" data-pips="0">
+              <span class="pip"></span>
+            </div>
+            <p class="cov-tip">Who connects to whom?</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="evidence-deck">
+        <p class="deck-label">Available evidence (drag or tap)</p>
+        <ul class="deck-list" id="deck-list"></ul>
+      </div>
+
       <footer class="submit-footer">
-        <p class="picker-count" id="picker-count">0 of 3 selected</p>
+        <p class="picker-count" id="picker-count">0 / 3 placed</p>
         <button id="verdict-btn" class="action-btn" type="button" disabled>Deliver verdict</button>
       </footer>
     </div>

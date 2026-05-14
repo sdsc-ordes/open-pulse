@@ -515,58 +515,264 @@ code { font-family: var(--font-mono); font-size: 0.92em; color: var(--accent); }
 
 /* --- submission modal -------------------------------------------------- */
 
+.submit-card {
+  max-width: 760px;
+}
+
 .submit-instructions {
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   color: var(--fg-dim);
   margin: 0 0 1rem;
 }
 
-.evidence-picker {
+/* Three verdict slots arranged horizontally */
+.slots-row {
   list-style: none;
   padding: 0;
-  margin: 0 0 1rem;
+  margin: 0 0 1.1rem;
   display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+}
+
+.slot {
+  position: relative;
+  min-height: 72px;
+  border: 2px dashed color-mix(in srgb, var(--fg-dim) 35%, transparent);
+  border-radius: 12px;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+  padding: 0.5rem;
+}
+
+.slot::before {
+  content: attr(data-num);
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.06em;
+}
+
+.slot.empty::after {
+  content: "drop evidence";
+}
+
+.slot.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+.slot.filled {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--surface);
+  padding: 0;
+}
+
+.slot .placed-card {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.25rem;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  cursor: grab;
+}
+
+.slot .placed-card .ev-tag {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.slot .placed-card .ev-snippet {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--fg);
+  letter-spacing: 0;
+  text-transform: none;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --- coverage map ------------------------------------------------------ */
+
+.coverage {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.7rem 0.9rem 0.85rem;
+  margin: 0 0 1rem;
+}
+
+.coverage-title {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin: 0 0 0.6rem;
+}
+
+.coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.cov-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.cov-label {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg);
+  margin: 0;
+}
+
+.cov-pips {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.cov-pips .pip {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--fg-dim) 40%, transparent);
+  background: transparent;
+  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.cov-col.lit .pip:first-child {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.cov-col[data-pips="2"] .pip {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.cov-col[data-pips="1"] .pip:first-child {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.cov-tip {
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+  margin: 0;
+  line-height: 1.3;
+}
+
+/* --- evidence deck ----------------------------------------------------- */
+
+.evidence-deck {
+  margin: 0 0 0.75rem;
+}
+
+.deck-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin: 0 0 0.5rem;
+}
+
+.deck-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 0.55rem;
 }
 
-.evidence-picker label {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.7rem;
-  align-items: start;
-  padding: 0.7rem 0.85rem;
+.ev-card {
   border: 1px solid var(--border);
-  border-radius: 12px;
-  cursor: pointer;
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0.55rem 0.7rem;
+  display: grid;
+  gap: 0.25rem;
+  cursor: grab;
+  user-select: none;
   font-family: var(--font-mono);
-  font-size: 0.85rem;
-  line-height: 1.5;
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition: border-color 140ms ease, transform 140ms ease, opacity 140ms ease, background-color 140ms ease;
 }
 
-.evidence-picker label:hover {
+.ev-card:hover {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  transform: translateY(-1px);
+}
+
+.ev-card.dragging {
+  opacity: 0.4;
+}
+
+.ev-card.placed {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ev-card.tap-selected {
+  border-color: var(--accent);
   background: var(--accent-soft);
 }
 
-.evidence-picker input[type="checkbox"]:checked + .ev-text {
-  color: var(--accent);
+.ev-card .ev-tag {
+  font-size: 0.78rem;
   font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.04em;
 }
 
-.evidence-picker input[type="checkbox"] {
-  accent-color: var(--accent);
-  width: 18px;
-  height: 18px;
-  margin-top: 2px;
+.ev-card .ev-snippet {
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--fg);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
+
+/* --- footer ------------------------------------------------------------ */
 
 .submit-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.8rem;
-  margin-top: 0.5rem;
+  margin-top: 0.4rem;
 }
 
 .picker-count {

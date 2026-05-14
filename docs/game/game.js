@@ -20,7 +20,7 @@
       icon: "★",
       bias: "Sees what shines. Cannot tell you if it is real.",
       script: [
-        { who: "STARGAZER", text: "Case file 00731. Yeah I've been watching void-engine since Tuesday. 50,000 stars in 7 days." },
+        { who: "STARGAZER", text: "Case file 00731. Yeah I've been watching eldritch-engine since Tuesday. 50,000 stars in 7 days." },
         { who: "STARGAZER", text: "Three trending boards picked it up. Two industry blogs cited it. The aggregate reputation system is amplifying it across the federation feed." },
         { who: "YOU", text: "Any red flags from where you sit?" },
         { who: "STARGAZER", text: "Star-to-contributor ratio: 6,250-to-1. Industry median is 18-to-1. That is anomalous in a way I cannot explain from my console alone." },
@@ -40,17 +40,17 @@
       icon: "◇",
       bias: "Sees who connects to whom. Cannot tell you what they did.",
       script: [
-        { who: "CARTOGRAPHER", text: "I have a network read on the void-engine contributor set. Eight visible accounts." },
+        { who: "CARTOGRAPHER", text: "I have a network read on the eldritch-engine contributor set. Eight visible accounts." },
         { who: "YOU", text: "How do they relate to each other?" },
-        { who: "CARTOGRAPHER", text: "Six of the eight only ever committed to void-engine. No history elsewhere. They appeared the week the repo went public." },
-        { who: "CARTOGRAPHER", text: "The remaining two share a three-year history with a private organization, void-collective. They co-contributed to an internal repo there." },
+        { who: "CARTOGRAPHER", text: "Six of the eight only ever committed to eldritch-engine. No history elsewhere. They appeared the week the repo went public." },
+        { who: "CARTOGRAPHER", text: "The remaining two share a three-year history with a private organization, eldritch-collective. They co-contributed to an internal repo there." },
         { who: "CARTOGRAPHER", text: "I see who knows whom. I do not see what they did, when, or why. Pair me with the others." },
         { who: "SYSTEM", text: "Evidence logged: 'B'." },
       ],
       evidence: {
         id: "B",
         kind: "structure",
-        label: "8 contributors; 6 have only void-engine; 2 share a 3-year history inside org void-collective.",
+        label: "8 contributors; 6 have only eldritch-engine; 2 share a 3-year history inside org eldritch-collective.",
       },
     },
     {
@@ -60,7 +60,7 @@
       icon: "❖",
       bias: "Knows what each thing is. Does not observe time.",
       script: [
-        { who: "ARCHIVIST", text: "Cataloging void-engine. Repo created seven days ago. Rust. MIT-licensed. Self-tagged as post-quantum cryptography." },
+        { who: "ARCHIVIST", text: "Cataloging eldritch-engine. Repo created seven days ago. Rust. MIT-licensed. Self-tagged as post-quantum cryptography." },
         { who: "ARCHIVIST", text: "The README cites ORCID 0000-0002-1234-9999. I cross-checked against the federation researcher registry." },
         { who: "YOU", text: "And?" },
         { who: "ARCHIVIST", text: "That ORCID is real. Issued in 2003. Belongs to Dr. Hadrien Voss at New Geneva Federal Institute. Specialization: post-quantum cryptography. Twenty years on the topic." },
@@ -80,7 +80,7 @@
       icon: "◫",
       bias: "Reads the rhythm. Does not read what is being played.",
       script: [
-        { who: "CHRONICLER", text: "I've run the CHAOSS metrics on void-engine. Eight contributors, all active in the last seven days. Healthy at a glance." },
+        { who: "CHRONICLER", text: "I've run the CHAOSS metrics on eldritch-engine. Eight contributors, all active in the last seven days. Healthy at a glance." },
         { who: "CHRONICLER", text: "But the pattern is off. Every contributor commits at exactly 09:00, 09:47, 10:34 UTC. Same intervals. Every weekday." },
         { who: "YOU", text: "Could that be coincidence?" },
         { who: "CHRONICLER", text: "No. Real humans drift. Timezones shift. Weekends dip. Coffee meetings push commits late. These commits have zero variance. It is a scheduler." },
@@ -100,17 +100,17 @@
       icon: "◎",
       bias: "Brings raw threads back. Does not interpret them.",
       script: [
-        { who: "SCOUT", text: "Went looking under the public surface. The org void-collective owns a private repo — engine-core. Federation crawl picked up its existence." },
+        { who: "SCOUT", text: "Went looking under the public surface. The org eldritch-collective owns a private repo — engine-core. Federation crawl picked up its existence." },
         { who: "YOU", text: "Anything inside?" },
         { who: "SCOUT", text: "Private, so no contents. But the metadata: created 2009. Last commit, three days ago. Continuous activity for fifteen years." },
-        { who: "SCOUT", text: "And — this is the thread to pull — the public void-engine's git tree shares SHAs with the private engine-core, starting 2014. The public repo is a curated mirror of the private one, force-pushed as a flat squash last week." },
+        { who: "SCOUT", text: "And — this is the thread to pull — the public eldritch-engine's git tree shares SHAs with the private engine-core, starting 2014. The public repo is a curated mirror of the private one, force-pushed as a flat squash last week." },
         { who: "SCOUT", text: "I find the threads. I do not pull them. That call is yours." },
         { who: "SYSTEM", text: "Evidence logged: 'E'." },
       ],
       evidence: {
         id: "E",
         kind: "provenance",
-        label: "Private mirror void-collective/engine-core created 2009; identical SHAs with public repo since 2014.",
+        label: "Private mirror eldritch-collective/engine-core created 2009; identical SHAs with public repo since 2014.",
       },
     },
   ];
@@ -128,7 +128,7 @@
       grade: "Verdict accepted · Full marks",
       gradeKind: "good",
       body:
-        "You showed that <strong>real work</strong> exists behind void-engine — a real researcher (ORCID since 2003) and a private mirror going back to 2009 — and that the popularity is <strong>manufactured</strong> (anomalous star-to-contributor ratio). The Bureau rules that the underlying code is genuine; the trending placement is the result of a stars campaign and is suppressed pending review.",
+        "You showed that <strong>real work</strong> exists behind eldritch-engine — a real researcher (ORCID since 2003) and a private mirror going back to 2009 — and that the popularity is <strong>manufactured</strong> (anomalous star-to-contributor ratio). The Bureau rules that the underlying code is genuine; the trending placement is the result of a stars campaign and is suppressed pending review.",
       takeaway:
         "This is what Open Pulse is for. Stars alone would have said 'success.' The semantic store (Archivist) plus the crawler (Scout) plus a popularity sanity-check (Stargazer) together produce a verdict no single layer could reach.",
     },
@@ -384,23 +384,32 @@
     state.typing = false;
   }
 
-  // ----- Submission flow -------------------------------------------------
+  // ----- Submission flow (drag-and-drop + tap fallback) ------------------
+
+  // Slot state: 3 positions, each holds an evidence id or null.
+  let slotState = [null, null, null];
+  // For tap-to-select on touch devices: which deck card is currently primed.
+  let tapPrimed = null;
+
+  function shortLabel(text) {
+    // Coverage cards show a 3-line snippet; the source labels are short
+    // enough that no truncation is needed but we strip the leading metric
+    // numbers for breathing room.
+    return text;
+  }
 
   function openSubmission() {
-    const picker = document.getElementById("evidence-picker");
-    state.selected = new Set();
-    picker.innerHTML = state.collected.map((id) => {
-      const e = findEvidence(id);
-      return `
-        <li>
-          <label>
-            <input type="checkbox" value="${e.id}" />
-            <span class="ev-text"><strong>[${e.id}]</strong> ${escape(e.label)}</span>
-          </label>
-        </li>
-      `;
-    }).join("");
-    updatePickerCount();
+    slotState = [null, null, null];
+    tapPrimed = null;
+    renderSlots();
+    renderDeck();
+    updateCoverage();
+    updateSubmitFooter();
+    // populate slot numbers (CSS attr)
+    const labels = ["EVIDENCE 01", "EVIDENCE 02", "EVIDENCE 03"];
+    document.querySelectorAll("#slots-row .slot").forEach((el, i) => {
+      el.dataset.num = labels[i];
+    });
     document.getElementById("submit-modal").hidden = false;
   }
 
@@ -408,29 +417,218 @@
     document.getElementById("submit-modal").hidden = true;
   }
 
-  function updatePickerCount() {
-    document.getElementById("picker-count").textContent =
-      `${state.selected.size} of 3 selected`;
-    document.getElementById("verdict-btn").disabled = state.selected.size !== 3;
+  function renderSlots() {
+    const slots = document.querySelectorAll("#slots-row .slot");
+    slots.forEach((el, i) => {
+      const id = slotState[i];
+      el.classList.toggle("empty", !id);
+      el.classList.toggle("filled", !!id);
+      el.classList.remove("drag-over");
+      el.innerHTML = "";
+      if (id) {
+        const ev = findEvidence(id);
+        el.innerHTML = `
+          <div class="placed-card" draggable="true" data-id="${ev.id}" data-from="slot:${i}">
+            <span class="ev-tag">[${ev.id}]</span>
+            <span class="ev-snippet">${escape(shortLabel(ev.label))}</span>
+          </div>`;
+      }
+    });
+    // re-wire drag handlers on the new card nodes
+    wireSlotCardDrag();
   }
 
-  function onPickerChange(event) {
-    if (event.target.tagName !== "INPUT") return;
-    const id = event.target.value;
-    if (event.target.checked) {
-      if (state.selected.size >= 3) {
-        event.target.checked = false;
+  function renderDeck() {
+    const deck = document.getElementById("deck-list");
+    deck.innerHTML = state.collected.map((id) => {
+      const ev = findEvidence(id);
+      const placed = slotState.includes(id);
+      const primed = tapPrimed === id;
+      const classes = ["ev-card"];
+      if (placed) classes.push("placed");
+      if (primed) classes.push("tap-selected");
+      return `
+        <li>
+          <div class="${classes.join(" ")}"
+               draggable="${placed ? "false" : "true"}"
+               data-id="${ev.id}"
+               data-from="deck"
+               role="button"
+               tabindex="0">
+            <span class="ev-tag">[${ev.id}]</span>
+            <span class="ev-snippet">${escape(shortLabel(ev.label))}</span>
+          </div>
+        </li>`;
+    }).join("");
+  }
+
+  function updateCoverage() {
+    const counts = { popularity: 0, provenance: 0, structure: 0 };
+    slotState.forEach((id) => {
+      if (!id) return;
+      const ev = findEvidence(id);
+      if (ev && counts[ev.kind] != null) counts[ev.kind]++;
+    });
+    document.querySelectorAll(".coverage .cov-col").forEach((col) => {
+      const kind = col.dataset.kind;
+      col.dataset.pips = String(counts[kind] || 0);
+      col.classList.toggle("lit", counts[kind] > 0);
+    });
+  }
+
+  function updateSubmitFooter() {
+    const filled = slotState.filter(Boolean).length;
+    document.getElementById("picker-count").textContent = `${filled} / 3 placed`;
+    document.getElementById("verdict-btn").disabled = filled !== 3;
+  }
+
+  function placeInSlot(slotIdx, evidenceId) {
+    if (slotIdx < 0 || slotIdx > 2) return;
+    if (!state.collected.includes(evidenceId)) return;
+    // Remove evidence from whichever slot already holds it (move semantics)
+    for (let i = 0; i < 3; i++) {
+      if (slotState[i] === evidenceId) slotState[i] = null;
+    }
+    slotState[slotIdx] = evidenceId;
+    tapPrimed = null;
+    renderSlots();
+    renderDeck();
+    updateCoverage();
+    updateSubmitFooter();
+  }
+
+  function removeFromSlot(slotIdx) {
+    if (slotIdx < 0 || slotIdx > 2) return;
+    slotState[slotIdx] = null;
+    renderSlots();
+    renderDeck();
+    updateCoverage();
+    updateSubmitFooter();
+  }
+
+  function firstEmptySlot() {
+    return slotState.findIndex((s) => s === null);
+  }
+
+  // --- Drag-and-drop wiring ----------------------------------------------
+
+  let draggingFrom = null;     // "deck" | "slot:N"
+  let draggingId = null;
+
+  function onDeckDragStart(e) {
+    const card = e.target.closest(".ev-card");
+    if (!card || card.classList.contains("placed")) {
+      e.preventDefault();
+      return;
+    }
+    draggingId = card.dataset.id;
+    draggingFrom = "deck";
+    card.classList.add("dragging");
+    if (e.dataTransfer) {
+      e.dataTransfer.setData("text/plain", draggingId);
+      e.dataTransfer.effectAllowed = "move";
+    }
+  }
+
+  function onDragEnd(e) {
+    const card = e.target.closest(".ev-card, .placed-card");
+    if (card) card.classList.remove("dragging");
+    document.querySelectorAll("#slots-row .slot").forEach((s) => s.classList.remove("drag-over"));
+    draggingFrom = null;
+    draggingId = null;
+  }
+
+  function wireSlotCardDrag() {
+    document.querySelectorAll("#slots-row .placed-card").forEach((card) => {
+      card.addEventListener("dragstart", (e) => {
+        draggingId = card.dataset.id;
+        draggingFrom = card.dataset.from;
+        card.classList.add("dragging");
+        if (e.dataTransfer) {
+          e.dataTransfer.setData("text/plain", draggingId);
+          e.dataTransfer.effectAllowed = "move";
+        }
+      });
+      card.addEventListener("dragend", onDragEnd);
+    });
+  }
+
+  function onSlotDragOver(e) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    const slot = e.target.closest(".slot");
+    if (slot) slot.classList.add("drag-over");
+  }
+
+  function onSlotDragLeave(e) {
+    const slot = e.target.closest(".slot");
+    if (slot) slot.classList.remove("drag-over");
+  }
+
+  function onSlotDrop(e) {
+    e.preventDefault();
+    const slot = e.target.closest(".slot");
+    if (!slot) return;
+    slot.classList.remove("drag-over");
+    const idx = Number(slot.dataset.slot);
+    if (Number.isFinite(idx) && draggingId) {
+      placeInSlot(idx, draggingId);
+    }
+    draggingId = null;
+    draggingFrom = null;
+  }
+
+  // Drop a slot card OUT (back to deck) by dragging it outside the slot area
+  function onDeckDrop(e) {
+    e.preventDefault();
+    if (draggingFrom && draggingFrom.startsWith("slot:")) {
+      const idx = Number(draggingFrom.split(":")[1]);
+      removeFromSlot(idx);
+    }
+    draggingId = null;
+    draggingFrom = null;
+  }
+  function onDeckDragOver(e) { e.preventDefault(); }
+
+  // --- Click-to-place fallback (touch + accessibility) ------------------
+
+  function onDeckClick(e) {
+    const card = e.target.closest(".ev-card");
+    if (!card) return;
+    if (card.classList.contains("placed")) return;
+    const id = card.dataset.id;
+    if (tapPrimed === id) {
+      // toggle off
+      tapPrimed = null;
+    } else {
+      // if a slot is empty, jump straight in
+      const empty = firstEmptySlot();
+      if (empty >= 0) {
+        placeInSlot(empty, id);
         return;
       }
-      state.selected.add(id);
-    } else {
-      state.selected.delete(id);
+      tapPrimed = id;
     }
-    updatePickerCount();
+    renderDeck();
+  }
+
+  function onSlotClick(e) {
+    const slot = e.target.closest(".slot");
+    if (!slot) return;
+    const idx = Number(slot.dataset.slot);
+    if (!Number.isFinite(idx)) return;
+    if (tapPrimed) {
+      placeInSlot(idx, tapPrimed);
+      return;
+    }
+    if (slotState[idx]) {
+      // tap a filled slot to remove
+      removeFromSlot(idx);
+    }
   }
 
   function deliverVerdict() {
-    const ids = Array.from(state.selected).sort();
+    const ids = slotState.filter(Boolean).sort();
     const key = ids.join("+");
     const v = VERDICTS[key] || synthesisedVerdict(ids);
     document.getElementById("verdict-grade").className =
@@ -516,8 +714,22 @@
 
     document.getElementById("submit-btn").addEventListener("click", openSubmission);
     document.getElementById("submit-close").addEventListener("click", closeSubmission);
-    document.getElementById("evidence-picker").addEventListener("change", onPickerChange);
     document.getElementById("verdict-btn").addEventListener("click", deliverVerdict);
+
+    // Drag-and-drop + tap fallback for the submission picker.
+    const deckList = document.getElementById("deck-list");
+    deckList.addEventListener("dragstart", onDeckDragStart);
+    deckList.addEventListener("dragend", onDragEnd);
+    deckList.addEventListener("dragover", onDeckDragOver);
+    deckList.addEventListener("drop", onDeckDrop);
+    deckList.addEventListener("click", onDeckClick);
+
+    const slotsRow = document.getElementById("slots-row");
+    slotsRow.addEventListener("dragover", onSlotDragOver);
+    slotsRow.addEventListener("dragleave", onSlotDragLeave);
+    slotsRow.addEventListener("drop", onSlotDrop);
+    slotsRow.addEventListener("dragend", onDragEnd);
+    slotsRow.addEventListener("click", onSlotClick);
 
     document.getElementById("verdict-close").addEventListener("click", closeVerdict);
     document.getElementById("verdict-retry").addEventListener("click", resetForRetry);
