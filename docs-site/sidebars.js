@@ -11,9 +11,11 @@ const sidebars = {
       label: "Concepts",
       items: [
         "concepts/metadata-and-ontology",
-        "concepts/graph-and-semantic-data"
+        "concepts/graph-and-semantic-data",
+        "concepts/metrics-and-chaoss"
       ]
     },
+    "use-cases/index",
     {
       type: "category",
       label: "Operations",
