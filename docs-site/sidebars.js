@@ -8,6 +8,14 @@ const sidebars = {
     "analysis/index",
     {
       type: "category",
+      label: "Concepts",
+      items: [
+        "concepts/metadata-and-ontology",
+        "concepts/graph-and-semantic-data"
+      ]
+    },
+    {
+      type: "category",
       label: "Operations",
       items: [
         "operations/index",
