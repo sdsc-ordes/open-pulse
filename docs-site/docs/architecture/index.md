@@ -5,6 +5,33 @@ slug: /architecture
 
 # Architecture
 
+Open Pulse is built around a single unified Python package and a small
+set of cooperating services. The pipeline crawls software ecosystems
+from GitHub, stores the resulting graph in Neo4j, extracts richer
+metadata about each repository, lands that metadata in a SPARQL store,
+and feeds development-activity signals into a GrimoireLab + OpenSearch
+stack for CHAOSS-style time-series metrics. A FastAPI hub stitches
+operations together for humans.
+
+```mermaid
+flowchart LR
+  CLI[open-pulse CLI] -->|quest run| Q[Quest pipeline]
+  HUB[open-pulse-hub] -. docker socket .-> CLI
+  Q --> CR[open-pulse-crawler]
+  CR --> N[(Neo4j)]
+  Q --> GME[git-metadata-extractor]
+  GME -->|JSON-LD| S[(sparql_store<br/>Oxigraph)]
+  Q -->|projects.json| GL[GrimoireLab<br/>Mordred + SortingHat]
+  GL --> OS[(OpenSearch)]
+```
+
+Two query layers expose the data, each tuned for a different shape of
+question — see
+[Concepts → Graph & Semantic Data](../concepts/graph-and-semantic-data.md)
+for the Neo4j ↔ SPARQL split, and
+[Concepts → Metrics & CHAOSS](../concepts/metrics-and-chaoss.md) for
+the GrimoireLab side.
+
 ## Repository boundaries
 
 - `src/open_pulse/` — CLI and runtime code (src-layout, hatchling-built,
