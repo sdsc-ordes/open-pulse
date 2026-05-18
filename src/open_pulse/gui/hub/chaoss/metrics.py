@@ -1162,6 +1162,406 @@ def _metric_academic_impact(full: str, canonical_url: str, window_days: int) -> 
     )
 
 
+# ── Metric 11 · Time to First Response ──────────────────────────────────
+
+def _metric_first_response(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Median hours from PR/issue creation to the first response by
+    someone other than the author. GrimoireLab enriches every github
+    document with ``time_to_first_attention_without_bot`` (or
+    ``time_to_first_attention_hours``) precomputed.
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"range": {"created_at": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "median": {
+                "percentiles": {
+                    "field": "time_to_first_attention_without_bot",
+                    "percents": [50],
+                }
+            },
+            "p90": {
+                "percentiles": {
+                    "field": "time_to_first_attention_without_bot",
+                    "percents": [90],
+                }
+            },
+            "count_with_response": {
+                "filter": {"exists": {"field": "time_to_first_attention_without_bot"}}
+            },
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"P50/P90 time to first response on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or github index empty",
+        ))
+        return MetricResult(
+            slug="first_response", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes=(
+                "GrimoireLab hasn't indexed pull-request/issue traffic "
+                "for this repo. The query above is what we'd run once "
+                "github_*_enriched starts receiving documents."
+            ),
+        )
+
+    aggs = raw.get("aggregations") or {}
+    n = int(((aggs.get("count_with_response") or {}).get("doc_count") or 0))
+    p50_raw = ((aggs.get("median") or {}).get("values") or {}).get("50.0")
+    p90_raw = ((aggs.get("p90") or {}).get("values") or {}).get("90.0")
+    p50 = float(p50_raw) if p50_raw is not None else None
+    p90 = float(p90_raw) if p90_raw is not None else None
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"P50/P90 time to first response on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=(
+            f"{n} responses · P50 {p50:.1f} h · P90 {p90:.1f} h"
+            if p50 is not None and p90 is not None
+            else f"{n} responses, no percentile available"
+        ),
+    ))
+
+    if not n or p50 is None:
+        return MetricResult(
+            slug="first_response", value="—", label="no responses in window",
+            secondary=None, queries=traces,
+            notes=(
+                "No github documents in the window carried a "
+                "time_to_first_attention_without_bot value — either "
+                "no PRs/issues opened, or none have been responded "
+                "to yet."
+            ),
+        )
+
+    return MetricResult(
+        slug="first_response",
+        value=f"{p50:.1f} h",
+        label=f"median response (last {window_days} days)",
+        secondary=f"{n} responses · P90 {p90:.1f} h" if p90 is not None else f"{n} responses",
+        queries=traces,
+        notes=(
+            "Median hours from PR/issue creation to the first comment "
+            "by someone other than the author (bot comments excluded). "
+            "GrimoireLab precomputes the per-document value; we just "
+            "ask for the percentile."
+        ),
+    )
+
+
+# ── Metric 12 · Issue Resolution Duration ───────────────────────────────
+
+def _metric_issue_resolution(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Median days to close an issue (excludes PRs)."""
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"term": {"pull_request": False}},
+                    {"term": {"state": "closed"}},
+                    {"range": {"closed_at": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "median_days": {
+                "percentiles": {"field": "time_open_days", "percents": [50]}
+            },
+            "p90_days": {
+                "percentiles": {"field": "time_open_days", "percents": [90]}
+            },
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"P50/P90 issue close duration on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or github index empty",
+        ))
+        return MetricResult(
+            slug="issue_resolution", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="github_*_enriched has no documents for this repo yet.",
+        )
+
+    total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+    aggs = raw.get("aggregations") or {}
+    p50_raw = ((aggs.get("median_days") or {}).get("values") or {}).get("50.0")
+    p90_raw = ((aggs.get("p90_days") or {}).get("values") or {}).get("90.0")
+    p50 = float(p50_raw) if p50_raw is not None else None
+    p90 = float(p90_raw) if p90_raw is not None else None
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"Issue close duration on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=(
+            f"{total} closed issues · P50 {p50:.1f} d · P90 {p90:.1f} d"
+            if p50 is not None and p90 is not None
+            else f"{total} closed issues, no percentile"
+        ),
+    ))
+
+    if not total or p50 is None:
+        return MetricResult(
+            slug="issue_resolution", value="—",
+            label="no closed issues in window",
+            secondary=None, queries=traces,
+            notes="No issues closed in the window for this repo.",
+        )
+    return MetricResult(
+        slug="issue_resolution",
+        value=f"{p50:.1f} d",
+        label=f"median time to close (last {window_days} days)",
+        secondary=(
+            f"{total} closed · P90 {p90:.1f} d" if p90 is not None else f"{total} closed"
+        ),
+        queries=traces,
+        notes=(
+            "Excludes pull requests (``pull_request: false``). Uses "
+            "GrimoireLab's ``time_open_days`` enrichment so the metric "
+            "stays consistent across multiple GitHub backends."
+        ),
+    )
+
+
+# ── Metric 13 · Self Merge Rate ─────────────────────────────────────────
+
+def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Fraction of merged PRs where the author also performed the merge."""
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"term": {"pull_request": True}},
+                    {"term": {"merged": True}},
+                    {"range": {"merge_date": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "self_merged": {
+                "filter": {
+                    # Painless script: comparison of ``user_login`` vs
+                    # ``merge_author_login``. Wrapped in try/catch so a
+                    # missing-field doc doesn't blow up the aggregation.
+                    "script": {
+                        "source": (
+                            "try { return doc['user_login'].value == "
+                            "doc['merge_author_login'].value; } catch "
+                            "(Exception e) { return false; }"
+                        )
+                    }
+                }
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Self-merged vs merged PRs on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or github index empty",
+        ))
+        return MetricResult(
+            slug="self_merge", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="github_*_enriched has no documents for this repo yet.",
+        )
+
+    total_merged = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+    self_merged = int(((raw.get("aggregations") or {}).get("self_merged") or {}).get("doc_count") or 0)
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"Self-merged vs merged PRs on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=f"{self_merged} self / {total_merged} merged",
+    ))
+
+    if not total_merged:
+        return MetricResult(
+            slug="self_merge", value="—", label="no merged PRs in window",
+            secondary=None, queries=traces,
+            notes="No PRs merged on this repo in the window.",
+        )
+    ratio = self_merged / total_merged
+    return MetricResult(
+        slug="self_merge",
+        value=f"{ratio:.0%}",
+        label=f"self-merged (last {window_days} days)",
+        secondary=f"{self_merged} of {total_merged} merged PRs",
+        queries=traces,
+        notes=(
+            "CHAOSS treats self-merge rate as a code-review-culture "
+            "signal: a high number suggests there is no reviewer "
+            "gate. Some projects intentionally allow it (trusted "
+            "maintainers, automation merges, single-author repos) so "
+            "interpret in context."
+        ),
+    )
+
+
+# ── Metric 14 · Burstiness ──────────────────────────────────────────────
+
+def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """CHAOSS Burstiness B = (σ - μ) / (σ + μ) of the inter-arrival
+    times between commits. B ranges from -1 (perfectly periodic)
+    through 0 (Poisson-distributed) to +1 (very bursty).
+
+    Computed from a daily date_histogram on git_*_enriched. We only
+    keep days that *had* commits and compute the gaps between those.
+    """
+    import statistics
+
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"range": {"grimoire_creation_date": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_day": {
+                "date_histogram": {
+                    "field": "grimoire_creation_date",
+                    "calendar_interval": "day",
+                    "min_doc_count": 1,
+                }
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Daily commit histogram on {origin} for burstiness",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or git index empty",
+        ))
+        return MetricResult(
+            slug="burstiness", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="No git activity indexed for this repo.",
+        )
+
+    buckets = (raw.get("aggregations") or {}).get("by_day", {}).get("buckets", [])
+    active_days = len(buckets)
+    if active_days < 3:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Daily commit histogram on {origin} for burstiness",
+            query=body_text,
+            result_summary=f"{active_days} active days — too few for burstiness",
+        ))
+        return MetricResult(
+            slug="burstiness", value="—",
+            label=f"only {active_days} active days",
+            secondary=None, queries=traces,
+            notes=(
+                "Burstiness needs at least three active days in the "
+                "window to compute inter-arrival gaps. Widen the "
+                "window or pick a more active repo."
+            ),
+        )
+
+    # Compute inter-arrival times in days. ``key`` on the bucket is
+    # ms-since-epoch; we convert and difference consecutive entries.
+    timestamps = [int(b.get("key") or 0) for b in buckets]
+    gaps_days = [
+        (timestamps[i + 1] - timestamps[i]) / 1000 / 86400.0
+        for i in range(len(timestamps) - 1)
+    ]
+    mu = statistics.fmean(gaps_days)
+    sigma = statistics.pstdev(gaps_days) if len(gaps_days) > 1 else 0.0
+
+    if mu + sigma == 0:
+        burstiness = 0.0
+    else:
+        burstiness = (sigma - mu) / (sigma + mu)
+
+    # Friendly label for the score's regime.
+    if burstiness > 0.3:
+        regime = "bursty (irregular bursts)"
+    elif burstiness < -0.3:
+        regime = "periodic (steady cadence)"
+    else:
+        regime = "Poisson-like (random)"
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"Daily commit histogram on {origin} for burstiness",
+        query=body_text,
+        result_summary=(
+            f"{active_days} active days · mean gap {mu:.2f} d · "
+            f"σ {sigma:.2f} d → B={burstiness:.3f}"
+        ),
+    ))
+
+    return MetricResult(
+        slug="burstiness",
+        value=f"{burstiness:+.2f}",
+        label=regime,
+        secondary=(
+            f"{active_days} active days · mean gap {mu:.1f} d · σ {sigma:.1f} d"
+        ),
+        queries=traces,
+        notes=(
+            "B = (σ − μ) / (σ + μ) on inter-arrival days between "
+            "commits, per Goh & Barabási (2008). Range: −1 (strictly "
+            "periodic) through 0 (random Poisson) to +1 (heavy bursts "
+            "with long silences). Computed client-side from the daily "
+            "histogram so the query shown above is exactly what ran."
+        ),
+    )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────
 
 REGISTRY: list[MetricSpec] = [
@@ -1327,6 +1727,70 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=False,
         compute=_metric_org_diversity,
+    ),
+    # ── Phase 3 additions ────────────────────────────────────────────
+    MetricSpec(
+        slug="first_response",
+        name="Time to First Response",
+        category="Community",
+        chaoss_level="Phase 2 · Would-like-to-have",
+        chaoss_url="https://chaoss.community/kb/metric-time-to-first-response/",
+        question="How quickly does the project respond?",
+        description=(
+            "Median hours from PR / issue creation to the first "
+            "non-bot, non-author comment. Uses GrimoireLab's "
+            "precomputed ``time_to_first_attention_without_bot``."
+        ),
+        is_time_based=True,
+        compute=_metric_first_response,
+    ),
+    MetricSpec(
+        slug="issue_resolution",
+        name="Issue Resolution Duration",
+        category="Community",
+        chaoss_level="Phase 2 · Would-like-to-have",
+        chaoss_url=(
+            "https://chaoss.community/kb/metric-issue-resolution-duration/"
+        ),
+        question="How long do issues stay open?",
+        description=(
+            "Median days from issue creation to close (PRs excluded). "
+            "Uses GrimoireLab's ``time_open_days`` enrichment so the "
+            "answer stays consistent across GitHub backends."
+        ),
+        is_time_based=True,
+        compute=_metric_issue_resolution,
+    ),
+    MetricSpec(
+        slug="self_merge",
+        name="Self Merge Rate",
+        category="Community",
+        chaoss_level="Phase 2 · Would-like-to-have",
+        chaoss_url="https://chaoss.community/kb/metric-self-merge-rate/",
+        question="How strong is the code-review culture?",
+        description=(
+            "Fraction of merged PRs in the window where the author "
+            "also performed the merge. High = no reviewer gate; low "
+            "= reviewed by someone else before landing."
+        ),
+        is_time_based=True,
+        compute=_metric_self_merge,
+    ),
+    MetricSpec(
+        slug="burstiness",
+        name="Burstiness",
+        category="Community",
+        chaoss_level="Phase 2 · Would-like-to-have",
+        chaoss_url="https://chaoss.community/kb/metric-burstiness/",
+        question="Is contribution steady or in bursts?",
+        description=(
+            "B = (σ − μ) / (σ + μ) on inter-arrival days between "
+            "commits — Goh & Barabási's burstiness measure. −1 = "
+            "strictly periodic; 0 = Poisson-like random; +1 = heavy "
+            "bursts with long silences between them."
+        ),
+        is_time_based=True,
+        compute=_metric_burstiness,
     ),
 ]
 
