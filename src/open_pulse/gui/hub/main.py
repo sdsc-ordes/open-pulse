@@ -13,7 +13,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .auth import _COOKIE_NAME, clear_session, get_settings, require_auth
-from .routes import admin, crawler, databases, pipeline, projects, services, stack, stats
+from .routes import (
+    admin,
+    crawler,
+    databases,
+    extractor,
+    pipeline,
+    projects,
+    services,
+    stack,
+    stats,
+)
 
 _HERE = Path(__file__).parent
 log = logging.getLogger(__name__)
@@ -64,6 +74,21 @@ templates.env.globals["dashboards"] = [
     },
 ]
 templates.env.globals["ontology_url"] = _settings.ontology_url
+# Swagger UIs for the two pipeline services that ship an HTTP API. Rendered
+# as their own compact sidebar group so users can poke the endpoints
+# directly without digging through Portainer.
+templates.env.globals["api_docs"] = [
+    {
+        "name": "Crawler",
+        "tech": "FastAPI",
+        "url": _settings.crawler_docs_url,
+    },
+    {
+        "name": "Metadata extractor",
+        "tech": "FastAPI",
+        "url": _settings.extractor_docs_url,
+    },
+]
 
 app.include_router(services.router)
 app.include_router(projects.router)
@@ -72,6 +97,7 @@ app.include_router(pipeline.router)
 app.include_router(stack.router)
 app.include_router(stats.router)
 app.include_router(crawler.router)
+app.include_router(extractor.router)
 app.include_router(admin.router)
 
 
