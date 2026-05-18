@@ -1452,42 +1452,54 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
 
 def _metric_org_diversity(full: str, canonical_url: str, window_days: int) -> MetricResult:
     """How many distinct organisations does the contributor pool span?
-    CHAOSS treats single-vendor projects very differently from
-    cross-org communities.
+
+    We use Path 1 — the ``pulse:ownedBy`` ownership chain — exclusively.
+    Path 2 (Person → ``org:hasMembership`` → Org → ``schema:name``)
+    pulls in self-declared affiliation strings whose canonicalisation
+    is still upstream of SortingHat; "Swiss Data Science Center" vs
+    "Swiss Data Science Centre" and SDSC-acronym collisions made the
+    headline overcount. Ownership handles are GitHub-issued
+    identifiers, no duplicates by construction.
+
+    Concretely: count the distinct organisations that own *any*
+    repository a contributor of this repo also touches. That's a
+    "where do these people work, GitHub-wise" view, derived purely
+    from clean ownership edges.
     """
     traces: list[QueryTrace] = []
     od_recipes = None
     org_names: list[str] = []
     org_count = 0
 
-    # Hop: ?repo → schema:author / pulse:hasContribution → ?person →
-    # org:hasMembership → ?m → org:organization → ?org → schema:name.
     sparql = (
-        "# Distinct organisations whose members contributed to this\n"
-        "# repository, going through the Person → Membership → Org\n"
-        "# chain. Counts each org once even if many of its members\n"
-        "# contributed.\n"
+        "# Path 1 — pure ``pulse:ownedBy`` ownership chain.\n"
+        "# Each contributor of THIS repo contributes to other repos\n"
+        "# too; each of those other repos has an org:Organization\n"
+        "# owner (clean GitHub handle, no duplicates). Count distinct.\n"
         "PREFIX schema: <http://schema.org/>\n"
         "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
         "PREFIX org:    <http://www.w3.org/ns/org#>\n"
-        "SELECT DISTINCT ?orgName WHERE {\n"
+        "SELECT ?orgName (COUNT(DISTINCT ?person) AS ?n) WHERE {\n"
         f'  ?repo pulse:githubRepositoryHandle "{full}" .\n'
-        "  { ?repo schema:author ?person }\n"
-        "  UNION\n"
-        "  { ?person pulse:hasContribution/pulse:contributionTo ?repo }\n"
-        "  ?person org:hasMembership ?m .\n"
-        "  ?m org:organization ?org .\n"
-        "  ?org schema:name ?orgName .\n"
+        "  ?person pulse:hasContribution ?c1 .\n"
+        "  ?c1 pulse:contributionTo ?repo .\n"
+        "  ?person pulse:hasContribution ?c2 .\n"
+        "  ?c2 pulse:contributionTo ?otherRepo .\n"
+        "  ?otherRepo pulse:ownedBy ?org .\n"
+        "  ?org a org:Organization ;\n"
+        "       schema:name ?orgName .\n"
         "}\n"
-        "ORDER BY ?orgName"
+        "GROUP BY ?orgName\n"
+        "ORDER BY DESC(?n) ?orgName"
     )
     try:
         rows = stores.sparql_select(sparql)
+        # rows look like [{"orgName": {"value": "..."}, "n": {"value": "..."}}, …]
         org_names = [r["orgName"]["value"] for r in rows]
         org_count = len(org_names)
         traces.append(QueryTrace(
             store="SPARQL", engine="sparql",
-            title=f"Distinct contributor organisations for {full}",
+            title=f"Distinct ownership orgs reachable from {full} contributors",
             query=sparql,
             result_summary=f"{org_count} distinct organisation"
                           + ("s" if org_count != 1 else ""),
@@ -1495,62 +1507,72 @@ def _metric_org_diversity(full: str, canonical_url: str, window_days: int) -> Me
     except Exception as exc:  # noqa: BLE001
         traces.append(QueryTrace(
             store="SPARQL", engine="sparql",
-            title=f"Distinct contributor organisations for {full}",
+            title=f"Distinct ownership orgs reachable from {full} contributors",
             query=sparql, result_summary="error", error=str(exc),
         ))
 
     if org_count == 0:
         return MetricResult(
-        recipes=od_recipes,
+            recipes=od_recipes,
             slug="org_diversity",
             value="—",
-            label="no org affiliations linked",
+            label="no organisations reachable",
             secondary=None,
             queries=traces,
             notes=(
-                "No contributor has an org:hasMembership triple "
-                "pointing at this repo. This is common when "
-                "contributors don't publicise their EPFL/SDSC "
-                "affiliation on GitHub."
+                "No contributor of this repo owns or contributes to "
+                "any other repo whose owner is an ``org:Organization``. "
+                "For a personal-account repo with no cross-org "
+                "contribution, this is the expected zero."
             ),
-        unification=(
-            "Distinct organisations whose members contributed — **SPARQL** chain: `Person → org:hasMembership → Membership → org:organization → Org → schema:name`."
-        ),
-    )
+            unification=(
+                "Distinct organisations reachable from the repo's "
+                "contributors via the **Path-1** ownership chain: "
+                "`Contributor → other repos they touch → pulse:ownedBy → Org`."
+            ),
+        )
 
-    
     od_recipes = _build_recipes(
         label='org_diversity',
         traces=traces,
         extracts=[
-                    {
-                        'python': "[row[0] for row in r1.get('rows', [])]",
-                        'bash':   '[.rows[][0]]',
-                        'js':     '(r1.rows || []).map(row => row[0])',
-                    },
-                ],
+            {
+                'python': "[row[0] for row in r1.get('rows', [])]",
+                'bash':   '[.rows[][0]]',
+                'js':     '(r1.rows || []).map(row => row[0])',
+            },
+        ],
         combine={
-                    'python': 'headline = len(v1)',
-                    'bash':   'headline=$(echo "$v1" | jq length)',
-                    'js':     'const headline = v1.length;',
-                },
+            'python': 'headline = len(v1)',
+            'bash':   'headline=$(echo "$v1" | jq length)',
+            'js':     'const headline = v1.length;',
+        },
     )
     return MetricResult(
         recipes=od_recipes,
         slug="org_diversity",
         value=str(org_count),
-        label="contributor organisations",
+        label="ownership orgs reachable",
         secondary=", ".join(org_names[:5]) + (f", +{org_count - 5}" if org_count > 5 else ""),
         queries=traces,
         examples=[{"label": n, "detail": "", "source": "SPARQL"} for n in org_names],
         notes=(
-            "Snapshot. A higher number = more diverse contributor "
-            "base, which CHAOSS treats as a sustainability signal. "
-            "Counts orgs once regardless of how many of their members "
-            "contributed."
+            "Snapshot. Counts distinct ``org:Organization`` entities "
+            "that own any repository the contributors of *this* repo "
+            "also work on. CHAOSS reads this as a sustainability "
+            "signal: a high number = the project's contributor base "
+            "spans many GitHub organisations.\n\n"
+            "Uses **Path 1** (ownership) only — the affiliation chain "
+            "via ``org:hasMembership`` produced noisier counts because "
+            "self-declared institutional names are not yet "
+            "canonicalised upstream."
         ),
-    unification=(
-            "Distinct organisations whose members contributed — **SPARQL** chain: `Person → org:hasMembership → Membership → org:organization → Org → schema:name`."
+        unification=(
+            "Distinct organisations reachable from the repo's "
+            "contributors via the **Path-1** ownership chain: "
+            "`Contributor → other repos they touch → pulse:ownedBy → Org`. "
+            "Ignores self-declared affiliations (Path 2) until upstream "
+            "name-canonicalisation lands."
         ),
     )
 
