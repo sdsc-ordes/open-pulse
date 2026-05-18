@@ -283,6 +283,11 @@ async def _decorate_wikidata_labels(
         chunks = [list(needed)[i:i + 50] for i in range(0, len(needed), 50)]
         for chunk in chunks:
             try:
+                # Wikidata's API rejects requests whose User-Agent
+                # doesn't identify the tool + contact (per their bot
+                # policy at meta.wikimedia.org/wiki/User-Agent_policy).
+                # httpx's default ``python-httpx/X.Y`` returns 403
+                # against the action API — give it a proper UA.
                 r = await client.get(
                     "https://www.wikidata.org/w/api.php",
                     params={
@@ -293,7 +298,14 @@ async def _decorate_wikidata_labels(
                         "format": "json",
                     },
                     timeout=8.0,
-                    headers={"User-Agent": "open-pulse-hub/1.0 (+facets-label-lookup)"},
+                    headers={
+                        "User-Agent": (
+                            "open-pulse-hub/1.0 "
+                            "(+https://github.com/sdsc-ordes/open-pulse; "
+                            "open-pulse@epfl.ch) httpx"
+                        ),
+                        "Accept": "application/json",
+                    },
                 )
                 if r.status_code != 200:
                     continue
