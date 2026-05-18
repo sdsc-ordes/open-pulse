@@ -2,7 +2,17 @@
   Fragment rendered into the body of a metric card after the lazy
   fetch lands. Sits inside the article > .chaoss-card-body div on
   templates/chaoss/repo.html.
+
+  ``category_pill`` maps the four CHAOSS topic names to the existing
+  pill-color classes in app.css so the modal header reuses the same
+  palette as the topic section headers.
 #}
+{% set category_pill = {
+  'Contributor':    'pill-info',
+  'Software':       'pill-accent',
+  'Lifecycle':      'pill-warn',
+  'Organization':   'pill-neutral',
+}[spec.category] | default('pill-neutral') %}
 <div style="display: flex; flex-direction: column; gap: 10px;">
 
   {# Headline value + secondary breakdown. The headline number can
@@ -214,25 +224,69 @@
   {% endif %}
 
   {#
-    Transparency block: collapsible, defaults closed so cards stay
-    compact. Each <details> opens to the actual query text +
-    syntax-highlighted code + a one-click jump to /databases with the
-    query pre-loaded. Toggle triggers highlight.js + the line-numbers
-    plugin on the freshly-revealed <code> elements.
+    Transparency block — opens as a modal so it doesn't push other
+    cards around and gets a proper viewport for tall query bodies.
+    The trigger is a card-style button; the modal teleports to <body>
+    so its z-index sits above everything. Esc / backdrop / × close.
+
+    Highlight.js + the line-numbers plugin run when the modal opens
+    (deferred via $nextTick because the panel needs to be in the DOM
+    before we ask hljs to paint it). The same scope holds the open
+    state so each card has its own modal lifecycle.
   #}
-  <details class="chaoss-trace-block" style="margin-top: 4px;" x-data="{ open: false }"
-           @toggle="if ($el.open && window.hljs) $el.querySelectorAll('pre code').forEach(c => { c.removeAttribute('data-highlighted'); try { window.hljs.highlightElement(c); if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(c); } catch(_){} })">
-    {# The summary is the row a visitor clicks to expand. The CSS
-       hides the default disclosure triangle and replaces it with a
-       chevron we control, so we can rotate it on open and pick our
-       own colour. #}
-    <summary class="chaoss-trace-summary">
-      <span class="chaoss-trace-chevron" aria-hidden="true">▸</span>
+  <div class="chaoss-methodology" x-data="{
+         open: false,
+         show() {
+           this.open = true;
+           document.body.classList.add('chaoss-modal-lock');
+           this.$nextTick(() => {
+             if (!window.hljs) return;
+             document.querySelectorAll('.chaoss-modal[data-metric=&quot;{{ spec.slug }}&quot;] pre code').forEach(c => {
+               c.removeAttribute('data-highlighted');
+               try { window.hljs.highlightElement(c); } catch(_) {}
+               try { if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(c); } catch(_) {}
+             });
+           });
+         },
+         hide() {
+           this.open = false;
+           document.body.classList.remove('chaoss-modal-lock');
+         },
+       }">
+    <button type="button" class="chaoss-trace-summary chaoss-trace-trigger" @click="show()">
+      <span class="chaoss-trace-icon" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/>
+          <path d="m20 20-3-3"/>
+        </svg>
+      </span>
       <span class="chaoss-trace-summary-label">How we compute this</span>
       <span class="chaoss-trace-summary-count">{{ traces|length }} quer{% if traces|length == 1 %}y{% else %}ies{% endif %}</span>
-    </summary>
-    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-      {% for t in traces %}
+    </button>
+
+    <template x-teleport="body">
+      <div class="chaoss-modal-backdrop"
+           x-show="open"
+           x-cloak
+           x-transition.opacity.duration.150ms
+           data-metric="{{ spec.slug }}"
+           @click.self="hide()"
+           @keydown.escape.window="hide()">
+        <div class="chaoss-modal" data-metric="{{ spec.slug }}" @click.stop>
+          <header class="chaoss-modal-header">
+            <div class="chaoss-modal-title">
+              <span class="pill {{ category_pill }}" style="font-size: 10px;">{{ spec.category }}</span>
+              <h3>{{ spec.name }} — how we compute this</h3>
+            </div>
+            <button type="button" class="chaoss-modal-close" @click="hide()" aria-label="close">×</button>
+          </header>
+
+          <div class="chaoss-modal-body">
+            <p class="chaoss-modal-question">{{ spec.question }}</p>
+
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+              {% for t in traces %}
         {#
           The trace card has an x-data scope that exposes the query
           text as a local variable ``q``. That keeps the copy
@@ -309,6 +363,10 @@
           </div>
         </div>
       {% endif %}
-    </div>
-  </details>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
 </div>
