@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ ref.display }} · Not yet enriched · Open Pulse Hub{% endblock %}
+{% block heading %}{{ ref.display }}{% endblock %}
+{% block subheading %}
+  We don't know this resource yet · <a href="{{ ref.canonical_url }}" rel="noopener" target="_blank">{{ ref.canonical_url }}</a>
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 16px;">
+
+  <div class="card {% if newly_queued %}tone-info{% else %}tone-warn{% endif %}">
+    <div class="card-title">{% if newly_queued %}Added to the enrichment backlog{% else %}Already on the backlog{% endif %}</div>
+    <p style="margin: 6px 0 0;">
+      {% if newly_queued %}
+        We've recorded this URL — the crawler / extractor team will pick it up
+        in the next enrichment pass. Come back later and the page will fill in
+        automatically.
+      {% else %}
+        This URL has been requested {{ row.hits }} time{{ '' if row.hits == 1 else 's' }}
+        (first seen <span class="mono">{{ row.first_seen }}</span>). It will surface as
+        soon as the pipeline indexes it.
+      {% endif %}
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">How the hub works</div>
+    <p style="margin: 8px 0 0; color: var(--fg-muted);">
+      The hub identifies resources by their URL. To reference any object on
+      the public web, type its address into the path after <span class="kbd">/hub/</span>:
+    </p>
+    <ul style="margin: 10px 0 0; padding-left: 18px; line-height: 1.7; color: var(--fg-muted);">
+      <li><span class="kbd">/hub/github.com/&lt;owner&gt;/&lt;repo&gt;</span></li>
+      <li><span class="kbd">/hub/zenodo.org/records/&lt;id&gt;</span></li>
+      <li><span class="kbd">/hub/ror.org/&lt;rorid&gt;</span></li>
+      <li><span class="kbd">/hub/infoscience.epfl.ch/entities/publication/&lt;id&gt;</span></li>
+      <li><span class="kbd">/hub/huggingface.co/&lt;model-or-org&gt;</span></li>
+    </ul>
+  </div>
+
+  <div>
+    <a class="btn btn-ghost" href="/hub/wanted">See all pending requests →</a>
+  </div>
+
+</div>
+{% endblock %}

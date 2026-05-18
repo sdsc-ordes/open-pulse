@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ label }} · Hub · Open Pulse{% endblock %}
+{% block heading %}{{ label }}{% endblock %}
+{% block subheading %}
+  {% if source_type %}<span style="color: var(--fg-faint);">{{ source_type }}</span> · {% endif %}
+  <span class="mono">{{ collection_name }}</span>
+  {% if count is not none %} · <strong>{{ '{:,}'.format(count) }}</strong> entries{% endif %}
+{% endblock %}
+{% block headeractions %}
+  <a class="btn btn-ghost" href="/hub">← Back to Hub</a>
+{% endblock %}
+
+{% block breadcrumb %}
+<nav class="hub-breadcrumb" aria-label="breadcrumb">
+  <a href="/hub">Hub</a>
+  <span class="sep">›</span>
+  <span class="current">{{ label }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 18px;">
+
+  <div class="card">
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="" width="20" height="20" loading="lazy" style="border-radius: 3px;">
+      {% endif %}
+      <div class="card-title" style="margin: 0;">About this source</div>
+      {% if homepage %}
+        <a href="{{ homepage }}" target="_blank" rel="noopener" class="btn btn-ghost"
+           style="margin-left: auto; font-size: 12px; padding: 4px 10px;">
+          Open {{ host }} ↗
+        </a>
+      {% endif %}
+    </div>
+    {% if description %}
+      <p style="margin: 6px 0 0; color: var(--fg);">{{ description }}</p>
+    {% endif %}
+    <p style="margin: 8px 0 0; color: var(--fg-muted); font-size: 13px;">
+      One of {{ '{:,}'.format(count) if count is not none else '?' }} entries indexed in the
+      <span class="mono">{{ collection_name }}</span> collection of gme-qdrant.
+      {% if host %}Each item resolves to a hub page on <span class="mono">{{ host }}</span>.{% endif %}
+      Pick one to walk the graph — clicking opens the entity's hub page with
+      its facts, related items, backlinks, and community context.
+    </p>
+  </div>
+
+  {% if not samples %}
+    <div class="card tone-warn">
+      <div class="card-title">No sample entries available</div>
+      <p style="margin: 6px 0 0;">
+        The collection is reachable but no point payloads exposed a public
+        URL we could resolve. The entries are still searchable in the
+        Databases console.
+      </p>
+    </div>
+  {% else %}
+    <div class="card">
+      <div class="card-title">Entry points</div>
+      <div class="card-meta" style="margin: 4px 0 12px;">
+        A sample of {{ samples|length }} entries from the collection. Click any
+        to land on its hub page.
+      </div>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px;">
+        {% for s in samples %}
+          <li>
+            <span class="hub-hover" data-preview-ref="{{ s.hub_url[5:] }}">
+              {% if source_type %}
+                <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ source_type }}</span>
+              {% endif %}
+              <a href="{{ s.hub_url }}" class="mono" style="word-break: break-all;">{{ s.title }}</a>
+              {% if s.external_url %}
+                <a href="{{ s.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>
+              {% endif %}
+              {% if s.badge %}
+                <span class="card-meta" style="font-size: 11px;">· {{ s.badge }}</span>
+              {% endif %}
+              <span class="hub-preview" aria-hidden="true">
+                <p class="hub-preview-title">{{ s.title }}</p>
+                {% if source_type %}<div class="hub-preview-meta">{{ source_type }} · {{ collection_name }}</div>{% endif %}
+                <div class="hub-preview-description"></div>
+                {% if s.badge %}<div class="hub-preview-badge">{{ s.badge }}</div>{% endif %}
+                <div class="hub-preview-hint">Click to open the hub page →</div>
+              </span>
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <div>
+    <a class="btn btn-ghost" href="/hub">← Back to the hub home</a>
+  </div>
+
+</div>
+{% endblock %}

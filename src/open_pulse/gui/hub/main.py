@@ -13,11 +13,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .auth import _COOKIE_NAME, clear_session, get_settings, require_auth
+from .chaoss import routes as chaoss_routes
 from .routes import (
     admin,
     crawler,
     databases,
     extractor,
+    hub,
     pipeline,
     projects,
     services,
@@ -90,6 +92,27 @@ templates.env.globals["api_docs"] = [
     },
 ]
 
+
+# Several route modules ship their own Jinja2Templates instance
+# because they need module-local filters (the CHAOSS surface adds an
+# inline-markdown ``md`` filter; routes/hub.py registered its own
+# directory historically). Without propagating the shared globals,
+# ``base.html``'s sidebar renders blank Dashboards + an empty
+# ontology link on those pages.
+#
+# Pushing globals via setdefault means each instance keeps its own
+# overrides; if a route registered a same-named global before this
+# line ran, it wins.
+def _propagate_globals(target: Jinja2Templates) -> None:
+    """Mirror every key on the shared template env onto another
+    Jinja2Templates instance, without clobbering existing keys."""
+    for _k, _v in templates.env.globals.items():
+        target.env.globals.setdefault(_k, _v)
+
+
+_propagate_globals(chaoss_routes.templates)
+_propagate_globals(hub.templates)
+
 app.include_router(services.router)
 app.include_router(projects.router)
 app.include_router(databases.router)
@@ -99,6 +122,9 @@ app.include_router(stats.router)
 app.include_router(crawler.router)
 app.include_router(extractor.router)
 app.include_router(admin.router)
+app.include_router(hub.router)
+app.include_router(hub.api)
+app.include_router(chaoss_routes.router)
 
 
 @app.get("/healthz")

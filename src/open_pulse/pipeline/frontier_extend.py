@@ -55,7 +55,9 @@ def _compute_frontier(graph: dict[str, Any]) -> list[str]:
     """
     repos = graph.get("repos") or {}
     known = set(repos.keys())
-    explored = {k for k, v in repos.items() if isinstance(v, dict) and v.get("is_explored")}
+    explored = {
+        k for k, v in repos.items() if isinstance(v, dict) and v.get("is_explored")
+    }
 
     mentioned: set[str] = set()
     for r in repos.values():

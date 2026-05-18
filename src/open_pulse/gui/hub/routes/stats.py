@@ -270,31 +270,55 @@ _RANGE_MAP = {
 @router.get("/history", dependencies=[Depends(require_auth)])
 def history(
     range_: str = Query(
-        "6h", alias="range", description="Window size: 1h, 6h, 24h, 7d, 30d."
+        "6h",
+        alias="range",
+        description="Window size: 1h, 6h, 24h, 7d, 30d, or 'custom' "
+        "(in which case ``start`` + ``end`` are required).",
     ),
     bucket_seconds: int = Query(
         0, description="Down-sample to one row per N seconds (0 = no bucketing)."
+    ),
+    start: str | None = Query(
+        None,
+        description="ISO-8601 lower bound (UTC). Required when range='custom'.",
+    ),
+    end: str | None = Query(
+        None,
+        description="ISO-8601 upper bound (UTC). Required when range='custom'.",
     ),
 ) -> dict[str, Any]:
     """Return the metric series, in chronological order.
 
     Each row carries the same shape as a snapshot of ``/api/stats/`` but
-    flattened into the columns the chart UI consumes directly.
+    flattened into the columns the chart UI consumes directly. When
+    ``range`` is ``custom`` the rows are bounded by ``start`` / ``end``
+    instead of the preset windows.
     """
-    if range_ not in _RANGE_MAP:
+    use_custom = range_ == "custom" and start and end
+    if not use_custom and range_ not in _RANGE_MAP:
         range_ = "6h"
-    cutoff = _RANGE_MAP[range_]
 
     conn = _history_db()
     try:
-        rows = conn.execute(
-            "SELECT ts, services_total, services_running, services_healthy,\n"
-            "       uptime_max_seconds, sparql_repos, neo4j_nodes, neo4j_rels\n"
-            "  FROM metrics_history\n"
-            " WHERE ts > datetime('now', ?)\n"
-            " ORDER BY ts ASC",
-            (cutoff,),
-        ).fetchall()
+        if use_custom:
+            rows = conn.execute(
+                "SELECT ts, services_total, services_running, services_healthy,\n"
+                "       uptime_max_seconds, sparql_repos, neo4j_nodes, neo4j_rels\n"
+                "  FROM metrics_history\n"
+                " WHERE ts BETWEEN ? AND ?\n"
+                " ORDER BY ts ASC",
+                (start, end),
+            ).fetchall()
+        else:
+            cutoff = _RANGE_MAP[range_]
+            rows = conn.execute(
+                "SELECT ts, services_total, services_running, services_healthy,\n"
+                "       uptime_max_seconds, sparql_repos, neo4j_nodes, neo4j_rels\n"
+                "  FROM metrics_history\n"
+                " WHERE ts > datetime('now', ?)\n"
+                " ORDER BY ts ASC",
+                (cutoff,),
+            ).fetchall()
     finally:
         conn.close()
 
