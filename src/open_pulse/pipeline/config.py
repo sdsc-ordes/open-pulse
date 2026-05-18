@@ -54,6 +54,35 @@ class CrawlerStepConfig(StepConfig):
     timeout_seconds: float = 3600.0
 
 
+class FrontierExtendStepConfig(StepConfig):
+    """Frontier-extend step configuration.
+
+    Reads ``input_dir/input_filename`` (the canonical crawler graph),
+    computes the set of repos referenced as dependents but never explored,
+    re-seeds the crawler with those, and merges the result back over the
+    same path. Off by default — enable only when extending an existing
+    graph is the goal of the quest.
+    """
+
+    enabled: bool = False
+    input_dir: str = ".quest-artifacts/crawler-json"
+    input_filename: str = "crawler-graph.json"
+    output_dir: str | None = None  # None → write back to input_dir
+    output_filename: str | None = None  # None → write back to input_filename
+    max_rounds: int = Field(default=1, ge=1, le=10)
+    crawl_dependencies: bool = False
+    crawl_dependents: bool = True
+    min_stars: int = Field(default=0, ge=0)
+    max_dependents: int | None = None
+    batch_size: int | None = None
+    max_frontier_seeds: int | None = None
+    """Hard cap on how many frontier nodes to send as seeds. ``None`` means
+    no cap. Useful when the frontier is huge and a smaller probe is
+    desired."""
+    poll_interval_seconds: float = 5.0
+    timeout_seconds: float = 3600.0
+
+
 class Neo4jUploadStepConfig(StepConfig):
     """Neo4j upload step configuration."""
 
@@ -123,6 +152,9 @@ class StepsConfig(BaseModel):
     """Ordered collection of all pipeline step configs."""
 
     crawler: CrawlerStepConfig = Field(default_factory=CrawlerStepConfig)
+    frontier_extend: FrontierExtendStepConfig = Field(
+        default_factory=FrontierExtendStepConfig,
+    )
     neo4j_upload: Neo4jUploadStepConfig = Field(default_factory=Neo4jUploadStepConfig)
     metadata_extractor: MetadataExtractorStepConfig = Field(
         default_factory=MetadataExtractorStepConfig,
