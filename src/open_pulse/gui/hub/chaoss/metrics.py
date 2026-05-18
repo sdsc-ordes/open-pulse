@@ -75,6 +75,10 @@ class MetricResult:
     queries: list[QueryTrace]
     notes: str
     series: list[dict[str, Any]] = field(default_factory=list)
+    # Human-readable unit for the series — shown in the sparkline
+    # hover chip after the count. Defaults to "events" but every
+    # series-emitting metric overrides it.
+    series_unit: str = "events"
     examples: list[dict[str, str]] = field(default_factory=list)
     # Optional typed visualisation hint. Shape is one of:
     #   {"kind": "donut",       "fraction": 0.0..1.0, "tone": "good|warn|info|danger"}
@@ -193,7 +197,10 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
             query=sparql, result_summary="error", error=str(exc),
         ))
 
-    # ── OpenSearch — distinct git authors in the window ──────────────
+    # ── OpenSearch — distinct git authors in the window + monthly
+    # trend so the card can render a sparkline. One round-trip; the
+    # date_histogram has a cardinality sub-agg per bucket plus the
+    # outer cardinality stays for the headline number.
     origin = f"https://github.com/{full}"
     body = {
         "size": 0,
@@ -206,21 +213,38 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
             }
         },
         "aggs": {
-            "by_author": {
-                "cardinality": {"field": "author_name"}
-            }
+            "by_author": {"cardinality": {"field": "author_name"}},
+            "by_month": {
+                "date_histogram": {
+                    "field": "grimoire_creation_date",
+                    "calendar_interval": "month",
+                    "min_doc_count": 0,
+                },
+                "aggs": {
+                    "unique_authors": {"cardinality": {"field": "author_name"}}
+                },
+            },
         },
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/git_*_enriched/_search", body)
+    contrib_series: list[dict[str, Any]] = []
     if raw is not None:
-        n = int(((raw.get("aggregations") or {}).get("by_author") or {}).get("value") or 0)
+        aggs = raw.get("aggregations") or {}
+        n = int((aggs.get("by_author") or {}).get("value") or 0)
         values["opensearch"] = n
+        for b in (aggs.get("by_month") or {}).get("buckets", []):
+            ts_ms = int(b.get("key") or 0)
+            authors = int((b.get("unique_authors") or {}).get("value") or 0)
+            contrib_series.append({
+                "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
+                "value": authors,
+            })
         traces.append(QueryTrace(
             store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Cardinality of git authors on {origin} since {cutoff_iso[:10]}",
+            title=f"Cardinality of git authors on {origin} since {cutoff_iso[:10]} (with monthly trend)",
             query=body_text,
-            result_summary=f"{n} distinct authors",
+            result_summary=f"{n} distinct authors · {len(contrib_series)} months",
         ))
     else:
         traces.append(QueryTrace(
@@ -265,6 +289,8 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
         slug="contributors",
         value=str(headline),
         label=label,
+        series=contrib_series,
+        series_unit="contributors",
         secondary=" · ".join(bits),
         queries=traces,
         notes=(
@@ -866,6 +892,7 @@ def _metric_activity_dates(full: str, canonical_url: str, window_days: int) -> M
         label=f"commits (last {window_days} days)",
         secondary=f"busiest month: {busiest['date']} ({busiest['value']} commits)",
         series=series,
+        series_unit="commits",
         queries=traces,
         notes=(
             "Date histogram on GrimoireLab's ``grimoire_creation_date`` "
@@ -1143,15 +1170,26 @@ def _metric_academic_impact(full: str, canonical_url: str, window_days: int) -> 
         if len(v) >= 4 and v[:4].isdigit():
             years.append(v[:4])
     span = ""
+    yearly_series: list[dict[str, Any]] = []
     if years:
         yrs = sorted(years)
         span = f"{yrs[0]} → {yrs[-1]}" if yrs[0] != yrs[-1] else yrs[0]
+        # Build a contiguous year-by-year series so the sparkline
+        # reflects gaps (no-publication years) instead of compressing
+        # them out.
+        from collections import Counter
+        counts = Counter(yrs)
+        first_y, last_y = int(yrs[0]), int(yrs[-1])
+        for y in range(first_y, last_y + 1):
+            yearly_series.append({"date": str(y), "value": counts.get(str(y), 0)})
 
     return MetricResult(
         slug="academic_impact",
         value=str(len(rows)),
         label="papers by contributors",
         secondary=(f"publication span: {span}" if span else None),
+        series=yearly_series,
+        series_unit="papers",
         queries=traces,
         examples=examples,
         notes=(
@@ -1893,7 +1931,19 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
                         "terms": {"field": "author_name", "size": 10}
                     }
                 },
-            }
+            },
+            "by_month": {
+                "date_histogram": {
+                    "field": "grimoire_creation_date",
+                    "calendar_interval": "month",
+                    "min_doc_count": 0,
+                },
+                "aggs": {
+                    "bot_count": {
+                        "filter": {"bool": {"should": bot_should, "minimum_should_match": 1}}
+                    }
+                },
+            },
         },
     }
     body_text = json.dumps(body, indent=2)
@@ -1934,11 +1984,21 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
         )
 
     ratio = bot_doc_count / total
+    bot_series: list[dict[str, Any]] = []
+    for b in ((raw.get("aggregations") or {}).get("by_month") or {}).get("buckets", []):
+        ts_ms = int(b.get("key") or 0)
+        cnt = int((b.get("bot_count") or {}).get("doc_count") or 0)
+        bot_series.append({
+            "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
+            "value": cnt,
+        })
     return MetricResult(
         slug="bot_activity",
         value=f"{ratio:.0%}",
         label=f"bot share (last {window_days} days)",
         secondary=f"{bot_doc_count} of {total} commits matched a bot pattern",
+        series=bot_series,
+        series_unit="bot commits",
         visual={"kind": "donut", "fraction": ratio, "tone": "info"},
         examples=[
             {
@@ -1998,6 +2058,18 @@ def _issues_count(
                 ]
             }
         },
+        "aggs": {
+            # Monthly histogram drives the sparkline. The same date
+            # field used for the range filter is the bucketing field
+            # so the bars line up with the headline count.
+            "by_month": {
+                "date_histogram": {
+                    "field": date_field,
+                    "calendar_interval": "month",
+                    "min_doc_count": 0,
+                }
+            }
+        },
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
@@ -2014,11 +2086,19 @@ def _issues_count(
             notes="github_*_enriched has no documents for this repo yet.",
         )
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+    monthly: list[dict[str, Any]] = []
+    for b in ((raw.get("aggregations") or {}).get("by_month") or {}).get("buckets", []):
+        ts_ms = int(b.get("key") or 0)
+        cnt = int(b.get("doc_count") or 0)
+        monthly.append({
+            "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
+            "value": cnt,
+        })
     traces.append(QueryTrace(
         store="OpenSearch", engine="opensearch", mode="dsl",
         title=f"{title} on {origin} since {cutoff_iso[:10]}",
         query=body_text,
-        result_summary=f"{total} issues",
+        result_summary=f"{total} issues · {len(monthly)} months in series",
     ))
     if not total:
         return MetricResult(
@@ -2029,6 +2109,7 @@ def _issues_count(
     return MetricResult(
         slug=slug, value=str(total), label=label,
         secondary=None, queries=traces, notes=notes,
+        series=monthly, series_unit="issues",
     )
 
 
@@ -2184,6 +2265,17 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
             "lines_added":   {"sum": {"field": "lines_added"}},
             "lines_removed": {"sum": {"field": "lines_removed"}},
             "files":         {"sum": {"field": "files"}},
+            "by_month": {
+                "date_histogram": {
+                    "field": "grimoire_creation_date",
+                    "calendar_interval": "month",
+                    "min_doc_count": 0,
+                },
+                "aggs": {
+                    "added":   {"sum": {"field": "lines_added"}},
+                    "removed": {"sum": {"field": "lines_removed"}},
+                },
+            },
         },
     }
     body_text = json.dumps(body, indent=2)
@@ -2206,6 +2298,15 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
     removed = int((aggs.get("lines_removed") or {}).get("value") or 0)
     files   = int((aggs.get("files")         or {}).get("value") or 0)
     delta = added + removed
+    monthly_churn: list[dict[str, Any]] = []
+    for b in (aggs.get("by_month") or {}).get("buckets", []):
+        ts_ms = int(b.get("key") or 0)
+        a = int((b.get("added")   or {}).get("value") or 0)
+        r = int((b.get("removed") or {}).get("value") or 0)
+        monthly_churn.append({
+            "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
+            "value": a + r,
+        })
     traces.append(QueryTrace(
         store="OpenSearch", engine="opensearch", mode="dsl",
         title=f"Lines changed on {origin} since {cutoff_iso[:10]}",
@@ -2226,6 +2327,8 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
             f"+{added:,} added · −{removed:,} removed · "
             f"{commits} commits across {files} file-changes"
         ),
+        series=monthly_churn,
+        series_unit="lines",
         queries=traces,
         notes=(
             "Sums GrimoireLab's per-commit ``lines_added`` and "
