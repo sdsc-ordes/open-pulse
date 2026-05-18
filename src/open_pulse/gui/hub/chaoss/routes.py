@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import urllib.parse
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -299,3 +300,262 @@ def chaoss_metric_card(
             "window": window,
         },
     )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#                        JSON API · /api/chaoss/v1/*
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Path layout:
+#     GET  /api/chaoss/v1/topics
+#     GET  /api/chaoss/v1/metrics
+#     GET  /api/chaoss/v1/metrics/{slug}
+#     GET  /api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics
+#     GET  /api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics/{slug}
+#
+# All routes return JSON. The repositories paths keep ``github.com`` as
+# an explicit path segment so the URL pattern stays host-agnostic — a
+# future ``gitlab.com/...`` resolver can slot in without breaking
+# existing clients.
+
+# Fields requested via ``?include=`` that aren't returned by default
+# because they bulk up the payload.
+_OPTIONAL_FIELDS = {"recipes", "traces", "series"}
+
+
+def _parse_include(include: str | None) -> set[str]:
+    """Parse ``?include=recipes,traces,series`` into a set, ignoring
+    unknown tokens. Empty string / missing param → empty set."""
+    if not include:
+        return set()
+    return {
+        tok.strip().lower()
+        for tok in include.split(",")
+        if tok.strip().lower() in _OPTIONAL_FIELDS
+    }
+
+
+def _spec_to_dict(spec: metrics_mod.MetricSpec) -> dict[str, Any]:
+    """Stable JSON shape for one MetricSpec entry. Used by /topics, /metrics
+    and as the static-spec header on every per-repo result."""
+    return {
+        "slug": spec.slug,
+        "name": spec.name,
+        "category": spec.category,
+        "question": spec.question,
+        "description": spec.description,
+        "chaoss_url": spec.chaoss_url,
+        "chaoss_level": spec.chaoss_level,
+        "is_time_based": spec.is_time_based,
+    }
+
+
+def _trace_to_dict(t: metrics_mod.QueryTrace) -> dict[str, Any]:
+    return {
+        "store": t.store,
+        "engine": t.engine,
+        "mode": t.mode,
+        "title": t.title,
+        "query": t.query,
+        "result_summary": t.result_summary,
+        "error": t.error,
+        "deep_link": _open_in_databases(t.engine, t.query, t.mode),
+    }
+
+
+def _result_to_dict(
+    spec: metrics_mod.MetricSpec,
+    result: metrics_mod.MetricResult,
+    include: set[str],
+) -> dict[str, Any]:
+    """Serialise a computed MetricResult. ``traces`` / ``recipes`` /
+    ``series`` are omitted unless explicitly requested in ``include``."""
+    payload: dict[str, Any] = {
+        **_spec_to_dict(spec),
+        "value": result.value,
+        "label": result.label,
+        "secondary": result.secondary,
+        "headline_tone": result.headline_tone,
+        "unification": result.unification or None,
+        "notes": result.notes or None,
+        "series_unit": result.series_unit,
+        "visual": result.visual,
+        "examples": result.examples or [],
+    }
+    if "series" in include and result.series:
+        payload["series"] = result.series
+    if "traces" in include and result.queries:
+        payload["traces"] = [_trace_to_dict(t) for t in result.queries]
+    if "recipes" in include and result.recipes:
+        payload["recipes"] = result.recipes
+    return payload
+
+
+def _compute_one(slug: str, full: str, window: int) -> tuple[metrics_mod.MetricSpec, metrics_mod.MetricResult]:
+    """Look up the spec, compute the metric. Raises 404 for an unknown
+    slug. Per-metric upstream failures are caught inside ``compute()``
+    and surface as ``queries[*].error`` rather than as HTTP errors."""
+    spec = metrics_mod.spec_for(slug)
+    if spec is None:
+        raise HTTPException(status_code=404, detail=f"unknown metric: {slug}")
+    canonical = f"https://github.com/{full}"
+    try:
+        result = spec.compute(full, canonical, window)
+    except Exception as exc:  # noqa: BLE001
+        # Hard failure during compute (rather than per-trace) bubbles
+        # up as a 500 with the error message attached.
+        log.exception("metric %s failed for %s", slug, full)
+        raise HTTPException(
+            status_code=500,
+            detail=f"compute failed for {slug} on {full}: {exc}",
+        ) from exc
+    return spec, result
+
+
+@router.get(
+    "/api/chaoss/v1/topics",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_api_topics() -> dict[str, Any]:
+    """List the 4 CHAOSS topic groups (Contributor / Software /
+    Lifecycle / Organization) with metric counts."""
+    grouped = _grouped(metrics_mod.REGISTRY)
+    by_name = {g["name"]: len(g["metrics"]) for g in grouped}
+    return {
+        "topics": [
+            {
+                "name": cat["name"],
+                "blurb": cat["blurb"],
+                "css": cat["css"],
+                "url": cat["url"],
+                "metric_count": by_name.get(cat["name"], 0),
+            }
+            for cat in CATEGORIES
+        ],
+    }
+
+
+@router.get(
+    "/api/chaoss/v1/metrics",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_api_metrics(
+    category: str | None = Query(
+        None, description="Filter to one topic — Contributor / Software / Lifecycle / Organization."
+    ),
+) -> dict[str, Any]:
+    """List every metric spec (catalogue). Pure static data — no
+    upstream stores are touched. Optionally filtered by ``category``."""
+    specs = metrics_mod.REGISTRY
+    if category:
+        specs = [m for m in specs if m.category.lower() == category.lower()]
+    return {"metrics": [_spec_to_dict(m) for m in specs]}
+
+
+@router.get(
+    "/api/chaoss/v1/metrics/{slug}",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_api_metric_spec(slug: str) -> dict[str, Any]:
+    """One metric spec by slug. 404 if unknown."""
+    spec = metrics_mod.spec_for(slug)
+    if spec is None:
+        raise HTTPException(status_code=404, detail=f"unknown metric: {slug}")
+    return _spec_to_dict(spec)
+
+
+@router.get(
+    "/api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_api_repo_metrics(
+    owner: str,
+    repo: str,
+    window: int = Query(DEFAULT_WINDOW_DAYS, ge=7, le=3650),
+    category: str | None = Query(
+        None, description="Compute only metrics in this topic."
+    ),
+    include: str | None = Query(
+        None,
+        description=(
+            "Comma-separated optional fields to include: "
+            "``traces``, ``recipes``, ``series``. Default omits all "
+            "three to keep payloads small (recipes alone are ~130 KB "
+            "for the full 22-metric set)."
+        ),
+    ),
+) -> dict[str, Any]:
+    """Compute every metric for a repository and return them as JSON.
+
+    Per-metric upstream-store errors don't fail the request — they end
+    up in that metric's ``traces[i].error`` (when ``include=traces``)
+    and the metric reports a value of ``"—"``.
+    """
+    window = _clamp_window(window)
+    full = f"{owner}/{repo}"
+    fields = _parse_include(include)
+    specs = metrics_mod.REGISTRY
+    if category:
+        specs = [m for m in specs if m.category.lower() == category.lower()]
+
+    metrics_out: list[dict[str, Any]] = []
+    for spec in specs:
+        canonical = f"https://github.com/{full}"
+        try:
+            result = spec.compute(full, canonical, window)
+        except Exception:  # noqa: BLE001
+            # One blown-up metric mustn't take out the others.
+            log.exception("metric %s failed for %s", spec.slug, full)
+            metrics_out.append({
+                **_spec_to_dict(spec),
+                "value": "—",
+                "label": "compute failed",
+                "secondary": None,
+                "headline_tone": "danger",
+                "unification": None,
+                "notes": None,
+                "series_unit": "events",
+                "visual": None,
+                "examples": [],
+                "error": "internal compute error",
+            })
+            continue
+        metrics_out.append(_result_to_dict(spec, result, fields))
+
+    return {
+        "repo": full,
+        "canonical_url": f"https://github.com/{full}",
+        "window_days": window,
+        "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "metric_count": len(metrics_out),
+        "metrics": metrics_out,
+    }
+
+
+@router.get(
+    "/api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics/{slug}",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_api_repo_metric_one(
+    owner: str,
+    repo: str,
+    slug: str,
+    window: int = Query(DEFAULT_WINDOW_DAYS, ge=7, le=3650),
+    include: str | None = Query(
+        None,
+        description="``traces``, ``recipes``, ``series`` (comma-separated).",
+    ),
+) -> dict[str, Any]:
+    """Compute a single metric for a repository. Same payload shape as
+    one element of the ``metrics`` array in the all-metrics endpoint."""
+    window = _clamp_window(window)
+    full = f"{owner}/{repo}"
+    fields = _parse_include(include)
+    spec, result = _compute_one(slug, full, window)
+    return {
+        "repo": full,
+        "canonical_url": f"https://github.com/{full}",
+        "window_days": window,
+        "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        **_result_to_dict(spec, result, fields),
+    }
