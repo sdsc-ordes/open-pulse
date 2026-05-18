@@ -164,7 +164,7 @@ def _clamp_window(value: int) -> int:
 
 def _engine_to_databases_tab(engine: str) -> str:
     """Map a metric's engine id onto the URL the /databases page wants
-    so we can build a 'Open in /databases' deep link.
+    so we can build a 'Run query' deep link into the /databases page.
     """
     return {
         "cypher": "cypher",

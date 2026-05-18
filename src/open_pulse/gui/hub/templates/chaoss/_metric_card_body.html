@@ -246,7 +246,7 @@
           <pre class="chaoss-trace-pre"><code
               class="hljs language-{% if t.engine == 'cypher' %}cypher{% elif t.engine == 'sparql' %}sparql{% else %}json{% endif %}">{{ t.query }}</code></pre>
           <div class="chaoss-trace-actions">
-            <a class="btn btn-tiny" href="{{ t.deep_link }}">Open in /databases</a>
+            <a class="btn btn-tiny" href="{{ t.deep_link }}" title="Open this query in the /databases console and run it">Run query</a>
             <button class="btn btn-tiny"
                     type="button"
                     @click="navigator.clipboard.writeText(q); copied = true; setTimeout(() => copied = false, 1200)"
