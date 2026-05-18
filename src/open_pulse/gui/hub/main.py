@@ -18,6 +18,7 @@ from .routes import (
     admin,
     crawler,
     databases,
+    extractor,
     hub,
     pipeline,
     projects,
@@ -75,6 +76,21 @@ templates.env.globals["dashboards"] = [
     },
 ]
 templates.env.globals["ontology_url"] = _settings.ontology_url
+# Swagger UIs for the two pipeline services that ship an HTTP API. Rendered
+# as their own compact sidebar group so users can poke the endpoints
+# directly without digging through Portainer.
+templates.env.globals["api_docs"] = [
+    {
+        "name": "Crawler",
+        "tech": "FastAPI",
+        "url": _settings.crawler_docs_url,
+    },
+    {
+        "name": "Metadata extractor",
+        "tech": "FastAPI",
+        "url": _settings.extractor_docs_url,
+    },
+]
 
 
 # Several route modules ship their own Jinja2Templates instance
@@ -104,6 +120,7 @@ app.include_router(pipeline.router)
 app.include_router(stack.router)
 app.include_router(stats.router)
 app.include_router(crawler.router)
+app.include_router(extractor.router)
 app.include_router(admin.router)
 app.include_router(hub.router)
 app.include_router(hub.api)

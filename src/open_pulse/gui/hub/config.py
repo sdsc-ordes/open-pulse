@@ -56,6 +56,13 @@ class Settings:
     ontology_url: str
     """External URL of the open-pulse ontology documentation."""
 
+    crawler_docs_url: str
+    """User-facing URL of the crawler's OpenAPI / Swagger docs (host-published)."""
+
+    extractor_docs_url: str
+    """User-facing URL of the git-metadata-extractor's Swagger docs
+    (host-published)."""
+
     opensearch_url: str
     """Base URL of OpenSearch (in-network)."""
 
@@ -148,13 +155,20 @@ def load_settings() -> Settings:
             "(e.g. python -c 'import secrets; print(secrets.token_urlsafe(32))')."
         )
 
+    # User-facing hostname for the host-published service ports. The
+    # individual HUB_*_BROWSER_URL / HUB_*_DOCS_URL overrides still win;
+    # this is just the default so an operator only has to set one var.
+    public_host = os.environ.get("HUB_PUBLIC_HOST", "localhost").strip() or "localhost"
+
     return Settings(
         auth_token=auth,
         data_dir=Path(os.environ.get("HUB_DATA_DIR", "/data/hub")),
         applier_url=os.environ.get("HUB_APPLIER_URL", "http://projects-applier:8000"),
         sparql_url=os.environ.get("HUB_SPARQL_URL", "http://sparql-proxy:7878"),
         neo4j_url=os.environ.get("HUB_NEO4J_URL", "bolt://neo4j:7687"),
-        grimoire_kibiter_url=os.environ.get("HUB_KIBITER_URL", "http://localhost:7508"),
+        grimoire_kibiter_url=os.environ.get(
+            "HUB_KIBITER_URL", f"http://{public_host}:7508"
+        ),
         opensearch_url=os.environ.get(
             "HUB_OPENSEARCH_URL", "https://opensearch-node1:9200"
         ),
@@ -166,16 +180,24 @@ def load_settings() -> Settings:
         ),
         opensearch_verify_tls=_env_bool("HUB_OPENSEARCH_VERIFY_TLS", default=False),
         neo4j_browser_url=os.environ.get(
-            "HUB_NEO4J_BROWSER_URL", "http://localhost:7474"
+            "HUB_NEO4J_BROWSER_URL", f"http://{public_host}:7503"
         ),
         sparql_browser_url=os.environ.get(
-            "HUB_SPARQL_BROWSER_URL", "http://localhost:7878"
+            "HUB_SPARQL_BROWSER_URL", f"http://{public_host}:7502"
         ),
         opensearch_dashboards_url=os.environ.get(
-            "HUB_OPENSEARCH_DASHBOARDS_URL", "http://localhost:5601"
+            "HUB_OPENSEARCH_DASHBOARDS_URL", f"http://{public_host}:7508"
         ),
         ontology_url=os.environ.get(
             "HUB_ONTOLOGY_URL", "https://github.com/sdsc-ordes/open-pulse-ontology"
+        ),
+        # Default to the hub-proxied Swagger surfaces (routes/crawler.py +
+        # routes/extractor.py) — hub auth gates discovery, so we don't have
+        # to expose the upstream Swagger pages anonymously on their public
+        # ports. Override with a full URL to bypass the proxy.
+        crawler_docs_url=os.environ.get("HUB_CRAWLER_DOCS_URL", "/api/crawler/docs"),
+        extractor_docs_url=os.environ.get(
+            "HUB_EXTRACTOR_DOCS_URL", "/api/extractor/docs"
         ),
         applier_auth=os.environ.get("APPLIER_AUTH", "").strip(),
         sparql_user=(_parse_user_pass(os.environ.get("SPARQL_AUTH", ""))[0]),
