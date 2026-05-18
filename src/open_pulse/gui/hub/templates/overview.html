@@ -489,6 +489,10 @@ function topStats() {
       if (!v) return '';
       try {
         const u = new URL(v);
+        // Ontology fragment IRIs (open-pulse.epfl.ch/ontology#Software,
+        // SPDX licence pages, etc.) carry their useful name after the
+        // `#`. Fall back to the last path segment for everything else.
+        if (u.hash) return u.hash.replace(/^#/, '');
         return u.pathname.split('/').filter(Boolean).pop() || u.hostname;
       } catch (_) { return v; }
     },

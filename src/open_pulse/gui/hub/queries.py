@@ -342,13 +342,19 @@ LIMIT 200""",
     Facet(
         key="repo_type",
         label="Repository type",
-        description="rdf:type — the schema.org class(es) asserted on the resource.",
-        predicate_path="a",
+        description=(
+            "pulse:repositoryType — the kind of artefact the repo "
+            "publishes (Software, Documentation, EducationalResource, "
+            "Data). rdf:type was less useful because every repo is "
+            "schema:SoftwareSourceCode regardless of what it actually "
+            "ships."
+        ),
+        predicate_path="pulse:repositoryType",
         values_query=PREFIXES
         + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
-  ?repo a ?value .
-  FILTER(STRSTARTS(STR(?value), "http://schema.org/"))
+  ?repo a schema:SoftwareSourceCode ;
+        pulse:repositoryType ?value .
 }
 GROUP BY ?value
 ORDER BY DESC(?count) ?value""",
