@@ -325,19 +325,26 @@ GROUP BY ?value
 ORDER BY DESC(?count) ?value""",
     ),
     Facet(
-        key="keyword",
-        label="Keyword / Topic",
-        description="schema:keywords / topic tags.",
-        predicate_path="schema:keywords",
+        key="org_type",
+        label="Organization type",
+        description=(
+            "``pulse:OrganizationType`` of the owning organisation — "
+            "PrivateCompany / University / ResearchInstitution / "
+            "NonProfitOrganization / GovernmentAgency / CommunitySpace "
+            "/ SoftwareProject / OtherOrganizationType. Counts repos "
+            "(not orgs), so a University with 100 repos contributes "
+            "100 to its bucket."
+        ),
+        predicate_path="pulse:ownedBy/pulse:OrganizationType",
         values_query=PREFIXES
         + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
-        schema:keywords ?value .
+        pulse:ownedBy ?org .
+  ?org  pulse:OrganizationType ?value .
 }
 GROUP BY ?value
-ORDER BY DESC(?count) ?value
-LIMIT 200""",
+ORDER BY DESC(?count) ?value""",
     ),
     Facet(
         key="repo_type",
