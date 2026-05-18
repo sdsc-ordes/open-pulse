@@ -1,0 +1,32 @@
+{# GitHub repositories referenced from a non-github entity (Zenodo
+   record, Infoscience publication, ROR org, HF dataset, …). Each
+   item navigates to the GitHub repo's hub page, where Neo4j +
+   OpenSearch + Qdrant deliver the deeper graph. #}
+{% if items %}
+<div class="card">
+  <div class="card-title">Connected on GitHub</div>
+  <div class="card-meta" style="margin: 4px 0 12px;">
+    GitHub repositories referenced from this entity's payload — click
+    through for community data via Neo4j + commit activity via OpenSearch.
+  </div>
+  <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px;">
+    {% for item in items %}
+      <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
+        <span class="hub-hover" data-preview-ref="{{ item.hub_url[5:] }}">
+          <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">GitHub</span>
+          <a href="{{ item.hub_url }}" class="mono" style="word-break: break-all;">{{ item.label }}</a>
+          {% if item.external_url %}<a href="{{ item.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>{% endif %}
+          <span class="hub-preview" aria-hidden="true">
+            <p class="hub-preview-title">{{ item.label }}</p>
+            <div class="hub-preview-meta">GitHub repository</div>
+            <div class="hub-preview-description"></div>
+            {% if item.badge %}<div class="hub-preview-badge">{{ item.badge }}</div>{% endif %}
+            <div class="hub-preview-hint">Click to open the hub page →</div>
+          </span>
+        </span>
+        {% if item.badge %}<span class="card-meta" style="font-size: 11px;">· {{ item.badge }}</span>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}

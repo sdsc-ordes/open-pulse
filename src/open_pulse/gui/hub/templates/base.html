@@ -82,6 +82,7 @@
              open-pulse-ontology docs (configurable via HUB_ONTOLOGY_URL). #}
           {% set nav_explore = [
             ('/', 'overview', 'Overview', 'M3 17l4-6 5 4 4-7 5 9'),
+            ('/hub', 'hub', 'Hub', 'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z'),
             ('/databases', 'databases', 'Query', 'M4 7c0-2 4-3 8-3s8 1 8 3v10c0 2-4 3-8 3s-8-1-8-3z M4 7c0 2 4 3 8 3s8-1 8-3 M4 12c0 2 4 3 8 3s8-1 8-3'),
           ] %}
           {# Admin / operations — orchestration, observability, configuration.
@@ -161,15 +162,23 @@
       </aside>
 
       <main class="main">
-        <header class="page-header">
-          <div class="page-heading">
-            <h1>{% block heading %}{% endblock %}</h1>
-            <p>{% block subheading %}{% endblock %}</p>
-          </div>
-          <div class="page-actions">
-            {% block headeractions %}{% endblock %}
-          </div>
-        </header>
+        {# .page-chrome is the sticky strip under the marquee that
+           contains the page heading + an optional breadcrumb. They
+           scroll as a single block so the breadcrumb always sits
+           exactly under the header. Pages without a breadcrumb just
+           leave the block empty. #}
+        <div class="page-chrome">
+          <header class="page-header">
+            <div class="page-heading">
+              <h1>{% block heading %}{% endblock %}</h1>
+              <p>{% block subheading %}{% endblock %}</p>
+            </div>
+            <div class="page-actions">
+              {% block headeractions %}{% endblock %}
+            </div>
+          </header>
+          {% block breadcrumb %}{% endblock %}
+        </div>
         <div class="page-body">
           {% block content %}{% endblock %}
         </div>

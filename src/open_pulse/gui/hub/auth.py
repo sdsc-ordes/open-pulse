@@ -76,3 +76,20 @@ def require_auth(
         detail="Authentication required",
         headers={"WWW-Authenticate": 'Basic realm="open-pulse-hub"'},
     )
+
+
+def maybe_require_auth(
+    request: Request,
+    response: Response,
+    creds: Annotated[HTTPBasicCredentials | None, Depends(_basic)] = None,
+    op_hub_session: Annotated[str | None, Cookie()] = None,
+) -> None:
+    """Auth bypass for /hub/** when HUB_PUBLIC_KNOWLEDGE=true.
+
+    Same accept-rules as :func:`require_auth`, but a flip of the env flag
+    turns the knowledge surface into a fully public catalog. Mounted on
+    the hub routes only; the rest of the dashboard stays gated.
+    """
+    if _SETTINGS.public_knowledge:
+        return
+    require_auth(request, response, creds, op_hub_session)

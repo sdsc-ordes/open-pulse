@@ -1,0 +1,38 @@
+{# A single Top-N leaderboard rendered as a card. ``data`` is the
+   dict from stats.fetch_top: {topic, label, description, items}.
+   Each item carries either a clickable hub_url or just a label. #}
+{% if data and data.rows %}
+<div class="card">
+  <div class="card-title">{{ data.label }}</div>
+  <div class="card-meta" style="margin: 4px 0 10px;">{{ data.description }}</div>
+  {% set max_count = data.rows[0].count %}
+  <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px;">
+    {% for item in data.rows %}
+      {% set pct = (item.count / max_count * 100) | round(1) if max_count else 0 %}
+      <li style="position: relative; display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; border-radius: 4px; overflow: hidden;">
+        {# Background bar reflects the count relative to the leader. #}
+        <span style="position: absolute; inset: 0; background: color-mix(in srgb, var(--accent) 12%, transparent); width: {{ pct }}%; transition: width .2s ease;" aria-hidden="true"></span>
+        <span style="position: relative; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          {% if item.hub_url %}
+            <span class="hub-hover" data-preview-ref="{{ item.hub_url[5:] }}">
+              <a href="{{ item.hub_url }}" class="mono">{{ item.name or item.login or item.slug or item.label }}</a>
+              <span class="hub-preview" aria-hidden="true">
+                <p class="hub-preview-title">{{ item.name or item.login or item.slug }}</p>
+                <div class="hub-preview-meta">GitHub</div>
+                <div class="hub-preview-description"></div>
+                <div class="hub-preview-badge">{{ item.count }} repos</div>
+                <div class="hub-preview-hint">Click to open the hub page →</div>
+              </span>
+            </span>
+          {% else %}
+            <span class="mono">{{ item.label }}</span>
+          {% endif %}
+        </span>
+        <span style="position: relative; color: var(--fg-muted); font-variant-numeric: tabular-nums; font-size: 12px;">
+          {{ '{:,}'.format(item.count) }}
+        </span>
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}

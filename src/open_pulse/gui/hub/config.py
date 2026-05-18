@@ -91,6 +91,39 @@ class Settings:
     neo4j_password: str
     """Neo4j password, parsed from NEO4J_AUTH."""
 
+    public_knowledge: bool
+    """When true, /hub/** is reachable without auth. Everything else
+    (admin, databases, projects, …) keeps the single-password gate."""
+
+    qdrant_url: str
+    """Base URL of the vector store. Defaults to the gme-qdrant sidecar
+    so resolvers can read the per-provider collections (github_repos,
+    zenodo_records, hf_*, ror_*, infoscience_*, …) GME already maintains."""
+
+    qdrant_api_key: str
+    """Optional bearer for Qdrant. Empty when running against the
+    in-network gme-qdrant which has no auth."""
+
+    llm_base_url: str
+    """OpenAI-compatible chat-completions base URL. Works with OpenAI
+    (api.openai.com/v1), OpenRouter, Ollama (localhost:11434/v1),
+    EPFL RCP (inference-rcp.epfl.ch/v1), LM Studio, vLLM — anything
+    that speaks the OpenAI schema.
+
+    When ``HUB_LLM_*`` aren't set explicitly but ``RCP_TOKEN`` is
+    present in the environment, we auto-target EPFL's inference
+    endpoint with the same model the GME extractor uses
+    (``openai/gpt-oss-120b``). That way deploying the hub on the
+    EPFL stack lights up the narrative panel without per-key fiddling."""
+
+    llm_api_key: str
+    """API key for the chat endpoint. Falls back to ``RCP_TOKEN`` when
+    ``HUB_LLM_API_KEY`` is empty (so the hub piggybacks on the
+    extractor's existing EPFL inference credentials)."""
+
+    llm_model: str
+    """Model name passed to the chat endpoint."""
+
 
 def _parse_user_pass(raw: str) -> tuple[str, str]:
     """Split a `user/password` env value (used by SPARQL_AUTH).
@@ -149,4 +182,56 @@ def load_settings() -> Settings:
         sparql_password=(_parse_user_pass(os.environ.get("SPARQL_AUTH", ""))[1]),
         neo4j_user=(_parse_user_pass(os.environ.get("NEO4J_AUTH", ""))[0]),
         neo4j_password=(_parse_user_pass(os.environ.get("NEO4J_AUTH", ""))[1]),
+        public_knowledge=_env_bool("HUB_PUBLIC_KNOWLEDGE", default=False),
+        qdrant_url=os.environ.get("HUB_QDRANT_URL", "http://gme-qdrant:6333"),
+        qdrant_api_key=os.environ.get("HUB_QDRANT_API_KEY", "").strip(),
+        **_llm_settings(),
     )
+
+
+# Default endpoint + model the extractor uses against EPFL's inference
+# platform. Kept in sync with src/v1/llm/model_config.py inside the
+# git-metadata-extractor image.
+_RCP_BASE_URL = "https://inference-rcp.epfl.ch/v1"
+_RCP_MODEL = "openai/gpt-oss-120b"
+
+
+def _llm_settings() -> dict[str, str]:
+    """Resolve llm_base_url / llm_api_key / llm_model with RCP fallback.
+
+    Behavior:
+
+    * Explicit ``HUB_LLM_*`` env vars always win.
+    * If ``HUB_LLM_API_KEY`` is empty but ``RCP_TOKEN`` is set, the hub
+      borrows the extractor's credentials and (unless overridden)
+      points at EPFL's inference endpoint with the matching model.
+    * Otherwise falls back to a generic OpenAI default so deployments
+      outside EPFL still work with their own API key.
+    """
+    hub_key = os.environ.get("HUB_LLM_API_KEY", "").strip()
+    hub_base = os.environ.get("HUB_LLM_BASE_URL", "").strip()
+    hub_model = os.environ.get("HUB_LLM_MODEL", "").strip()
+    rcp_token = os.environ.get("RCP_TOKEN", "").strip()
+
+    using_rcp = not hub_key and bool(rcp_token)
+
+    api_key = hub_key or rcp_token
+    if hub_base:
+        base_url = hub_base
+    elif using_rcp:
+        base_url = _RCP_BASE_URL
+    else:
+        base_url = "https://api.openai.com/v1"
+
+    if hub_model:
+        model = hub_model
+    elif using_rcp:
+        model = _RCP_MODEL
+    else:
+        model = "gpt-4o-mini"
+
+    return {
+        "llm_base_url": base_url.rstrip("/"),
+        "llm_api_key": api_key,
+        "llm_model": model,
+    }
