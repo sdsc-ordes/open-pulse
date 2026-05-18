@@ -881,13 +881,106 @@ body.chaoss-modal-lock { overflow: hidden; }
 .chaoss-modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 18px;
+  padding: 18px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 .chaoss-modal-question {
-  margin: 0 0 14px;
-  font-size: 13px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--fg);
+  line-height: 1.5;
+  font-style: italic;
+  border-left: 3px solid var(--chaoss-tone-info, var(--accent));
+  padding-left: 12px;
+}
+
+/* ── Modal sections ────────────────────────────────────────────── */
+.chaoss-modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chaoss-modal-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
   color: var(--fg-muted);
-  line-height: 1.45;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chaoss-modal-section-count {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.chaoss-modal-prose {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg);
+}
+.chaoss-modal-prose-muted { color: var(--fg-muted); }
+.chaoss-modal-prose code {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+  color: var(--fg);
+}
+
+/* ── Methodology card (the always-visible "how" block) ─────────── */
+.chaoss-modal-method {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  gap: 8px;
+}
+.chaoss-modal-method .chaoss-modal-section-title {
+  margin-bottom: 2px;
+}
+.chaoss-modal-combine {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--chaoss-tone-info, var(--accent));
+  border-radius: 6px;
+}
+.chaoss-modal-combine-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+.chaoss-modal-combine-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.chaoss-modal-combine-text strong { color: var(--chaoss-tone-info, var(--accent)); }
+.chaoss-modal-combine-text code {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
 }
 
 /* Unification footer — the "how values combine" block under the
@@ -921,12 +1014,44 @@ body.chaoss-modal-lock { overflow: hidden; }
 }
 .chaoss-unification-text strong { color: var(--chaoss-tone-info, var(--accent)); }
 
-/* Reproducibility-recipe block — sits just under the unification
- * footer with a small language switcher. */
-.chaoss-recipe {
-  margin-top: 4px;
+/* "Reproduce end-to-end" — a <details> expander wrapping a tabbed
+ * code block. The summary matches the trace-row chevron pattern so
+ * the visitor recognises it as another open-on-click row. */
+.chaoss-recipe-details {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.chaoss-recipe-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface-sunk);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  list-style: none;
+  transition: background .12s ease;
+}
+.chaoss-recipe-summary::-webkit-details-marker { display: none; }
+.chaoss-recipe-summary::marker { display: none; }
+.chaoss-recipe-summary:hover { background: var(--surface); }
+.chaoss-recipe-summary > span:nth-child(2) { flex: 1; min-width: 0; }
+.chaoss-recipe-details[open] > .chaoss-recipe-summary .chaoss-trace-chevron {
+  transform: rotate(90deg);
+}
+.chaoss-recipe-details[open] > .chaoss-recipe-summary {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.chaoss-recipe-details > p { padding: 0 12px; }
+
+.chaoss-recipe {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
   overflow: hidden;
   background: var(--surface);
 }
@@ -934,17 +1059,11 @@ body.chaoss-modal-lock { overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 10px;
+  padding: 8px 12px;
   background: var(--surface-sunk);
+  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
-}
-.chaoss-recipe-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--fg-muted);
 }
 .chaoss-recipe-tabs {
   display: flex;
@@ -972,94 +1091,161 @@ body.chaoss-modal-lock { overflow: hidden; }
 }
 .chaoss-recipe pre {
   margin: 0;
-  max-height: 360px;
+  max-height: 420px;
   overflow: auto;
-  background: #1d1f23;
+  background: #1a1d21;
 }
 .chaoss-recipe pre code {
   display: block;
-  padding: 10px 14px;
-  font-size: 12px;
-  line-height: 1.5;
+  padding: 12px 16px;
+  font-size: 12.5px;
+  line-height: 1.55;
   background: transparent !important;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
+/* ── Trace list inside the modal ───────────────────────────────── */
+.chaoss-trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .chaoss-trace {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
   background: var(--surface);
 }
 
-.chaoss-trace-head {
+/* Closed-state head IS the expander button. */
+button.chaoss-trace-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
-  padding: 8px 10px;
+  width: 100%;
+  padding: 10px 12px;
   background: var(--surface-sunk);
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  font-family: inherit;
   font-size: 12px;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  transition: background .12s ease;
+}
+button.chaoss-trace-head:hover { background: var(--surface); }
+button.chaoss-trace-head.is-open {
+  background: var(--surface);
+  border-bottom-color: var(--border);
+}
+.chaoss-trace-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px; height: 14px;
+  color: var(--accent, var(--chaoss-tone-info));
+  font-size: 11px;
+  transition: transform .15s ease;
+  flex-shrink: 0;
+}
+.chaoss-trace-chevron.is-open { transform: rotate(90deg); }
+.chaoss-trace-store {
+  flex-shrink: 0;
+  font-size: 10px;
 }
 .chaoss-trace-title {
   flex: 1;
   min-width: 0;
   color: var(--fg);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chaoss-trace-summary-line {
   color: var(--fg-muted);
   font-size: 11px;
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  flex-shrink: 0;
 }
 .chaoss-trace-summary-line.is-error { color: var(--chaoss-tone-danger, #c43); }
 
+.chaoss-trace-body { /* x-show toggles display */ }
+.chaoss-trace-body-enter            { transition: opacity .14s ease; }
+.chaoss-trace-body-enter-start      { opacity: 0; }
+.chaoss-trace-body-enter-end        { opacity: 1; }
+
 .chaoss-trace-pre {
   margin: 0;
-  max-height: 320px;
+  max-height: 360px;
   overflow: auto;
-  background: #1d1f23;
+  background: #1a1d21;
+  border-top: 1px solid var(--border);
 }
 .chaoss-trace-pre code {
   display: block;
-  padding: 10px 0;
-  font-size: 12px;
-  line-height: 1.5;
+  padding: 12px 0;
+  font-size: 12.5px;
+  line-height: 1.55;
   background: transparent !important;
 }
 
-/* highlight.js line-numbers plugin uses a table layout. Tighten it
- * so the line gutter reads as a muted column instead of the wide,
- * left-leaning default. */
+/* highlight.js line-numbers plugin uses a table layout. We re-skin
+ * the gutter so it reads as a thin numbered column rather than the
+ * loose, large-padding default. */
 .chaoss-trace-pre table.hljs-ln {
   border-spacing: 0;
   width: 100%;
 }
 .chaoss-trace-pre td.hljs-ln-numbers {
   user-select: none;
+  -webkit-user-select: none;
   text-align: right;
   vertical-align: top;
-  color: var(--fg-faint, rgba(255, 255, 255, 0.3));
-  padding: 0 12px 0 14px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  width: 1%;          /* shrink-to-fit */
+  color: rgba(160, 168, 180, 0.42);
+  padding: 0 14px 0 16px;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.18);
+  width: 1%;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .chaoss-trace-pre td.hljs-ln-code {
-  padding-left: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
+  padding-left: 14px;
+  padding-right: 14px;
+  white-space: pre;
+}
+@media (max-width: 720px) {
+  /* Allow wrap on narrow screens so visitors don't have to
+     scroll horizontally over long SPARQL filters. */
+  .chaoss-trace-pre td.hljs-ln-code { white-space: pre-wrap; word-break: break-word; }
 }
 
 .chaoss-trace-actions {
   display: flex;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 8px 12px;
   background: var(--surface-sunk);
   border-top: 1px solid var(--border);
 }
+
+/* ── Custom token colours for Cypher + SPARQL on top of
+ *    atom-one-dark. The default theme handles common keywords
+ *    fairly well; these tweaks pull our domain-specific tokens
+ *    (``:Label`` symbols, ``?var`` bindings, prefixed names) into
+ *    palette colours that read clearly against the dark background. */
+.chaoss-trace-pre .hljs-keyword,
+.chaoss-trace-pre .hljs-built_in     { color: #c678dd; }     /* purple */
+.chaoss-trace-pre .hljs-string       { color: #98c379; }     /* green  */
+.chaoss-trace-pre .hljs-number       { color: #d19a66; }     /* orange */
+.chaoss-trace-pre .hljs-comment      { color: #5c6370; font-style: italic; }
+.chaoss-trace-pre .hljs-symbol       { color: #61afef; }     /* blue  ─ :Label, :REL */
+.chaoss-trace-pre .hljs-variable     { color: #e5c07b; }     /* yellow ─ ?var, $var */
+.chaoss-trace-pre .hljs-attribute    { color: #56b6c2; }     /* cyan  ─ pulse:hasContribution */
+.chaoss-trace-pre .hljs-meta         { color: #56b6c2; }
+.chaoss-trace-pre .hljs-literal      { color: #d19a66; font-weight: 500; }
 
 /* A small button variant for the actions row. Smaller padding, same
  * shape as the standard .btn so it slots into the chrome cleanly. */
