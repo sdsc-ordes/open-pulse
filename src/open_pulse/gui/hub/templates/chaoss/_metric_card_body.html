@@ -222,8 +222,14 @@
   #}
   <details class="chaoss-trace-block" style="margin-top: 4px;" x-data="{ open: false }"
            @toggle="if ($el.open && window.hljs) $el.querySelectorAll('pre code').forEach(c => { c.removeAttribute('data-highlighted'); try { window.hljs.highlightElement(c); if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(c); } catch(_){} })">
-    <summary class="card-meta chaoss-trace-summary" style="cursor: pointer; font-size: 12px; user-select: none;">
-      How we compute this · {{ traces|length }} quer{% if traces|length == 1 %}y{% else %}ies{% endif %}
+    {# The summary is the row a visitor clicks to expand. The CSS
+       hides the default disclosure triangle and replaces it with a
+       chevron we control, so we can rotate it on open and pick our
+       own colour. #}
+    <summary class="chaoss-trace-summary">
+      <span class="chaoss-trace-chevron" aria-hidden="true">▸</span>
+      <span class="chaoss-trace-summary-label">How we compute this</span>
+      <span class="chaoss-trace-summary-count">{{ traces|length }} quer{% if traces|length == 1 %}y{% else %}ies{% endif %}</span>
     </summary>
     <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
       {% for t in traces %}
@@ -254,6 +260,18 @@
           </div>
         </div>
       {% endfor %}
+
+      {# ── Unification footer ──────────────────────────────────────
+         What the visitor walked through above is the raw store
+         queries. This footer states explicitly how those values
+         combine into the headline number, so the dashboard isn't
+         just "here's three numbers, pick one". #}
+      {% if result.unification %}
+        <div class="chaoss-unification">
+          <div class="chaoss-unification-label">How values combine</div>
+          <div class="chaoss-unification-text">{{ result.unification | md }}</div>
+        </div>
+      {% endif %}
     </div>
   </details>
 </div>

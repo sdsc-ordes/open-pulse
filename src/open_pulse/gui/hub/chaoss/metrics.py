@@ -80,6 +80,11 @@ class MetricResult:
     # series-emitting metric overrides it.
     series_unit: str = "events"
     examples: list[dict[str, str]] = field(default_factory=list)
+    # One-line explanation of how the queries combine into the
+    # headline number — rendered at the bottom of the trace expander
+    # under "How values combine". Markdown-flavour (backticks +
+    # **bold** + *italic*) gets parsed by the ``md`` Jinja filter.
+    unification: str = ""
     # Optional typed visualisation hint. Shape is one of:
     #   {"kind": "donut",       "fraction": 0.0..1.0, "tone": "good|warn|info|danger"}
     #   {"kind": "stacked_bar", "segments": [{"label": str, "value": int, "tone": str}, …]}
@@ -273,7 +278,10 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
                 slug="contributors", value="—", label="no contributor data",
                 secondary=None, queries=traces,
                 notes="None of the three stores returned a value for this repo.",
-            )
+            unification=(
+            "Largest non-zero of three stores: **OpenSearch** (windowed git-cardinality) · **SPARQL** (windowed contribution graph) · **Neo4j** (all-time edges). Fallback ladder skips zeros so an empty index can't hide a real signal."
+        ),
+    )
         winner = observed[0]
     headline, label = winner
 
@@ -298,6 +306,9 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
             "indexed by GrimoireLab in the window. SPARQL uses the typed "
             "``pulse:lastContributionDate`` on the Contribution node. "
             "Neo4j is an all-time edge count — it ignores the window."
+        ),
+    unification=(
+            "Largest non-zero of three stores: **OpenSearch** (windowed git-cardinality) · **SPARQL** (windowed contribution graph) · **Neo4j** (all-time edges). Fallback ladder skips zeros so an empty index can't hide a real signal."
         ),
     )
 
@@ -419,7 +430,10 @@ def _metric_new_contributors(full: str, canonical_url: str, window_days: int) ->
                 slug="new_contributors", value="—", label="no data",
                 secondary=None, queries=traces,
                 notes="Couldn't reach either store with first-contribution data.",
-            )
+            unification=(
+            "Largest non-zero of windowed **SPARQL** (`pulse:firstContributionDate` filter) and **OpenSearch** (terms agg + min commit date per author, filtered client-side)."
+        ),
+    )
         winner = observed[0]
     headline, label = winner
 
@@ -523,7 +537,10 @@ def _metric_technical_fork(full: str, canonical_url: str, window_days: int) -> M
             slug="technical_fork", value="—", label="no fork data",
             secondary=None, queries=traces,
             notes="No fork count available from either store.",
-        )
+        unification=(
+            "**SPARQL** GitHub-reported takes precedence; **Neo4j** in-graph observed-fork count is shown as a secondary signal."
+        ),
+    )
     bits = []
     if values["sparql"] is not None:
         bits.append(f"GitHub-reported: {values['sparql']}")
@@ -595,7 +612,10 @@ def _metric_licenses(full: str, canonical_url: str, window_days: int) -> MetricR
                 "it just means the metadata extractor didn't find one. "
                 "Triggering enrichment may surface it."
             ),
-        )
+        unification=(
+            "Presence flag: ✓ if **SPARQL** returns ≥ 1 `schema:license` triple, ✗ otherwise."
+        ),
+    )
 
     display = ", ".join(_short_license(l) for l in licenses[:3])
     if len(licenses) > 3:
@@ -805,7 +825,10 @@ def _metric_languages(full: str, canonical_url: str, window_days: int) -> Metric
                 "for this repo. Re-running enrichment will refresh "
                 "the triples."
             ),
-        )
+        unification=(
+            "Distinct `schema:programmingLanguage` triples in **SPARQL** (presence, not byte share — that's a Phase-3 ontology upgrade)."
+        ),
+    )
     return MetricResult(
         slug="programming_languages",
         value=str(len(languages)),
@@ -894,7 +917,10 @@ def _metric_activity_dates(full: str, canonical_url: str, window_days: int) -> M
                 "had no commits in the selected window. The /hub entity "
                 "page's sparkline runs the same agg over all time."
             ),
-        )
+        unification=(
+            "Sum of monthly bucket counts from one **OpenSearch** `date_histogram` on `grimoire_creation_date`."
+        ),
+    )
 
     busiest = max(series, key=lambda r: r["value"])
     return MetricResult(
@@ -986,7 +1012,10 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
                 "or GrimoireLab hasn't ingested this repo's github "
                 "stream yet."
             ),
-        )
+        unification=(
+            "`closed / total` from one **OpenSearch** PR aggregation (`state.terms` + `merged` filter on PRs created in window)."
+        ),
+    )
 
     ratio = closed / total
     return MetricResult(
@@ -1070,7 +1099,10 @@ def _metric_org_diversity(full: str, canonical_url: str, window_days: int) -> Me
                 "contributors don't publicise their EPFL/SDSC "
                 "affiliation on GitHub."
             ),
-        )
+        unification=(
+            "Distinct organisations whose members contributed — **SPARQL** chain: `Person → org:hasMembership → Membership → org:organization → Org → schema:name`."
+        ),
+    )
 
     return MetricResult(
         slug="org_diversity",
@@ -1084,6 +1116,9 @@ def _metric_org_diversity(full: str, canonical_url: str, window_days: int) -> Me
             "base, which CHAOSS treats as a sustainability signal. "
             "Counts orgs once regardless of how many of their members "
             "contributed."
+        ),
+    unification=(
+            "Distinct organisations whose members contributed — **SPARQL** chain: `Person → org:hasMembership → Membership → org:organization → Org → schema:name`."
         ),
     )
 
@@ -1166,7 +1201,10 @@ def _metric_academic_impact(full: str, canonical_url: str, window_days: int) -> 
                 "that there are none. It does NOT mean no paper cites "
                 "the software."
             ),
-        )
+        unification=(
+            "Count of **SPARQL** shared-author chain results: `Article → schema:author → Person → pulse:hasContribution → Repo` (no direct article↔repo predicate exists yet)."
+        ),
+    )
 
     examples: list[dict[str, str]] = []
     for r in rows[:8]:
@@ -1275,7 +1313,10 @@ def _metric_first_response(full: str, canonical_url: str, window_days: int) -> M
                 "for this repo. The query above is what we'd run once "
                 "github_*_enriched starts receiving documents."
             ),
-        )
+        unification=(
+            "P50 of GrimoireLab's pre-computed `time_to_first_attention_without_bot` enrichment via an **OpenSearch** percentiles agg."
+        ),
+    )
 
     aggs = raw.get("aggregations") or {}
     n = int(((aggs.get("count_with_response") or {}).get("doc_count") or 0))
@@ -1305,7 +1346,10 @@ def _metric_first_response(full: str, canonical_url: str, window_days: int) -> M
                 "no PRs/issues opened, or none have been responded "
                 "to yet."
             ),
-        )
+        unification=(
+            "P50 of GrimoireLab's pre-computed `time_to_first_attention_without_bot` enrichment via an **OpenSearch** percentiles agg."
+        ),
+    )
 
     return MetricResult(
         slug="first_response",
@@ -1366,7 +1410,10 @@ def _metric_issue_resolution(full: str, canonical_url: str, window_days: int) ->
             slug="issue_resolution", value="—", label="no data",
             secondary=None, queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
-        )
+        unification=(
+            "P50 of GrimoireLab's `time_open_days` for issues (`pull_request:false`) that closed in the window — via **OpenSearch** percentiles agg."
+        ),
+    )
 
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
     aggs = raw.get("aggregations") or {}
@@ -1392,7 +1439,10 @@ def _metric_issue_resolution(full: str, canonical_url: str, window_days: int) ->
             label="no closed issues in window",
             secondary=None, queries=traces,
             notes="No issues closed in the window for this repo.",
-        )
+        unification=(
+            "P50 of GrimoireLab's `time_open_days` for issues (`pull_request:false`) that closed in the window — via **OpenSearch** percentiles agg."
+        ),
+    )
     return MetricResult(
         slug="issue_resolution",
         value=f"{p50:.1f} d",
@@ -1461,7 +1511,10 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
             slug="self_merge", value="—", label="no data",
             secondary=None, queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
-        )
+        unification=(
+            "`self-merged / total-merged` — Painless script compares `user_login` vs `merge_author_login` inside an **OpenSearch** filter agg."
+        ),
+    )
 
     total_merged = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
     self_merged = int(((raw.get("aggregations") or {}).get("self_merged") or {}).get("doc_count") or 0)
@@ -1478,7 +1531,10 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
             slug="self_merge", value="—", label="no merged PRs in window",
             secondary=None, queries=traces,
             notes="No PRs merged on this repo in the window.",
-        )
+        unification=(
+            "`self-merged / total-merged` — Painless script compares `user_login` vs `merge_author_login` inside an **OpenSearch** filter agg."
+        ),
+    )
     ratio = self_merged / total_merged
     # Self-merge is a signal we read inversely: high → weak review
     # gate, low → strong. Tone the donut accordingly.
@@ -1551,7 +1607,10 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
             slug="burstiness", value="—", label="no data",
             secondary=None, queries=traces,
             notes="No git activity indexed for this repo.",
-        )
+        unification=(
+            "B = (σ − μ) / (σ + μ) on inter-arrival days between commit-days. Daily histogram from **OpenSearch**, post-processed in Python (`statistics.pstdev` + mean)."
+        ),
+    )
 
     buckets = (raw.get("aggregations") or {}).get("by_day", {}).get("buckets", [])
     active_days = len(buckets)
@@ -1571,7 +1630,10 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
                 "window to compute inter-arrival gaps. Widen the "
                 "window or pick a more active repo."
             ),
-        )
+        unification=(
+            "B = (σ − μ) / (σ + μ) on inter-arrival days between commit-days. Daily histogram from **OpenSearch**, post-processed in Python (`statistics.pstdev` + mean)."
+        ),
+    )
 
     # Compute inter-arrival times in days. ``key`` on the bucket is
     # ms-since-epoch; we convert and difference consecutive entries.
@@ -1690,7 +1752,10 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
             slug="absence_factor", value="—", label="no data",
             secondary=None, queries=traces,
             notes="No git activity indexed for this repo.",
-        )
+        unification=(
+            "Walk descending **OpenSearch** terms agg until cumulative commits ≥ 50 %. Headline = N at threshold; example list shows each top contributor's share."
+        ),
+    )
 
     buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
     total = sum(int(b.get("doc_count") or 0) for b in buckets)
@@ -1705,7 +1770,10 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
             slug="absence_factor", value="—", label="no commits in window",
             secondary=None, queries=traces,
             notes="Widen the window — the bus factor needs at least one commit.",
-        )
+        unification=(
+            "Walk descending **OpenSearch** terms agg until cumulative commits ≥ 50 %. Headline = N at threshold; example list shows each top contributor's share."
+        ),
+    )
 
     # Walk the (already-sorted-desc) bucket list and accumulate.
     factor = 0
@@ -1822,7 +1890,10 @@ def _metric_demographics(full: str, canonical_url: str, window_days: int) -> Met
             slug="project_demographics", value="—", label="no data",
             secondary=None, queries=traces,
             notes="No git activity indexed for this repo.",
-        )
+        unification=(
+            "**OpenSearch** terms agg with `min`/`max` sub-aggs per author. Buckets (`core`/`active`/`recent`/`dormant`) partitioned client-side."
+        ),
+    )
 
     buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
     total_contribs = len(buckets)
@@ -1831,7 +1902,10 @@ def _metric_demographics(full: str, canonical_url: str, window_days: int) -> Met
             slug="project_demographics", value="0", label="no contributors",
             secondary=None, queries=traces,
             notes="No commits indexed for this repo.",
-        )
+        unification=(
+            "**OpenSearch** terms agg with `min`/`max` sub-aggs per author. Buckets (`core`/`active`/`recent`/`dormant`) partitioned client-side."
+        ),
+    )
 
     total_commits = sum(int(b.get("doc_count") or 0) for b in buckets)
 
@@ -2004,7 +2078,10 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
             slug="bot_activity", value="—", label="no data",
             secondary=None, queries=traces,
             notes="No git activity indexed for this repo.",
-        )
+        unification=(
+            "bot-matching commits / total. Detection = **OpenSearch** `author_bot:true` OR any of 10 wildcard author-name patterns (`*[bot]*`, `*dependabot*`, …)."
+        ),
+    )
 
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
     bot_doc_count = int(((raw.get("aggregations") or {}).get("bots") or {}).get("doc_count") or 0)
@@ -2026,7 +2103,10 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
             slug="bot_activity", value="—", label="no commits in window",
             secondary=None, queries=traces,
             notes="Widen the window to compute bot share.",
-        )
+        unification=(
+            "bot-matching commits / total. Detection = **OpenSearch** `author_bot:true` OR any of 10 wildcard author-name patterns (`*[bot]*`, `*dependabot*`, …)."
+        ),
+    )
 
     ratio = bot_doc_count / total
     bot_series: list[dict[str, Any]] = []
@@ -2255,7 +2335,10 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
             slug="cr_reviews", value="—", label="no data",
             secondary=None, queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
-        )
+        unification=(
+            "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
+        ),
+    )
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
     reviewed = int(((raw.get("aggregations") or {}).get("reviewed") or {}).get("doc_count") or 0)
     traces.append(QueryTrace(
@@ -2269,7 +2352,10 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
             slug="cr_reviews", value="—", label="no PRs in window",
             secondary=None, queries=traces,
             notes="No pull requests opened on this repo in the window.",
-        )
+        unification=(
+            "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
+        ),
+    )
     ratio = reviewed / total
     # High review-rate = healthy review culture; low = concerning.
     tone = "good" if ratio >= 0.6 else "warn" if ratio >= 0.3 else "danger"
@@ -2284,6 +2370,9 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
             "Counts PRs whose ``num_review_comments_without_bot`` is "
             "positive — i.e. at least one review comment from a human. "
             "Pair with self_merge to read code-review culture."
+        ),
+    unification=(
+            "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
         ),
     )
 
@@ -2338,7 +2427,10 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
             slug="code_lines", value="—", label="no data",
             secondary=None, queries=traces,
             notes="No git activity indexed for this repo.",
-        )
+        unification=(
+            "`sum(lines_added) + sum(lines_removed)` across commits in window from **OpenSearch**. Monthly churn histogram drives the sparkline."
+        ),
+    )
     commits = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
     aggs = raw.get("aggregations") or {}
     added   = int((aggs.get("lines_added")   or {}).get("value") or 0)
@@ -2368,7 +2460,10 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
             slug="code_lines", value="—", label="no commits in window",
             secondary=None, queries=traces,
             notes="Widen the window to compute line churn.",
-        )
+        unification=(
+            "`sum(lines_added) + sum(lines_removed)` across commits in window from **OpenSearch**. Monthly churn histogram drives the sparkline."
+        ),
+    )
     return MetricResult(
         slug="code_lines",
         value=f"{delta:,}",
@@ -2386,6 +2481,9 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
             "``lines_removed``. Vendored or generated files inflate "
             "this — a one-line refactor can still touch thousands of "
             "lines if a lockfile lives in the repo."
+        ),
+    unification=(
+            "`sum(lines_added) + sum(lines_removed)` across commits in window from **OpenSearch**. Monthly churn histogram drives the sparkline."
         ),
     )
 
