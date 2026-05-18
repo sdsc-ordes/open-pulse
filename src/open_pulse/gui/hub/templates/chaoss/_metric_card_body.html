@@ -104,14 +104,15 @@
     {% if n > 1 %}
       <div x-data='{
              hover: null,
-             dates: {{ dates | tojson }},
-             values: {{ values | tojson }}
+             dates:  {{ dates  | tojson }},
+             values: {{ values | tojson }},
+             unit:   {{ result.series_unit | tojson }}
            }'
            style="position: relative;">
         {# The floating chip — only visible while a bar is hovered.
            Anchored top-left so it never gets clipped by the card. #}
         <div x-show="hover !== null" x-cloak
-             x-text="hover !== null ? (dates[hover] + ' · ' + values[hover] + ' commits') : ''"
+             x-text="hover !== null ? (dates[hover] + ' · ' + values[hover] + ' ' + unit) : ''"
              style="position: absolute; top: -22px; left: 0; padding: 2px 6px;
                     background: var(--surface); border: 1px solid var(--border-strong);
                     border-radius: 4px; font-size: 11px; white-space: nowrap;
@@ -127,7 +128,7 @@
                   fill="var(--accent, #5a8)"
                   style="opacity: {{ 0.5 + (0.5 * v / vmax) }}; cursor: crosshair;"
                   @mouseenter="hover = {{ loop.index0 }}">
-              <title>{{ dates[loop.index0] }}: {{ v }} commits</title>
+              <title>{{ dates[loop.index0] }}: {{ v }} {{ result.series_unit }}</title>
             </rect>
           {% endfor %}
         </svg>
