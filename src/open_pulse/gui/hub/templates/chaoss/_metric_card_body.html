@@ -272,6 +272,43 @@
           <div class="chaoss-unification-text">{{ result.unification | md }}</div>
         </div>
       {% endif %}
+
+      {# ── Reproducibility recipes ────────────────────────────────
+         When the metric supplies recipes, render them as a tabbed
+         code block. Each script fetches every trace's raw response,
+         extracts the relevant numbers, applies the unification, and
+         prints the headline — pre-filled with everything except the
+         OPENPULSE_TOKEN env var. #}
+      {% if result.recipes %}
+        <div class="chaoss-recipe" x-data="{ lang: 'python', copied: false }">
+          <div class="chaoss-recipe-head">
+            <span class="chaoss-recipe-label">Reproduce end-to-end</span>
+            <div class="chaoss-recipe-tabs">
+              {% for L, pretty in [('python', 'python'), ('bash', 'bash'), ('js', 'node.js')] %}
+                <button type="button"
+                        @click="lang = '{{ L }}'"
+                        :class="lang === '{{ L }}' ? 'is-active' : ''">{{ pretty }}</button>
+              {% endfor %}
+            </div>
+            <button type="button" class="btn btn-tiny chaoss-recipe-copy"
+                    @click="navigator.clipboard.writeText(scripts[lang]); copied = true; setTimeout(() => copied = false, 1200)"
+                    x-text="copied ? 'copied!' : 'copy'"></button>
+          </div>
+          {# Each language has its own <pre> so highlight.js can run
+             once on each at expander-open time without re-painting.
+             ``scripts`` is exposed via x-init so the copy button can
+             read the active text directly. #}
+          <div x-init="$data.scripts = {
+                 python: $refs.recPy.textContent,
+                 bash:   $refs.recBash.textContent,
+                 js:     $refs.recJs.textContent,
+               }">
+            <pre x-show="lang === 'python'"><code x-ref="recPy"  class="language-python">{{ result.recipes.python }}</code></pre>
+            <pre x-show="lang === 'bash'"  ><code x-ref="recBash" class="language-bash">{{ result.recipes.bash }}</code></pre>
+            <pre x-show="lang === 'js'"    ><code x-ref="recJs"   class="language-javascript">{{ result.recipes.js }}</code></pre>
+          </div>
+        </div>
+      {% endif %}
     </div>
   </details>
 </div>
