@@ -700,3 +700,43 @@ table.data tr:hover td { background: var(--surface-sunk); }
 .hub-preview-meta   { color: var(--fg-muted); font-size: 11px; margin-top: 4px; }
 .hub-preview-badge  { color: var(--fg-muted); font-size: 11px; margin-top: 6px; }
 .hub-preview-hint   { color: var(--fg-faint); font-size: 11px; margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+
+/* ─── CHAOSS dashboard styles ────────────────────────────────────
+ * Earlier edits in this branch were dropped — consolidating
+ * everything the chaoss surface needs in one block here so it
+ * actually ships.
+ * ──────────────────────────────────────────────────────────────── */
+
+/* Filter chips on /chaoss go dim + strike-through when their
+ * section is toggled off — visual feedback for the Alpine
+ * chaossFilter() component. */
+.pill.is-inactive {
+  opacity: 0.32;
+  text-decoration: line-through;
+}
+
+/* Semantic tones used by metric-card visuals (donuts, stacked bars,
+ * rank bars, severity-coloured headlines). Defined as CSS variables
+ * so light and dark themes stay coordinated. */
+:root {
+  --chaoss-tone-good:   #2faa6a;
+  --chaoss-tone-info:   #4f8cff;
+  --chaoss-tone-warn:   #d8a13a;
+  --chaoss-tone-danger: #d35454;
+}
+[data-theme="light"] {
+  --chaoss-tone-good:   #1d8a55;
+  --chaoss-tone-info:   #2966d8;
+  --chaoss-tone-warn:   #b8801a;
+  --chaoss-tone-danger: #b53b3b;
+}
+
+/* Topic icons next to section headers. The width/height are also
+ * inlined as SVG attributes on the templates as a belt-and-braces
+ * guard against this rule being stripped by a future build. */
+svg.chaoss-topic-icon {
+  width: 18px !important;
+  height: 18px !important;
+  flex: 0 0 18px !important;
+  color: var(--fg-muted);
+}
