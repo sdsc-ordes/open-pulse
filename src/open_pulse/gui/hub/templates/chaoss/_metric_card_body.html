@@ -66,6 +66,61 @@
     {% endif %}
   {% endif %}
 
+  {# Horizontal gauge — used by burstiness, which has a fixed
+     [-1, +1] range. A vertical marker sits at the value's position.
+     marker_pct comes from the metric as 0..100 already. #}
+  {% if result.visual and result.visual.kind == 'gauge' %}
+    {% set tone = result.visual.tone or 'info' %}
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="position: relative; height: 8px; border-radius: 4px;
+                  background: linear-gradient(to right,
+                      var(--chaoss-tone-good, var(--accent)) 0%,
+                      var(--chaoss-tone-info, var(--accent)) 50%,
+                      var(--chaoss-tone-warn, var(--accent)) 100%);
+                  opacity: 0.35;"></div>
+      <div style="position: relative; height: 0; margin-top: -8px;">
+        <div style="position: absolute; top: -2px;
+                    left: {{ result.visual.marker_pct }}%;
+                    transform: translateX(-50%);
+                    width: 3px; height: 12px; border-radius: 1px;
+                    background: var(--chaoss-tone-{{ tone }}, var(--fg));"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 10px;" class="card-meta">
+        <span>{{ result.visual.left_label }}</span>
+        <span>0 random</span>
+        <span>{{ result.visual.right_label }}</span>
+      </div>
+    </div>
+  {% endif %}
+
+  {# Pill cloud — used by programming_languages so each language
+     reads as a discrete badge instead of a comma-string. #}
+  {% if result.visual and result.visual.kind == 'pill_cloud' %}
+    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+      {% for p in result.visual.pills %}
+        <span class="pill pill-info" style="font-size: 11px;">{{ p }}</span>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {# Stat tiles — used by project_popularity to surface stars / forks
+     / dependents as three glanceable cells with icons and tone. #}
+  {% if result.visual and result.visual.kind == 'stat_tiles' %}
+    <div style="display: grid; grid-template-columns: repeat({{ result.visual.tiles | length }}, minmax(0, 1fr)); gap: 6px;">
+      {% for t in result.visual.tiles %}
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;
+                    padding: 6px 4px; background: var(--surface-sunk); border-radius: 6px;">
+          <div style="font-size: 18px;
+                      color: var(--chaoss-tone-{{ t.tone }}, var(--fg));">
+            {{ t.icon }}
+          </div>
+          <div style="font-size: 18px; font-weight: 600; line-height: 1;">{{ t.value }}</div>
+          <div class="card-meta" style="font-size: 10px;">{{ t.label }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   {# Ranked horizontal bars — used by the bus-factor card to show
      the top contributors and their relative share of commits.
      Note: the data lives under ``bars`` not ``items`` because Jinja
