@@ -10,10 +10,69 @@
 
 {% block content %}
 
-{# highlight.js for the query trace blocks. Same theme as /databases. #}
+{# highlight.js for the query trace blocks. Same theme as /databases.
+   We also load the line-numbers plugin and register two inline
+   language definitions for Cypher and SPARQL — neither ships with
+   highlight.js out of the box but both are small enough to define
+   in-page. #}
 <link rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
+<script>
+  // Cypher mode — keywords from the openCypher reference; clause-
+  // separators and string / number / comment shapes mirror highlight.js's
+  // built-in SQL mode so the rendering feels familiar to readers used
+  // to the standard hljs themes.
+  if (window.hljs) {
+    hljs.registerLanguage('cypher', () => ({
+      case_insensitive: true,
+      keywords: {
+        keyword: 'MATCH OPTIONAL WHERE WITH RETURN ORDER BY ASC DESC LIMIT SKIP '
+               + 'CREATE MERGE DELETE DETACH SET REMOVE UNWIND UNION ALL CALL '
+               + 'YIELD CASE WHEN THEN ELSE END AS DISTINCT IN AND OR NOT '
+               + 'STARTS ENDS CONTAINS USING INDEX CONSTRAINT ON FOREACH IS',
+        literal: 'true false null',
+        built_in: 'count avg sum min max collect labels type id keys nodes '
+                + 'relationships startNode endNode length size head last tail '
+                + 'coalesce toInteger toFloat toString',
+      },
+      contains: [
+        hljs.QUOTE_STRING_MODE,
+        hljs.APOS_STRING_MODE,
+        hljs.C_NUMBER_MODE,
+        { className: 'comment', begin: '//', end: '$' },
+        { className: 'symbol',  begin: ':[a-zA-Z_][a-zA-Z0-9_]*' },   // :Label / :REL
+        { className: 'variable', begin: '\\$[a-zA-Z_][a-zA-Z0-9_]*' },
+      ],
+    }));
+
+    // SPARQL — keywords from the SPARQL 1.1 reference; ``?var`` and
+    // ``$var`` show up as symbols, prefixed names (foo:bar) as
+    // attributes, and IRIs (<http://…>) as strings.
+    hljs.registerLanguage('sparql', () => ({
+      case_insensitive: true,
+      keywords: {
+        keyword: 'PREFIX BASE SELECT DISTINCT REDUCED WHERE FROM NAMED CONSTRUCT '
+               + 'DESCRIBE ASK FILTER OPTIONAL UNION GRAPH BIND VALUES SERVICE '
+               + 'ORDER BY GROUP BY HAVING LIMIT OFFSET MINUS NOT EXISTS AS '
+               + 'IS_IRI IS_BLANK IS_LITERAL REGEX STR LANG DATATYPE BOUND '
+               + 'COUNT SUM AVG MIN MAX SAMPLE GROUP_CONCAT IF COALESCE',
+        literal: 'true false a',
+      },
+      contains: [
+        hljs.QUOTE_STRING_MODE,
+        { className: 'comment', begin: '#', end: '$' },
+        { className: 'meta',    begin: '@[a-zA-Z]+' },
+        { className: 'variable', begin: '\\?[a-zA-Z_][a-zA-Z0-9_]*' },
+        { className: 'variable', begin: '\\$[a-zA-Z_][a-zA-Z0-9_]*' },
+        { className: 'attribute', begin: '\\b[a-zA-Z][a-zA-Z0-9_-]*:[a-zA-Z][a-zA-Z0-9_-]*' },
+        { className: 'string',  begin: '<https?://', end: '>' },
+        hljs.C_NUMBER_MODE,
+      ],
+    }));
+  }
+</script>
 
 <div x-data="chaossRepo({{ window }})" style="display: flex; flex-direction: column; gap: 18px;">
 

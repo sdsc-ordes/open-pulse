@@ -740,3 +740,109 @@ svg.chaoss-topic-icon {
   flex: 0 0 18px !important;
   color: var(--fg-muted);
 }
+
+/* ─── CHAOSS query-trace block (under "How we compute this") ───── */
+
+.chaoss-trace-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chaoss-trace-summary::-webkit-details-marker { color: var(--fg-muted); }
+
+.chaoss-trace {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.chaoss-trace-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface-sunk);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.chaoss-trace-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg);
+}
+.chaoss-trace-summary-line {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+.chaoss-trace-summary-line.is-error { color: var(--chaoss-tone-danger, #c43); }
+
+.chaoss-trace-pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  background: #1d1f23;
+}
+.chaoss-trace-pre code {
+  display: block;
+  padding: 10px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  background: transparent !important;
+}
+
+/* highlight.js line-numbers plugin uses a table layout. Tighten it
+ * so the line gutter reads as a muted column instead of the wide,
+ * left-leaning default. */
+.chaoss-trace-pre table.hljs-ln {
+  border-spacing: 0;
+  width: 100%;
+}
+.chaoss-trace-pre td.hljs-ln-numbers {
+  user-select: none;
+  text-align: right;
+  vertical-align: top;
+  color: var(--fg-faint, rgba(255, 255, 255, 0.3));
+  padding: 0 12px 0 14px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  width: 1%;          /* shrink-to-fit */
+  white-space: nowrap;
+}
+.chaoss-trace-pre td.hljs-ln-code {
+  padding-left: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chaoss-trace-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface-sunk);
+  border-top: 1px solid var(--border);
+}
+
+/* A small button variant for the actions row. Smaller padding, same
+ * shape as the standard .btn so it slots into the chrome cleanly. */
+.btn.btn-tiny {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+
+/* Inline code inside metric notes (rendered by the md filter).
+ * Keeps backticked field names readable against the muted note text
+ * and bumps line-height so wrapping looks airy. */
+.chaoss-notes code {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+  color: var(--fg);
+}
+.chaoss-notes strong { color: var(--fg); }
+.chaoss-notes em     { color: var(--fg); font-style: italic; }
