@@ -581,6 +581,462 @@ def _metric_licenses(full: str, canonical_url: str, window_days: int) -> MetricR
     )
 
 
+# ── Metric 6 · Project Popularity (stars + forks + dependents) ──────────
+
+def _metric_project_popularity(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Composite popularity snapshot: stars, forks, and — importantly
+    for the academic context — the *dependents* count from the
+    DEPENDS_ON edges Neo4j keeps. CHAOSS doesn't single out dependents
+    as a metric of its own, but they're the closest signal we have to
+    "how much software is built on top of this".
+    """
+    traces: list[QueryTrace] = []
+    stars: int | None = None
+    forks: int | None = None
+    dependents: int = 0
+    dependent_names: list[str] = []
+
+    # ── SPARQL — stars + forks in one shot ───────────────────────────
+    sparql = (
+        "# githubRepoStars + githubRepoForks come from the metadata\n"
+        "# extractor and reflect the most recent crawl. They are\n"
+        "# snapshots, not series.\n"
+        "PREFIX pulse: <https://open-pulse.epfl.ch/ontology#>\n"
+        "SELECT ?stars ?forks WHERE {\n"
+        f'  ?repo pulse:githubRepositoryHandle "{full}" .\n'
+        "  OPTIONAL { ?repo pulse:githubRepoStars ?stars }\n"
+        "  OPTIONAL { ?repo pulse:githubRepoForks ?forks }\n"
+        "}"
+    )
+    try:
+        rows = stores.sparql_select(sparql)
+        if rows:
+            stars = int(rows[0]["stars"]["value"]) if rows[0].get("stars") else None
+            forks = int(rows[0]["forks"]["value"]) if rows[0].get("forks") else None
+            traces.append(QueryTrace(
+                store="SPARQL", engine="sparql",
+                title=f"Stars + fork count for {full}",
+                query=sparql,
+                result_summary=f"{stars or 0} stars · {forks or 0} forks",
+            ))
+        else:
+            traces.append(QueryTrace(
+                store="SPARQL", engine="sparql",
+                title=f"Stars + fork count for {full}",
+                query=sparql, result_summary="repo not in graph",
+            ))
+    except Exception as exc:  # noqa: BLE001
+        traces.append(QueryTrace(
+            store="SPARQL", engine="sparql",
+            title=f"Stars + fork count for {full}",
+            query=sparql, result_summary="error", error=str(exc),
+        ))
+
+    # ── Neo4j — DEPENDS_ON dependents ────────────────────────────────
+    cypher = (
+        "// Inbound DEPENDS_ON edges into the target repo. Each edge is\n"
+        "// a separate repository that lists this one in its manifest.\n"
+        "// The crawler resolves manifests opportunistically, so this\n"
+        "// is a lower bound — the *observed* dependent count.\n"
+        f"MATCH (dep:Repo)-[:DEPENDS_ON]->(r:Repo {{full_name: '{full}'}})\n"
+        "RETURN dep.full_name AS dependent\n"
+        "ORDER BY dependent\n"
+        "LIMIT 20"
+    )
+    try:
+        rows = stores.neo4j_run(cypher)
+        dependent_names = [r["dependent"] for r in rows if r.get("dependent")]
+        # Count again without the LIMIT for an accurate total.
+        count_cypher = (
+            "// Total inbound DEPENDS_ON count (no limit).\n"
+            f"MATCH (dep:Repo)-[:DEPENDS_ON]->(r:Repo {{full_name: '{full}'}})\n"
+            "RETURN count(DISTINCT dep) AS n"
+        )
+        count_rows = stores.neo4j_run(count_cypher)
+        dependents = int(count_rows[0].get("n") or 0) if count_rows else 0
+        traces.append(QueryTrace(
+            store="Neo4j", engine="cypher",
+            title=f"Top-20 dependents of {full}",
+            query=cypher,
+            result_summary=f"{dependents} total dependents in graph",
+        ))
+    except Exception as exc:  # noqa: BLE001
+        traces.append(QueryTrace(
+            store="Neo4j", engine="cypher",
+            title=f"Top-20 dependents of {full}",
+            query=cypher, result_summary="error", error=str(exc),
+        ))
+
+    # Headline: stars when known (universally recognised), else the
+    # dependent count, else forks.
+    if stars is not None:
+        headline = str(stars)
+        label = "stars"
+    elif dependents:
+        headline = str(dependents)
+        label = "dependents"
+    elif forks is not None:
+        headline = str(forks)
+        label = "forks"
+    else:
+        headline = "—"
+        label = "no popularity signal"
+
+    bits: list[str] = []
+    if stars is not None:
+        bits.append(f"⭐ {stars} stars")
+    if forks is not None:
+        bits.append(f"⑂ {forks} forks")
+    if dependents:
+        bits.append(f"↘ {dependents} dependents")
+
+    return MetricResult(
+        slug="project_popularity",
+        value=headline,
+        label=label,
+        secondary=" · ".join(bits) if bits else None,
+        queries=traces,
+        examples=[
+            {"label": name, "detail": "depends on this repo", "source": "Neo4j"}
+            for name in dependent_names[:8]
+        ],
+        notes=(
+            "Snapshot. Stars and forks come from the latest metadata "
+            "crawl; the dependents count comes from inbound DEPENDS_ON "
+            "edges resolved from package manifests (npm, pypi, cargo, "
+            "go.mod, …) — only as complete as the crawl pipeline that "
+            "extracted them."
+        ),
+    )
+
+
+# ── Metric 7 · Programming Language Distribution ────────────────────────
+
+def _metric_languages(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Which programming languages does the repo declare? The metadata
+    extractor stores one ``schema:programmingLanguage`` triple per
+    detected language, so this is a simple set query.
+    """
+    traces: list[QueryTrace] = []
+    languages: list[str] = []
+
+    sparql = (
+        "# Every detected language for the repo. The metadata extractor\n"
+        "# emits one triple per language (no relative-weight data yet),\n"
+        "# so this is a presence-set, not a distribution.\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "SELECT DISTINCT ?lang WHERE {\n"
+        f'  ?repo pulse:githubRepositoryHandle "{full}" ;\n'
+        "        schema:programmingLanguage ?lang .\n"
+        "}\n"
+        "ORDER BY ?lang"
+    )
+    try:
+        rows = stores.sparql_select(sparql)
+        languages = [r["lang"]["value"] for r in rows]
+        traces.append(QueryTrace(
+            store="SPARQL", engine="sparql",
+            title=f"Programming languages declared for {full}",
+            query=sparql,
+            result_summary=f"{len(languages)} language" + ("s" if len(languages) != 1 else ""),
+        ))
+    except Exception as exc:  # noqa: BLE001
+        traces.append(QueryTrace(
+            store="SPARQL", engine="sparql",
+            title=f"Programming languages declared for {full}",
+            query=sparql, result_summary="error", error=str(exc),
+        ))
+
+    if not languages:
+        return MetricResult(
+            slug="programming_languages",
+            value="—",
+            label="no language declared",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "The metadata extractor didn't surface any language "
+                "for this repo. Re-running enrichment will refresh "
+                "the triples."
+            ),
+        )
+    return MetricResult(
+        slug="programming_languages",
+        value=str(len(languages)),
+        label="languages",
+        secondary=", ".join(languages[:6]) + (f", +{len(languages) - 6}" if len(languages) > 6 else ""),
+        queries=traces,
+        examples=[{"label": l, "detail": "", "source": "SPARQL"} for l in languages],
+        notes=(
+            "Snapshot. The current ontology stores languages as a flat "
+            "set — no per-language size weighting. The CHAOSS "
+            "'Programming Language Distribution' spec wants byte-level "
+            "shares; that's Phase 3 once the extractor emits them."
+        ),
+    )
+
+
+# ── Metric 8 · Activity Dates and Times ─────────────────────────────────
+
+def _metric_activity_dates(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Monthly commit activity from GrimoireLab's git index. Returns a
+    series so the card can render a sparkline.
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+    series: list[dict[str, Any]] = []
+    total = 0
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"range": {"grimoire_creation_date": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_month": {
+                "date_histogram": {
+                    "field": "grimoire_creation_date",
+                    "calendar_interval": "month",
+                    "min_doc_count": 0,
+                }
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    if raw is not None:
+        buckets = (raw.get("aggregations") or {}).get("by_month", {}).get("buckets", [])
+        for b in buckets:
+            ts_ms = int(b.get("key") or 0)
+            count = int(b.get("doc_count") or 0)
+            total += count
+            series.append({
+                "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
+                "value": count,
+            })
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Monthly commit histogram on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{total} commits in {len(series)} months",
+        ))
+    else:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Monthly commit histogram on {origin} since {cutoff_iso[:10]}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or empty",
+        ))
+
+    if total == 0:
+        return MetricResult(
+            slug="activity_dates",
+            value="0",
+            label="no commits in window",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "Either this repo isn't indexed by GrimoireLab or it "
+                "had no commits in the selected window. The /hub entity "
+                "page's sparkline runs the same agg over all time."
+            ),
+        )
+
+    busiest = max(series, key=lambda r: r["value"])
+    return MetricResult(
+        slug="activity_dates",
+        value=str(total),
+        label=f"commits (last {window_days} days)",
+        secondary=f"busiest month: {busiest['date']} ({busiest['value']} commits)",
+        series=series,
+        queries=traces,
+        notes=(
+            "Date histogram on GrimoireLab's ``grimoire_creation_date`` "
+            "field. Each bar = one calendar month. Bursty patterns "
+            "(release-tag spikes) tell a different story from steady "
+            "monthly contributions."
+        ),
+    )
+
+
+# ── Metric 9 · Change Request Closure Ratio ─────────────────────────────
+
+def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Of every pull request created on this repo in the window, what
+    fraction was closed (merged or rejected)?
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    # GrimoireLab's enriched github_issues index stamps every doc with
+    # ``pull_request: bool`` (true for PRs) and ``state: keyword``
+    # ("open" / "closed"). ``merged: bool`` differentiates accepted
+    # from rejected closes.
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"term": {"pull_request": True}},
+                    {"range": {"created_at": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_state": {"terms": {"field": "state", "size": 5}},
+            "merged":   {"filter": {"term": {"merged": True}}},
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    total = closed = merged = open_ = 0
+    if raw is not None:
+        total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+        for b in (raw.get("aggregations") or {}).get("by_state", {}).get("buckets", []):
+            key = (b.get("key") or "").lower()
+            if key == "closed":
+                closed = int(b.get("doc_count") or 0)
+            elif key == "open":
+                open_ = int(b.get("doc_count") or 0)
+        merged = int(((raw.get("aggregations") or {}).get("merged") or {}).get("doc_count") or 0)
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"PR state breakdown on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{total} PRs · {closed} closed · {merged} merged · {open_} open",
+        ))
+    else:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"PR state breakdown on {origin} since {cutoff_iso[:10]}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or github index empty",
+        ))
+
+    if total == 0:
+        return MetricResult(
+            slug="closure_ratio",
+            value="—",
+            label="no PRs in window",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "Either no pull requests were opened in this window, "
+                "or GrimoireLab hasn't ingested this repo's github "
+                "stream yet."
+            ),
+        )
+
+    ratio = closed / total
+    return MetricResult(
+        slug="closure_ratio",
+        value=f"{ratio:.0%}",
+        label=f"closed (last {window_days} days)",
+        secondary=(
+            f"{closed} closed of {total} PRs · {merged} merged · {open_} still open"
+        ),
+        queries=traces,
+        notes=(
+            "Closure ratio = closed / total. CHAOSS distinguishes "
+            "*acceptance* (merged) from *closure* (closed without "
+            "merge); the secondary line shows both so you can tell "
+            "an active-reviewers project from a graveyard."
+        ),
+    )
+
+
+# ── Metric 10 · Organizational Diversity ────────────────────────────────
+
+def _metric_org_diversity(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """How many distinct organisations does the contributor pool span?
+    CHAOSS treats single-vendor projects very differently from
+    cross-org communities.
+    """
+    traces: list[QueryTrace] = []
+    org_names: list[str] = []
+    org_count = 0
+
+    # Hop: ?repo → schema:author / pulse:hasContribution → ?person →
+    # org:hasMembership → ?m → org:organization → ?org → schema:name.
+    sparql = (
+        "# Distinct organisations whose members contributed to this\n"
+        "# repository, going through the Person → Membership → Org\n"
+        "# chain. Counts each org once even if many of its members\n"
+        "# contributed.\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX org:    <http://www.w3.org/ns/org#>\n"
+        "SELECT DISTINCT ?orgName WHERE {\n"
+        f'  ?repo pulse:githubRepositoryHandle "{full}" .\n'
+        "  { ?repo schema:author ?person }\n"
+        "  UNION\n"
+        "  { ?person pulse:hasContribution/pulse:contributionTo ?repo }\n"
+        "  ?person org:hasMembership ?m .\n"
+        "  ?m org:organization ?org .\n"
+        "  ?org schema:name ?orgName .\n"
+        "}\n"
+        "ORDER BY ?orgName"
+    )
+    try:
+        rows = stores.sparql_select(sparql)
+        org_names = [r["orgName"]["value"] for r in rows]
+        org_count = len(org_names)
+        traces.append(QueryTrace(
+            store="SPARQL", engine="sparql",
+            title=f"Distinct contributor organisations for {full}",
+            query=sparql,
+            result_summary=f"{org_count} distinct organisation"
+                          + ("s" if org_count != 1 else ""),
+        ))
+    except Exception as exc:  # noqa: BLE001
+        traces.append(QueryTrace(
+            store="SPARQL", engine="sparql",
+            title=f"Distinct contributor organisations for {full}",
+            query=sparql, result_summary="error", error=str(exc),
+        ))
+
+    if org_count == 0:
+        return MetricResult(
+            slug="org_diversity",
+            value="—",
+            label="no org affiliations linked",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "No contributor has an org:hasMembership triple "
+                "pointing at this repo. This is common when "
+                "contributors don't publicise their EPFL/SDSC "
+                "affiliation on GitHub."
+            ),
+        )
+
+    return MetricResult(
+        slug="org_diversity",
+        value=str(org_count),
+        label="contributor organisations",
+        secondary=", ".join(org_names[:5]) + (f", +{org_count - 5}" if org_count > 5 else ""),
+        queries=traces,
+        examples=[{"label": n, "detail": "", "source": "SPARQL"} for n in org_names],
+        notes=(
+            "Snapshot. A higher number = more diverse contributor "
+            "base, which CHAOSS treats as a sustainability signal. "
+            "Counts orgs once regardless of how many of their members "
+            "contributed."
+        ),
+    )
+
+
 def _short_license(iri: str) -> str:
     """Squeeze an SPDX IRI down to its short id where possible."""
     if "/" not in iri:
@@ -790,6 +1246,87 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=False,
         compute=_metric_academic_impact,
+    ),
+    # ── Phase 2 additions ────────────────────────────────────────────
+    MetricSpec(
+        slug="project_popularity",
+        name="Project Popularity",
+        category="Popularity",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-project-popularity/",
+        question="How visible is the project?",
+        description=(
+            "Composite snapshot: stars + forks from the SPARQL store, "
+            "and *dependents* from inbound DEPENDS_ON edges in Neo4j — "
+            "i.e. other repositories that list this one in their "
+            "package manifest."
+        ),
+        is_time_based=False,
+        compute=_metric_project_popularity,
+    ),
+    MetricSpec(
+        slug="programming_languages",
+        name="Programming Language Distribution",
+        category="FAIR / quality",
+        chaoss_level="Phase 2 · Would-like-to-have",
+        chaoss_url=(
+            "https://chaoss.community/kb/metric-programming-language-distribution/"
+        ),
+        question="Which languages does the codebase use?",
+        description=(
+            "Distinct schema:programmingLanguage values declared for "
+            "this repo. Per-language byte shares aren't in the "
+            "ontology yet, so this is a presence-set."
+        ),
+        is_time_based=False,
+        compute=_metric_languages,
+    ),
+    MetricSpec(
+        slug="activity_dates",
+        name="Activity Dates and Times",
+        category="Community",
+        chaoss_level="Level 0 · Must-have",
+        chaoss_url="https://chaoss.community/kb/metric-activity-dates-and-times/",
+        question="What is the engagement pattern?",
+        description=(
+            "Monthly commit histogram from GrimoireLab. The card "
+            "renders it as an inline sparkline so you can see steady "
+            "vs bursty activity at a glance."
+        ),
+        is_time_based=True,
+        compute=_metric_activity_dates,
+    ),
+    MetricSpec(
+        slug="closure_ratio",
+        name="Change Request Closure Ratio",
+        category="Community",
+        chaoss_level="Level 0 · Must-have",
+        chaoss_url=(
+            "https://chaoss.community/kb/metric-change-request-closure-ratio/"
+        ),
+        question="Are pull requests being acted on?",
+        description=(
+            "Closed / total pull requests in the window, with merged "
+            "vs simply-closed broken out in the secondary line — "
+            "tells an active-reviewers project from a stalled one."
+        ),
+        is_time_based=True,
+        compute=_metric_closure_ratio,
+    ),
+    MetricSpec(
+        slug="org_diversity",
+        name="Organizational Diversity",
+        category="Community",
+        chaoss_level="Level 0 · Must-have",
+        chaoss_url="https://chaoss.community/kb/metric-organizational-diversity/",
+        question="Is the contributor base single-vendor or distributed?",
+        description=(
+            "Distinct organisations whose members appear in the "
+            "repo's contributor pool, walked through the "
+            "Person → Membership → Org chain in SPARQL."
+        ),
+        is_time_based=False,
+        compute=_metric_org_diversity,
     ),
 ]
 
