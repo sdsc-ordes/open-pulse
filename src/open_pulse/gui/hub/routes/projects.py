@@ -237,12 +237,82 @@ async def facets(refresh: bool = False) -> dict[str, Any]:
             *(_facet_values(client, f) for f in FACETS),
             return_exceptions=False,
         )
+        # Decorate Wikidata IRIs (e.g. ``http://www.wikidata.org/entity/Q428691``)
+        # with their human-readable label. We batch every Q-id we
+        # found across all facets into one ``wbgetentities`` call and
+        # cache the result in process memory — 15 disciplines + a
+        # handful of others means one HTTP round-trip on the first
+        # uncached load, then nothing.
+        await _decorate_wikidata_labels(client, results)
 
     payload = {"endpoint": endpoint, "facets": list(results)}
     _FACETS_CACHE["data"] = payload
     _FACETS_CACHE["at"] = now
     _FACETS_CACHE["endpoint"] = endpoint
     return payload
+
+
+# In-process cache of Wikidata Q-id → English label. Discipline
+# values in our SPARQL store are stored as opaque Wikidata IRIs;
+# resolving them to a label here keeps the data clean (we don't
+# duplicate Wikidata into our triples) without making the UI render
+# raw Q-numbers.
+_WIKIDATA_LABEL_CACHE: dict[str, str] = {}
+_WIKIDATA_IRI_PREFIX = "http://www.wikidata.org/entity/"
+
+
+async def _decorate_wikidata_labels(
+    client: httpx.AsyncClient,
+    facets_payload: list[dict[str, Any]],
+) -> None:
+    """For every facet value whose ``value`` is a Wikidata entity IRI,
+    add a ``label`` field with its English label. Cached.
+    """
+    # Collect every Q-id that needs resolving, minus what we already
+    # have in the cache.
+    needed: set[str] = set()
+    for facet in facets_payload:
+        for v in facet.get("values") or []:
+            iri = v.get("value") or ""
+            if iri.startswith(_WIKIDATA_IRI_PREFIX):
+                qid = iri[len(_WIKIDATA_IRI_PREFIX):]
+                if qid and qid not in _WIKIDATA_LABEL_CACHE:
+                    needed.add(qid)
+    if needed:
+        # The MediaWiki API allows up to 50 IDs per call. Batch.
+        chunks = [list(needed)[i:i + 50] for i in range(0, len(needed), 50)]
+        for chunk in chunks:
+            try:
+                r = await client.get(
+                    "https://www.wikidata.org/w/api.php",
+                    params={
+                        "action": "wbgetentities",
+                        "ids": "|".join(chunk),
+                        "props": "labels",
+                        "languages": "en",
+                        "format": "json",
+                    },
+                    timeout=8.0,
+                    headers={"User-Agent": "open-pulse-hub/1.0 (+facets-label-lookup)"},
+                )
+                if r.status_code != 200:
+                    continue
+                payload = r.json()
+            except Exception:  # noqa: BLE001 — never fatal
+                continue
+            for qid, ent in (payload.get("entities") or {}).items():
+                label = (((ent.get("labels") or {}).get("en") or {}).get("value")) or qid
+                _WIKIDATA_LABEL_CACHE[qid] = label
+
+    # Now annotate every facet value in place.
+    for facet in facets_payload:
+        for v in facet.get("values") or []:
+            iri = v.get("value") or ""
+            if iri.startswith(_WIKIDATA_IRI_PREFIX):
+                qid = iri[len(_WIKIDATA_IRI_PREFIX):]
+                lbl = _WIKIDATA_LABEL_CACHE.get(qid)
+                if lbl:
+                    v["label"] = lbl
 
 
 @router.post("/build-from-filters", dependencies=[Depends(require_auth)])
