@@ -1,4 +1,11 @@
-"""HTTP wiring for the CHAOSS metrics surface.
+r"""HTTP wiring for the CHAOSS metrics surface.
+
+The module also registers a tiny ``md`` Jinja filter that turns
+markdown-flavoured inline syntax (``\`code\``, ``**bold**``,
+``*italic*``) into HTML inside metric notes / methodology
+paragraphs. That keeps the metrics module free to write notes with
+natural backticks around field names like ``author_bot`` without the
+template having to remember to wrap them in ``<code>`` tags by hand.
 
 Three handlers live here:
 
@@ -27,16 +34,46 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from typing import Any
 
+import html as _html
+import re as _re
+
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 
 from ..auth import maybe_require_auth
 from . import metrics as metrics_mod
+
+
+def _md_inline(text: str | None) -> Markup:
+    """Tiny inline-markdown → HTML filter.
+
+    Handles only what notes / methodology paragraphs need:
+    backtick-delimited inline code, ``**bold**`` and ``*italic*``.
+    HTML in the source string is escaped first so the filter is safe
+    to apply to anything that came out of a SPARQL / OpenSearch
+    result without worrying about injection. Returns ``Markup`` so
+    Jinja doesn't double-escape it.
+    """
+    if not text:
+        return Markup("")
+    s = _html.escape(str(text), quote=False)
+    # Order matters: bold first (two stars) before italic (one star)
+    # so ``**x**`` doesn't get mis-tokenised as italic-italic.
+    s = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s, flags=_re.DOTALL)
+    s = _re.sub(r"(?<![*_])\*([^*\n]+?)\*(?![*])", r"<em>\1</em>", s)
+    # Double-backticks first (reST-style, used in our metrics module
+    # for field names) so the single-backtick rule doesn't eat just
+    # one side and break the pair.
+    s = _re.sub(r"``([^`\n]+?)``", r"<code>\1</code>", s)
+    s = _re.sub(r"`([^`\n]+?)`", r"<code>\1</code>", s)
+    return Markup(s)
 
 log = logging.getLogger(__name__)
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE.parent / "templates"))
+templates.env.filters["md"] = _md_inline
 
 router = APIRouter(tags=["chaoss"])
 
