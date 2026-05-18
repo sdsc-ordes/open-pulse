@@ -130,7 +130,7 @@
                 <span class="top-bar-cell">
                   <span class="top-bar"
                         :style="'width:' + (Math.max(8, (v.count / topMax(f)) * 100)) + '%'"></span>
-                  <span class="top-label" :title="v.value" x-text="shortLabel(v.value)"></span>
+                  <span class="top-label" :title="v.value" x-text="shortLabel(v)"></span>
                 </span>
                 <span class="top-count" x-text="v.count"></span>
               </li>
@@ -479,6 +479,13 @@ function topStats() {
     },
 
     shortLabel(v) {
+      // ``v`` here can be a row object (value + optional label) OR a
+      // raw URL/string. Resolve to the human label when the backend
+      // attached one (e.g. Wikidata Q-ids on the Discipline facet).
+      if (v && typeof v === 'object') {
+        if (v.label) return v.label;
+        v = v.value || '';
+      }
       if (!v) return '';
       try {
         const u = new URL(v);
