@@ -76,6 +76,15 @@ class MetricResult:
     notes: str
     series: list[dict[str, Any]] = field(default_factory=list)
     examples: list[dict[str, str]] = field(default_factory=list)
+    # Optional typed visualisation hint. Shape is one of:
+    #   {"kind": "donut",       "fraction": 0.0..1.0, "tone": "good|warn|info|danger"}
+    #   {"kind": "stacked_bar", "segments": [{"label": str, "value": int, "tone": str}, …]}
+    #   {"kind": "rank_bars",   "items": [{"label": str, "value": int, "share": 0..1}, …]}
+    # ``tone`` maps to a CSS variable in app.css so light/dark themes stay consistent.
+    visual: dict[str, Any] | None = None
+    # Severity hint for the headline value (good / warn / info / danger).
+    # When set, the template colours the big number accordingly.
+    headline_tone: str | None = None
 
 
 @dataclass
@@ -947,6 +956,7 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
             f"{closed} closed of {total} PRs · {merged} merged · {open_} still open"
         ),
         queries=traces,
+        visual={"kind": "donut", "fraction": ratio, "tone": "info"},
         notes=(
             "Closure ratio = closed / total. CHAOSS distinguishes "
             "*acceptance* (merged) from *closure* (closed without "
@@ -1416,12 +1426,17 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
             notes="No PRs merged on this repo in the window.",
         )
     ratio = self_merged / total_merged
+    # Self-merge is a signal we read inversely: high → weak review
+    # gate, low → strong. Tone the donut accordingly.
+    tone = "danger" if ratio >= 0.5 else "warn" if ratio >= 0.2 else "good"
     return MetricResult(
         slug="self_merge",
         value=f"{ratio:.0%}",
         label=f"self-merged (last {window_days} days)",
         secondary=f"{self_merged} of {total_merged} merged PRs",
         queries=traces,
+        visual={"kind": "donut", "fraction": ratio, "tone": tone},
+        headline_tone=tone,
         notes=(
             "CHAOSS treats self-merge rate as a code-review-culture "
             "signal: a high number suggests there is no reviewer "
@@ -1638,10 +1653,13 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
     # Friendly regime label — CHAOSS guidance suggests 1-2 is fragile.
     if factor <= 2:
         regime = "fragile · one or two key people"
+        tone = "danger"
     elif factor <= 5:
         regime = "concentrated · few key contributors"
+        tone = "warn"
     else:
         regime = "distributed"
+        tone = "good"
 
     traces.append(QueryTrace(
         store="OpenSearch", engine="opensearch", mode="dsl",
@@ -1653,6 +1671,21 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
         ),
     ))
 
+    # Rank-bar data — top-N contributors with their per-author share.
+    # Use the full bucket list (truncated to 8) so the bars span the
+    # whole contributor pool, not just the ones in the 50 % cut.
+    rank_items: list[dict[str, Any]] = []
+    if buckets:
+        top = buckets[0].get("doc_count", 0) or 1
+        for b in buckets[:8]:
+            cnt = int(b.get("doc_count") or 0)
+            rank_items.append({
+                "label": b.get("key") or "(anonymous)",
+                "value": cnt,
+                "share": cnt / total if total else 0,
+                "bar":   cnt / top,  # 0..1 for the bar width
+            })
+
     return MetricResult(
         slug="absence_factor",
         value=str(factor),
@@ -1663,6 +1696,8 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
         ),
         queries=traces,
         examples=top_share[:8],
+        visual={"kind": "rank_bars", "bars": rank_items, "tone": tone},
+        headline_tone=tone,
         notes=(
             "Also known as the 'bus factor'. CHAOSS defines it as the "
             "smallest N for which the top-N contributors' commits sum "
@@ -1760,6 +1795,36 @@ def _metric_demographics(full: str, canonical_url: str, window_days: int) -> Met
         ),
     ))
 
+    # Compose a 4-segment stacked bar covering the whole pool. The
+    # buckets overlap conceptually (a "recent arrival" can also be
+    # "active"), so we partition cleanly into:
+    #   core    — top N by commit count
+    #   recent  — first commit in last 90 d AND not already core
+    #   dormant — last commit predates 180 d AND not core
+    #   other   — middle of the pack
+    core_set = {b.get("key") for b in buckets[:core]}
+    recent_set: set[str] = set()
+    dormant_set: set[str] = set()
+    for b in buckets:
+        key = b.get("key")
+        if key in core_set:
+            continue
+        first_val = int((b.get("first") or {}).get("value") or 0)
+        last_val = int((b.get("last") or {}).get("value") or 0)
+        if first_val >= now_ms - ninety_days_ms:
+            recent_set.add(key)
+        elif last_val < now_ms - one_eighty_days_ms:
+            dormant_set.add(key)
+    other = total_contribs - len(core_set) - len(recent_set) - len(dormant_set)
+    if other < 0:
+        other = 0
+    segments = [
+        {"label": "core",    "value": len(core_set),    "tone": "good"},
+        {"label": "active",  "value": other,            "tone": "info"},
+        {"label": "recent",  "value": len(recent_set),  "tone": "warn"},
+        {"label": "dormant", "value": len(dormant_set), "tone": "danger"},
+    ]
+
     return MetricResult(
         slug="project_demographics",
         value=str(total_contribs),
@@ -1770,6 +1835,7 @@ def _metric_demographics(full: str, canonical_url: str, window_days: int) -> Met
             f"dormant {dormant} (no commit in 180 d)"
         ),
         queries=traces,
+        visual={"kind": "stacked_bar", "segments": segments},
         notes=(
             "Demographics rolled up from the same git_*_enriched index "
             "that powers the activity sparkline. 'Core' uses CHAOSS's "
@@ -1873,6 +1939,7 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
         value=f"{ratio:.0%}",
         label=f"bot share (last {window_days} days)",
         secondary=f"{bot_doc_count} of {total} commits matched a bot pattern",
+        visual={"kind": "donut", "fraction": ratio, "tone": "info"},
         examples=[
             {
                 "label": b.get("key") or "(unnamed)",
@@ -2076,12 +2143,15 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
             notes="No pull requests opened on this repo in the window.",
         )
     ratio = reviewed / total
+    # High review-rate = healthy review culture; low = concerning.
+    tone = "good" if ratio >= 0.6 else "warn" if ratio >= 0.3 else "danger"
     return MetricResult(
         slug="cr_reviews",
         value=str(reviewed),
         label=f"reviewed PRs (last {window_days} days)",
         secondary=f"{reviewed} of {total} PRs ({ratio:.0%}) had a non-bot review",
         queries=traces,
+        visual={"kind": "donut", "fraction": ratio, "tone": tone},
         notes=(
             "Counts PRs whose ``num_review_comments_without_bot`` is "
             "positive — i.e. at least one review comment from a human. "
