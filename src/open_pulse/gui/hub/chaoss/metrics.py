@@ -198,7 +198,7 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
         },
         "aggs": {
             "by_author": {
-                "cardinality": {"field": "author_name.keyword"}
+                "cardinality": {"field": "author_name"}
             }
         },
     }
@@ -331,7 +331,7 @@ def _metric_new_contributors(full: str, canonical_url: str, window_days: int) ->
         "query": {"term": {"origin": origin}},
         "aggs": {
             "by_author": {
-                "terms": {"field": "author_name.keyword", "size": 1000},
+                "terms": {"field": "author_name", "size": 1000},
                 "aggs": {
                     "first_commit": {"min": {"field": "grimoire_creation_date"}}
                 },
@@ -1562,6 +1562,345 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
     )
 
 
+# ── Metric 15 · Contributor Absence Factor (a.k.a. bus factor) ──────────
+
+def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """CHAOSS-defined Contributor Absence Factor: the smallest number
+    of distinct authors whose *combined* commit count is at least 50 %
+    of the total. Low values mean the project depends on a tiny
+    handful of people; high values mean the work is distributed.
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    # 500 author buckets is more than enough for any single-repo
+    # window — once a repo has 500+ committers, the bus factor is
+    # almost certainly large and the long tail doesn't change the
+    # answer.
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"range": {"grimoire_creation_date": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_author": {
+                "terms": {"field": "author_name", "size": 500}
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Per-author commit counts on {origin} for bus-factor",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or git index empty",
+        ))
+        return MetricResult(
+            slug="absence_factor", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="No git activity indexed for this repo.",
+        )
+
+    buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
+    total = sum(int(b.get("doc_count") or 0) for b in buckets)
+    if total == 0:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Per-author commit counts on {origin}",
+            query=body_text,
+            result_summary="0 commits in window",
+        ))
+        return MetricResult(
+            slug="absence_factor", value="—", label="no commits in window",
+            secondary=None, queries=traces,
+            notes="Widen the window — the bus factor needs at least one commit.",
+        )
+
+    # Walk the (already-sorted-desc) bucket list and accumulate.
+    factor = 0
+    cumul = 0
+    top_share: list[dict[str, str]] = []
+    half = 0.5 * total
+    for i, b in enumerate(buckets):
+        cnt = int(b.get("doc_count") or 0)
+        cumul += cnt
+        factor = i + 1
+        top_share.append({
+            "label": b.get("key") or "(anonymous)",
+            "detail": f"{cnt} commits · {cnt / total:.0%}",
+            "source": "OpenSearch",
+        })
+        if cumul >= half:
+            break
+
+    # Friendly regime label — CHAOSS guidance suggests 1-2 is fragile.
+    if factor <= 2:
+        regime = "fragile · one or two key people"
+    elif factor <= 5:
+        regime = "concentrated · few key contributors"
+    else:
+        regime = "distributed"
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"Per-author commit counts on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=(
+            f"{len(buckets)} contributors · top {factor} = "
+            f"{cumul / total:.0%} of {total} commits"
+        ),
+    ))
+
+    return MetricResult(
+        slug="absence_factor",
+        value=str(factor),
+        label=regime,
+        secondary=(
+            f"top {factor} of {len(buckets)} contributors carry "
+            f"{cumul / total:.0%} of {total} commits"
+        ),
+        queries=traces,
+        examples=top_share[:8],
+        notes=(
+            "Also known as the 'bus factor'. CHAOSS defines it as the "
+            "smallest N for which the top-N contributors' commits sum "
+            "to at least half of the project's total. A factor of 1 "
+            "means a single person could disappear and the project "
+            "loses half its bandwidth overnight."
+        ),
+    )
+
+
+# ── Metric 16 · Project Demographics ────────────────────────────────────
+
+def _metric_demographics(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """A simple population breakdown of the contributor pool: total,
+    'core' (top contributors covering 80 % of commits), 'recent
+    arrivals' (first commit in last 90 days), and 'dormant' (had
+    activity earlier but none in the last 180 days).
+    """
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    # Single query that gives us per-author first + last commit dates
+    # AND commit counts — enough to compute every demographic bucket
+    # we need.
+    body = {
+        "size": 0,
+        "query": {"term": {"origin": origin}},
+        "aggs": {
+            "by_author": {
+                "terms": {"field": "author_name", "size": 500},
+                "aggs": {
+                    "first": {"min": {"field": "grimoire_creation_date"}},
+                    "last":  {"max": {"field": "grimoire_creation_date"}},
+                },
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Per-author first/last commit + count on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or git index empty",
+        ))
+        return MetricResult(
+            slug="project_demographics", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="No git activity indexed for this repo.",
+        )
+
+    buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
+    total_contribs = len(buckets)
+    if total_contribs == 0:
+        return MetricResult(
+            slug="project_demographics", value="0", label="no contributors",
+            secondary=None, queries=traces,
+            notes="No commits indexed for this repo.",
+        )
+
+    total_commits = sum(int(b.get("doc_count") or 0) for b in buckets)
+
+    # "Core" = smallest set covering 80 % of commits (sorted desc by
+    # default). The bus factor uses 50 %; this is the wider "who
+    # carries the work" view.
+    core = 0
+    cumul = 0
+    for i, b in enumerate(buckets):
+        cumul += int(b.get("doc_count") or 0)
+        if cumul >= 0.8 * total_commits:
+            core = i + 1
+            break
+
+    # Recent arrivals — first commit in last 90 days.
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    ninety_days_ms = 90 * 86400 * 1000
+    one_eighty_days_ms = 180 * 86400 * 1000
+    recent = sum(
+        1 for b in buckets
+        if int((b.get("first") or {}).get("value") or 0) >= now_ms - ninety_days_ms
+    )
+    dormant = sum(
+        1 for b in buckets
+        if int((b.get("last") or {}).get("value") or 0) < now_ms - one_eighty_days_ms
+    )
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"Per-author first/last commit + count on {origin}",
+        query=body_text,
+        result_summary=(
+            f"{total_contribs} contributors · core {core} · "
+            f"recent {recent} · dormant {dormant}"
+        ),
+    ))
+
+    return MetricResult(
+        slug="project_demographics",
+        value=str(total_contribs),
+        label="total contributors (all-time, OpenSearch)",
+        secondary=(
+            f"core {core} (80 % of {total_commits} commits) · "
+            f"recent arrivals {recent} (last 90 d) · "
+            f"dormant {dormant} (no commit in 180 d)"
+        ),
+        queries=traces,
+        notes=(
+            "Demographics rolled up from the same git_*_enriched index "
+            "that powers the activity sparkline. 'Core' uses CHAOSS's "
+            "80 % threshold (vs the bus-factor's 50 %); 'recent' marks "
+            "first-time contributors in the last 90 days; 'dormant' "
+            "marks people whose last commit on this repo predates the "
+            "last 180 days."
+        ),
+    )
+
+
+# ── Metric 17 · Bot Activity ─────────────────────────────────────────────
+
+# Author-name substrings that almost certainly indicate a bot. The
+# match is case-insensitive via the wildcard-on-keyword pattern below.
+_BOT_PATTERNS: tuple[str, ...] = (
+    "*[bot]*",
+    "*-bot",
+    "bot-*",
+    "*github-actions*",
+    "*dependabot*",
+    "*renovate*",
+    "*pre-commit-ci*",
+    "*release-please*",
+    "*stale*",
+    "*mergify*",
+)
+
+
+def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Fraction of commits authored by recognised bots — high values
+    are not inherently bad (security bots, lockfile bots, CI signers
+    are all useful) but they distort raw commit counts."""
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    bot_should = [{"wildcard": {"author_name": p}} for p in _BOT_PATTERNS]
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"range": {"grimoire_creation_date": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "bots": {
+                "filter": {"bool": {"should": bot_should, "minimum_should_match": 1}},
+                "aggs": {
+                    "by_bot": {
+                        "terms": {"field": "author_name", "size": 10}
+                    }
+                },
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Commits matching known bot patterns on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or git index empty",
+        ))
+        return MetricResult(
+            slug="bot_activity", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="No git activity indexed for this repo.",
+        )
+
+    total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+    bot_doc_count = int(((raw.get("aggregations") or {}).get("bots") or {}).get("doc_count") or 0)
+    bot_buckets = (
+        ((raw.get("aggregations") or {}).get("bots") or {})
+        .get("by_bot", {})
+        .get("buckets", [])
+    )
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"Bot vs human commits on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=f"{bot_doc_count} bot commits of {total} total",
+    ))
+
+    if not total:
+        return MetricResult(
+            slug="bot_activity", value="—", label="no commits in window",
+            secondary=None, queries=traces,
+            notes="Widen the window to compute bot share.",
+        )
+
+    ratio = bot_doc_count / total
+    return MetricResult(
+        slug="bot_activity",
+        value=f"{ratio:.0%}",
+        label=f"bot share (last {window_days} days)",
+        secondary=f"{bot_doc_count} of {total} commits matched a bot pattern",
+        examples=[
+            {
+                "label": b.get("key") or "(unnamed)",
+                "detail": f"{int(b.get('doc_count') or 0)} commits",
+                "source": "OpenSearch",
+            }
+            for b in bot_buckets[:8]
+        ],
+        queries=traces,
+        notes=(
+            "Patterns matched: "
+            + ", ".join(repr(p) for p in _BOT_PATTERNS)
+            + ". Wildcards are applied case-sensitively to "
+            "``author_name``, so any bot whose committer name "
+            "doesn't match the list above goes uncounted. A high "
+            "share isn't bad — it can mean Dependabot is active or "
+            "release-please is signing tags."
+        ),
+    )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────
 
 REGISTRY: list[MetricSpec] = [
@@ -1791,6 +2130,56 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=True,
         compute=_metric_burstiness,
+    ),
+    # ── Phase 4 additions ────────────────────────────────────────────
+    MetricSpec(
+        slug="absence_factor",
+        name="Contributor Absence Factor",
+        category="Community",
+        chaoss_level="Level 0 · Must-have",
+        chaoss_url=(
+            "https://chaoss.community/kb/metric-contributor-absence-factor/"
+        ),
+        question="Does the project depend on a few people?",
+        description=(
+            "The 'bus factor' — smallest N contributors whose combined "
+            "commits make up at least 50 % of the project's total. "
+            "Low values flag a sustainability risk."
+        ),
+        is_time_based=True,
+        compute=_metric_absence_factor,
+    ),
+    MetricSpec(
+        slug="project_demographics",
+        name="Project Demographics",
+        category="Community",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-project-demographics/",
+        question="Who are the contributors and how active are they?",
+        description=(
+            "Population breakdown of the all-time contributor pool: "
+            "total / 'core' (top N covering 80 % of commits) / "
+            "recent arrivals (first commit in last 90 d) / dormant "
+            "(no commit in 180 d)."
+        ),
+        is_time_based=False,
+        compute=_metric_demographics,
+    ),
+    MetricSpec(
+        slug="bot_activity",
+        name="Bot Activity",
+        category="Community",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-bot-activity/",
+        question="How much of the activity is automated?",
+        description=(
+            "Share of commits authored by recognised bots "
+            "(dependabot, renovate, github-actions, *[bot]*, …). "
+            "High is not bad — it usually means active automation — "
+            "but it distorts raw commit counts."
+        ),
+        is_time_based=True,
+        compute=_metric_bot_activity,
     ),
 ]
 
