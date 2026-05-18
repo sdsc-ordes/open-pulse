@@ -52,7 +52,9 @@ def _post(path: str, body: dict[str, Any]) -> dict[str, Any] | None:
     settings = get_settings()
     url = f"{settings.opensearch_url.rstrip('/')}{path}"
     try:
-        r = client.post(url, json=body, auth=auth, headers={"Content-Type": "application/json"})
+        r = client.post(
+            url, json=body, auth=auth, headers={"Content-Type": "application/json"}
+        )
     except httpx.HTTPError as exc:
         log.info("opensearch POST %s failed: %s", path, exc)
         return None
@@ -81,9 +83,7 @@ def repo_activity(canonical_url: str) -> ActivityStats | None:
         "size": 0,
         "query": {"term": {"origin": canonical_url}},
         "aggs": {
-            "contributors": {
-                "cardinality": {"field": "author_name.keyword"}
-            },
+            "contributors": {"cardinality": {"field": "author_name.keyword"}},
             "first": {"min": {"field": "grimoire_creation_date"}},
             "last": {"max": {"field": "grimoire_creation_date"}},
             "by_month": {

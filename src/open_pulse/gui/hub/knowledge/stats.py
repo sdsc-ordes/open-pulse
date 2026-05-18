@@ -98,9 +98,7 @@ def put_cached(data_dir: Path, key: str, value: Any) -> None:
             pass
 
 
-def cached_compute(
-    data_dir: Path, key: str, compute_fn: Callable[[], Any]
-) -> Any:
+def cached_compute(data_dir: Path, key: str, compute_fn: Callable[[], Any]) -> Any:
     """Memoised computation. First hit triggers ``compute_fn``; the
     result is JSON-cached in DuckDB with a 1-hour TTL."""
     v = get_cached(data_dir, key)
@@ -194,9 +192,7 @@ def compute_top_repos_by_contributors(limit: int = 10) -> list[dict[str, Any]]:
     ]
 
 
-def _qdrant_facet_scroll(
-    collection: str, field: str, *, sample: int = 5000
-) -> Counter:
+def _qdrant_facet_scroll(collection: str, field: str, *, sample: int = 5000) -> Counter:
     """Sample up to ``sample`` points from ``collection`` and tally
     the values appearing in ``field``. Cheap aggregator that doesn't
     need full collection scans."""
@@ -208,10 +204,7 @@ def _qdrant_facet_scroll(
         return Counter()
     _, headers = pair
     settings = qdrant.get_settings()
-    url = (
-        f"{settings.qdrant_url.rstrip('/')}"
-        f"/collections/{collection}/points/scroll"
-    )
+    url = f"{settings.qdrant_url.rstrip('/')}/collections/{collection}/points/scroll"
 
     counts: Counter = Counter()
     next_offset: Any = None
@@ -242,10 +235,15 @@ def _qdrant_facet_scroll(
             break
         for p in points:
             v = (p.get("payload") or {}).get(field)
-            if isinstance(v, str) and v.strip() and v.strip() not in (
-                "NOASSERTION",
-                "None",
-                "n/a",
+            if (
+                isinstance(v, str)
+                and v.strip()
+                and v.strip()
+                not in (
+                    "NOASSERTION",
+                    "None",
+                    "n/a",
+                )
             ):
                 counts[v.strip()] += 1
             elif isinstance(v, list):
@@ -262,35 +260,23 @@ def _qdrant_facet_scroll(
 def compute_top_languages(limit: int = 10) -> list[dict[str, Any]]:
     """Top primary_language values across ``github_repos`` (sample)."""
     counts = _qdrant_facet_scroll("github_repos", "primary_language", sample=5000)
-    return [
-        {"label": label, "count": n}
-        for label, n in counts.most_common(limit)
-    ]
+    return [{"label": label, "count": n} for label, n in counts.most_common(limit)]
 
 
 def compute_top_licenses(limit: int = 10) -> list[dict[str, Any]]:
     counts = _qdrant_facet_scroll("github_repos", "license_spdx", sample=5000)
-    return [
-        {"label": label, "count": n}
-        for label, n in counts.most_common(limit)
-    ]
+    return [{"label": label, "count": n} for label, n in counts.most_common(limit)]
 
 
 def compute_top_countries(limit: int = 10) -> list[dict[str, Any]]:
     """Top country_code on ROR (worldwide bucket — the global mirror)."""
     counts = _qdrant_facet_scroll("ror_worldwide", "country_code", sample=5000)
-    return [
-        {"label": label, "count": n}
-        for label, n in counts.most_common(limit)
-    ]
+    return [{"label": label, "count": n} for label, n in counts.most_common(limit)]
 
 
 def compute_top_publication_years(limit: int = 10) -> list[dict[str, Any]]:
     counts = _qdrant_facet_scroll("infoscience_articles", "year", sample=5000)
-    return [
-        {"label": str(label), "count": n}
-        for label, n in counts.most_common(limit)
-    ]
+    return [{"label": str(label), "count": n} for label, n in counts.most_common(limit)]
 
 
 # ── Public dispatch table ────────────────────────────────────────────────

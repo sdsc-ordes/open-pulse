@@ -180,7 +180,7 @@ SPARQL: list[dict[str, str]] = [
         "body": "# Replace ORG_NAME with the value found in 'Distinct authors'.\n"
         "PREFIX schema: <http://schema.org/>\n"
         "SELECT ?license (COUNT(DISTINCT ?repo) AS ?n) WHERE {\n"
-        '  ?repo a schema:SoftwareSourceCode ;\n'
+        "  ?repo a schema:SoftwareSourceCode ;\n"
         '        (schema:author|schema:publisher)/schema:name "sdsc-ordes" ;\n'
         "        schema:license ?license .\n"
         "}\n"
