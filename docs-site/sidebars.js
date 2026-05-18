@@ -11,10 +11,14 @@ const sidebars = {
       label: "Operations",
       items: [
         "operations/index",
+        "operations/deployment",
         "operations/branch-model",
+        "operations/register-a-node",
+        "operations/release-checklist",
         "operations/migration-from-static-docs"
       ]
-    }
+    },
+    "community/index"
   ]
 };
 
