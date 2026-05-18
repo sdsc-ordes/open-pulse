@@ -130,7 +130,10 @@ CATEGORIES: tuple[dict[str, str], ...] = (
     },
     {
         "name": "Organization",
-        "css": "pill",
+        # ``pill-neutral`` is the styled gray variant — using just
+        # ``pill`` would render the chip without a background, since
+        # the base ``.pill`` rule alone has no colour fill.
+        "css": "pill-neutral",
         "blurb": "How are contributors organised across orgs?",
         "url": "https://chaoss.community/kbtopic/organization/",
         # Office building.

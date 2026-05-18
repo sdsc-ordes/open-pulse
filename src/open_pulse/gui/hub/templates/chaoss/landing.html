@@ -59,19 +59,19 @@
     <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
       <div class="card-title">What we measure</div>
       {# Filter pill row: click to toggle visibility of each topic. #}
-      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-        {% for cat in categories %}
+      <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+        {% for g in groups %}
           {# Inner quotes are single because the outer attribute is
              double-quoted. See repo.html for the longer note. #}
           <button type="button"
-                  class="pill {{ cat.css }}"
-                  @click="toggle('{{ cat.name }}')"
-                  :class="active.includes('{{ cat.name }}') ? '' : 'is-inactive'"
+                  class="pill {{ g.css }}"
+                  @click="toggle('{{ g.name }}')"
+                  :class="active.includes('{{ g.name }}') ? '' : 'is-inactive'"
                   style="font-size: 11px; cursor: pointer; user-select: none; padding: 3px 10px;">
-            {{ cat.name }}
+            {{ g.name }}<span class="pill-count">{{ g.metrics | length }}</span>
           </button>
         {% endfor %}
-        <button type="button" class="pill"
+        <button type="button" class="pill pill-neutral"
                 @click="reset()"
                 style="font-size: 11px; cursor: pointer; padding: 3px 10px;">
           all
