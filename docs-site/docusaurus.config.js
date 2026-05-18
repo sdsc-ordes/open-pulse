@@ -19,10 +19,13 @@ const config = {
 
   onBrokenLinks: "throw",
   markdown: {
+    mermaid: true,
     hooks: {
       onBrokenMarkdownLinks: "throw"
     }
   },
+
+  themes: ["@docusaurus/theme-mermaid"],
 
   // Match the landing's typography (Manrope + JetBrains Mono).
   headTags: [
