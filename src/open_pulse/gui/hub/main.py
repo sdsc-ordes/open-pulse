@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .auth import _COOKIE_NAME, clear_session, get_settings, require_auth
-from .routes import crawler, databases, pipeline, projects, services, stack, stats
+from .routes import admin, crawler, databases, pipeline, projects, services, stack, stats
 
 _HERE = Path(__file__).parent
 log = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ app.include_router(pipeline.router)
 app.include_router(stack.router)
 app.include_router(stats.router)
 app.include_router(crawler.router)
+app.include_router(admin.router)
 
 
 @app.get("/healthz")
@@ -154,6 +155,12 @@ def logs_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
     return templates.TemplateResponse(request, "settings.html", {"page": "settings"})
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
+    """Resources dashboard — disk / RAM / CPU / docker. Polls every 15 min."""
+    return templates.TemplateResponse(request, "admin.html", {"page": "admin"})
 
 
 @app.post("/logout")
