@@ -283,87 +283,133 @@
           </header>
 
           <div class="chaoss-modal-body">
+            {# ── 1. Lede: the CHAOSS question this metric answers ─── #}
             <p class="chaoss-modal-question">{{ spec.question }}</p>
 
-            <div style="display: flex; flex-direction: column; gap: 12px;">
-              {% for t in traces %}
-        {#
-          The trace card has an x-data scope that exposes the query
-          text as a local variable ``q``. That keeps the copy
-          button's @click expression simple (no tojson-inside-an-
-          attribute parsing trap) and survives queries that contain
-          quotes, newlines, and SPARQL angle brackets.
-        #}
-        <div class="chaoss-trace"
-             x-data='{ q: {{ t.query | tojson }}, copied: false }'>
-          <div class="chaoss-trace-head">
-            <span class="pill pill-info" style="font-size: 10px;">{{ t.store }}</span>
-            <span class="chaoss-trace-title">{{ t.title | md }}</span>
-            <span class="chaoss-trace-summary-line {% if t.error %}is-error{% endif %}">
-              {% if t.error %}error: {{ t.error }}{% else %}{{ t.result_summary | md }}{% endif %}
-            </span>
-          </div>
-          <pre class="chaoss-trace-pre"><code
-              class="hljs language-{% if t.engine == 'cypher' %}cypher{% elif t.engine == 'sparql' %}sparql{% else %}json{% endif %}">{{ t.query }}</code></pre>
-          <div class="chaoss-trace-actions">
-            <a class="btn btn-tiny" href="{{ t.deep_link }}" title="Open this query in the /databases console and run it">Run query</a>
-            <button class="btn btn-tiny"
-                    type="button"
-                    @click="navigator.clipboard.writeText(q); copied = true; setTimeout(() => copied = false, 1200)"
-                    x-text="copied ? 'copied!' : 'copy query'"></button>
-          </div>
-        </div>
-      {% endfor %}
+            {# ── 2. Methodology card — the always-visible explanation
+                  of what the metric *is* and how the values stitch
+                  together. This is the most important block for a
+                  visitor who lands cold. #}
+            {% if spec.description or result.notes or result.unification %}
+              <section class="chaoss-modal-section chaoss-modal-method">
+                <h4 class="chaoss-modal-section-title">Methodology</h4>
+                {% if spec.description %}
+                  <p class="chaoss-modal-prose">{{ spec.description | md }}</p>
+                {% endif %}
+                {% if result.notes %}
+                  <p class="chaoss-modal-prose">{{ result.notes | md }}</p>
+                {% endif %}
+                {% if result.unification %}
+                  <div class="chaoss-modal-combine">
+                    <div class="chaoss-modal-combine-label">How values combine</div>
+                    <div class="chaoss-modal-combine-text">{{ result.unification | md }}</div>
+                  </div>
+                {% endif %}
+              </section>
+            {% endif %}
 
-      {# ── Unification footer ──────────────────────────────────────
-         What the visitor walked through above is the raw store
-         queries. This footer states explicitly how those values
-         combine into the headline number, so the dashboard isn't
-         just "here's three numbers, pick one". #}
-      {% if result.unification %}
-        <div class="chaoss-unification">
-          <div class="chaoss-unification-label">How values combine</div>
-          <div class="chaoss-unification-text">{{ result.unification | md }}</div>
-        </div>
-      {% endif %}
+            {# ── 3. Queries section — one expander per trace.
+                  Closed by default so the modal stays scannable. The
+                  intro paragraph + summary line on the closed
+                  expander give the reader enough to know whether to
+                  open each one. #}
+            <section class="chaoss-modal-section">
+              <h4 class="chaoss-modal-section-title">
+                Queries
+                <span class="chaoss-modal-section-count">{{ traces|length }}</span>
+              </h4>
+              <p class="chaoss-modal-prose chaoss-modal-prose-muted">
+                We ran these against the open-pulse data plane to get the
+                numbers shown above. Click any row to see its query and
+                copy or re-run it in <a href="/databases">the /databases console</a>.
+              </p>
 
-      {# ── Reproducibility recipes ────────────────────────────────
-         When the metric supplies recipes, render them as a tabbed
-         code block. Each script fetches every trace's raw response,
-         extracts the relevant numbers, applies the unification, and
-         prints the headline — pre-filled with everything except the
-         OPENPULSE_TOKEN env var. #}
-      {% if result.recipes %}
-        <div class="chaoss-recipe" x-data="{ lang: 'python', copied: false }">
-          <div class="chaoss-recipe-head">
-            <span class="chaoss-recipe-label">Reproduce end-to-end</span>
-            <div class="chaoss-recipe-tabs">
-              {% for L, pretty in [('python', 'python'), ('bash', 'bash'), ('js', 'node.js')] %}
-                <button type="button"
-                        @click="lang = '{{ L }}'"
-                        :class="lang === '{{ L }}' ? 'is-active' : ''">{{ pretty }}</button>
-              {% endfor %}
-            </div>
-            <button type="button" class="btn btn-tiny chaoss-recipe-copy"
-                    @click="navigator.clipboard.writeText(scripts[lang]); copied = true; setTimeout(() => copied = false, 1200)"
-                    x-text="copied ? 'copied!' : 'copy'"></button>
+              <div class="chaoss-trace-list">
+                {% for t in traces %}
+                  {# Each trace gets its own Alpine scope so the local
+                     ``q`` / ``open`` / ``copied`` flags don't collide
+                     across traces. ``open: false`` keeps everything
+                     collapsed until the visitor expands. #}
+                  <div class="chaoss-trace"
+                       x-data='{ q: {{ t.query | tojson }}, open: false, copied: false }'>
+                    <button type="button" class="chaoss-trace-head"
+                            @click="open = !open"
+                            :class="open ? 'is-open' : ''">
+                      <span class="chaoss-trace-chevron" :class="open ? 'is-open' : ''" aria-hidden="true">▸</span>
+                      <span class="pill pill-info chaoss-trace-store">{{ t.store }}</span>
+                      <span class="chaoss-trace-title">{{ t.title | md }}</span>
+                      <span class="chaoss-trace-summary-line {% if t.error %}is-error{% endif %}">
+                        {% if t.error %}error: {{ t.error }}{% else %}{{ t.result_summary | md }}{% endif %}
+                      </span>
+                    </button>
+                    <div x-show="open" x-cloak class="chaoss-trace-body"
+                         x-transition:enter="chaoss-trace-body-enter"
+                         x-transition:enter-start="chaoss-trace-body-enter-start"
+                         x-transition:enter-end="chaoss-trace-body-enter-end">
+                      <pre class="chaoss-trace-pre"><code
+                          class="hljs language-{% if t.engine == 'cypher' %}cypher{% elif t.engine == 'sparql' %}sparql{% else %}json{% endif %}">{{ t.query }}</code></pre>
+                      <div class="chaoss-trace-actions">
+                        <a class="btn btn-tiny" href="{{ t.deep_link }}"
+                           title="Open this query in the /databases console and run it">Run query</a>
+                        <button class="btn btn-tiny"
+                                type="button"
+                                @click="navigator.clipboard.writeText(q); copied = true; setTimeout(() => copied = false, 1200)"
+                                x-text="copied ? 'copied!' : 'copy query'"></button>
+                      </div>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            </section>
+
+            {# ── 4. Reproduce end-to-end. Closed by default — heavy
+                  block (full script per language) the visitor opens
+                  only if they want to run it locally. #}
+            {% if result.recipes %}
+              <section class="chaoss-modal-section">
+                <details class="chaoss-recipe-details" x-data="{ lang: 'python', copied: false }">
+                  <summary class="chaoss-recipe-summary">
+                    <span class="chaoss-trace-chevron" aria-hidden="true">▸</span>
+                    <span>Reproduce end-to-end</span>
+                    <span class="chaoss-trace-summary-line">runnable script · python / bash / node.js</span>
+                  </summary>
+                  <p class="chaoss-modal-prose chaoss-modal-prose-muted" style="margin-top: 10px;">
+                    Set <code>OPENPULSE_TOKEN</code> before running. The script fires every
+                    query above, extracts the relevant value from each response, and applies
+                    the same combine logic the dashboard does — so it lands on the same
+                    headline.
+                  </p>
+                  <div class="chaoss-recipe">
+                    <div class="chaoss-recipe-head">
+                      <div class="chaoss-recipe-tabs">
+                        {% for L, pretty in [('python', 'python'), ('bash', 'bash'), ('js', 'node.js')] %}
+                          <button type="button"
+                                  @click="lang = '{{ L }}'"
+                                  :class="lang === '{{ L }}' ? 'is-active' : ''">{{ pretty }}</button>
+                        {% endfor %}
+                      </div>
+                      <button type="button" class="btn btn-tiny chaoss-recipe-copy"
+                              @click="navigator.clipboard.writeText(scripts[lang]); copied = true; setTimeout(() => copied = false, 1200)"
+                              x-text="copied ? 'copied!' : 'copy'"></button>
+                    </div>
           </div>
           {# Each language has its own <pre> so highlight.js can run
              once on each at expander-open time without re-painting.
              ``scripts`` is exposed via x-init so the copy button can
              read the active text directly. #}
-          <div x-init="$data.scripts = {
-                 python: $refs.recPy.textContent,
-                 bash:   $refs.recBash.textContent,
-                 js:     $refs.recJs.textContent,
-               }">
-            <pre x-show="lang === 'python'"><code x-ref="recPy"  class="language-python">{{ result.recipes.python }}</code></pre>
-            <pre x-show="lang === 'bash'"  ><code x-ref="recBash" class="language-bash">{{ result.recipes.bash }}</code></pre>
-            <pre x-show="lang === 'js'"    ><code x-ref="recJs"   class="language-javascript">{{ result.recipes.js }}</code></pre>
-          </div>
-        </div>
-      {% endif %}
-            </div>
+                    <div x-init="$data.scripts = {
+                           python: $refs.recPy.textContent,
+                           bash:   $refs.recBash.textContent,
+                           js:     $refs.recJs.textContent,
+                         }">
+                      <pre x-show="lang === 'python'"><code x-ref="recPy"  class="language-python">{{ result.recipes.python }}</code></pre>
+                      <pre x-show="lang === 'bash'"  ><code x-ref="recBash" class="language-bash">{{ result.recipes.bash }}</code></pre>
+                      <pre x-show="lang === 'js'"    ><code x-ref="recJs"   class="language-javascript">{{ result.recipes.js }}</code></pre>
+                    </div>
+                  </div>
+                </details>
+              </section>
+            {% endif %}
           </div>
         </div>
       </div>
