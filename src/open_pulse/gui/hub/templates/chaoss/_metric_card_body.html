@@ -234,19 +234,18 @@
     before we ask hljs to paint it). The same scope holds the open
     state so each card has its own modal lifecycle.
   #}
+  {# Methodology modal scope. ``show()`` only flips the visibility +
+     locks the page scroll. Highlight.js + the line-numbers plugin
+     are invoked from each trace / recipe expander on its own toggle
+     (see ``chaossHighlight`` below) so the <code> element is
+     visible (non-zero clientHeight) by the time the line-numbers
+     plugin measures it — without that, the plugin builds an empty
+     gutter and the syntax colours never paint cleanly. #}
   <div class="chaoss-methodology" x-data="{
          open: false,
          show() {
            this.open = true;
            document.body.classList.add('chaoss-modal-lock');
-           this.$nextTick(() => {
-             if (!window.hljs) return;
-             document.querySelectorAll('.chaoss-modal[data-metric=&quot;{{ spec.slug }}&quot;] pre code').forEach(c => {
-               c.removeAttribute('data-highlighted');
-               try { window.hljs.highlightElement(c); } catch(_) {}
-               try { if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(c); } catch(_) {}
-             });
-           });
          },
          hide() {
            this.open = false;
@@ -326,14 +325,19 @@
 
               <div class="chaoss-trace-list">
                 {% for t in traces %}
-                  {# Each trace gets its own Alpine scope so the local
-                     ``q`` / ``open`` / ``copied`` flags don't collide
-                     across traces. ``open: false`` keeps everything
-                     collapsed until the visitor expands. #}
+                  {# Each trace gets its own Alpine scope. ``open``
+                     drives the expander's x-show; on the very first
+                     ``open = true`` we paint the code via
+                     ``chaossHighlight`` (highlight.js + line-numbers
+                     plugin). Doing it here, not in the parent's
+                     show(), means the <pre><code> is visible and
+                     measurable when the plugin runs — that's what the
+                     line-numbers gutter needs. #}
                   <div class="chaoss-trace"
-                       x-data='{ q: {{ t.query | tojson }}, open: false, copied: false }'>
+                       x-data='{ q: {{ t.query | tojson }}, open: false, copied: false, painted: false }'
+                       x-id="['trace-body']">
                     <button type="button" class="chaoss-trace-head"
-                            @click="open = !open"
+                            @click="open = !open; if (open && !painted) { painted = true; $nextTick(() => chaossHighlight($refs.body)); }"
                             :class="open ? 'is-open' : ''">
                       <span class="chaoss-trace-chevron" :class="open ? 'is-open' : ''" aria-hidden="true">▸</span>
                       <span class="pill pill-info chaoss-trace-store">{{ t.store }}</span>
@@ -342,7 +346,7 @@
                         {% if t.error %}error: {{ t.error }}{% else %}{{ t.result_summary | md }}{% endif %}
                       </span>
                     </button>
-                    <div x-show="open" x-cloak class="chaoss-trace-body"
+                    <div x-ref="body" x-show="open" x-cloak class="chaoss-trace-body"
                          x-transition:enter="chaoss-trace-body-enter"
                          x-transition:enter-start="chaoss-trace-body-enter-start"
                          x-transition:enter-end="chaoss-trace-body-enter-end">
@@ -367,7 +371,9 @@
                   only if they want to run it locally. #}
             {% if result.recipes %}
               <section class="chaoss-modal-section">
-                <details class="chaoss-recipe-details" x-data="{ lang: 'python', copied: false }">
+                <details class="chaoss-recipe-details"
+                         x-data="{ lang: 'python', copied: false, painted: false }"
+                         @toggle="if ($el.open && !painted) { painted = true; $nextTick(() => chaossHighlight($el)); }">
                   <summary class="chaoss-recipe-summary">
                     <span class="chaoss-trace-chevron" aria-hidden="true">▸</span>
                     <span>Reproduce end-to-end</span>
