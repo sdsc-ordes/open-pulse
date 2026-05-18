@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 PREFIXES = """\
 PREFIX schema: <http://schema.org/>
 PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>
 """
 
 
@@ -269,14 +270,14 @@ ORDER BY DESC(?count) ?value""",
     ),
     Facet(
         key="discipline",
-        label="Discipline / Category",
-        description="schema:applicationCategory — discipline-level tags.",
-        predicate_path="schema:applicationCategory",
+        label="Discipline",
+        description="pulse:discipline — discipline / research-area tag on the repo.",
+        predicate_path="pulse:discipline",
         values_query=PREFIXES
         + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
-        schema:applicationCategory ?value .
+        pulse:discipline ?value .
 }
 GROUP BY ?value
 ORDER BY DESC(?count) ?value""",
