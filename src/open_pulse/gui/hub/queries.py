@@ -27,6 +27,7 @@ PREFIXES = """\
 PREFIX schema: <http://schema.org/>
 PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>
+PREFIX org:    <http://www.w3.org/ns/org#>
 """
 
 
@@ -243,13 +244,40 @@ FACETS: tuple[Facet, ...] = (
     Facet(
         key="organization",
         label="Organization",
-        description="Authors and publishers as schema:Organization (or anything with schema:name).",
-        predicate_path="(schema:author|schema:publisher)/schema:name",
+        description=(
+            "Owning organisation per ``pulse:ownedBy``, filtered to nodes "
+            "typed as ``org:Organization`` (GitHub orgs only — user-owned "
+            "repos are excluded since their pulse:ownedBy points at a "
+            "schema:Person)."
+        ),
+        predicate_path="pulse:ownedBy",
         values_query=PREFIXES
         + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
-        (schema:author|schema:publisher)/schema:name ?value .
+        pulse:ownedBy ?org .
+  ?org  a            org:Organization ;
+        schema:name  ?value .
+}
+GROUP BY ?value
+ORDER BY DESC(?count) ?value""",
+    ),
+    Facet(
+        key="owner_user",
+        label="Owner (personal)",
+        description=(
+            "GitHub users that own one or more repositories — the "
+            "``pulse:ownedBy`` target is a ``schema:Person`` (personal "
+            "account), not an organisation."
+        ),
+        predicate_path="pulse:ownedBy",
+        values_query=PREFIXES
+        + """\
+SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
+  ?repo a schema:SoftwareSourceCode ;
+        pulse:ownedBy ?user .
+  ?user a            schema:Person ;
+        schema:name  ?value .
 }
 GROUP BY ?value
 ORDER BY DESC(?count) ?value""",
