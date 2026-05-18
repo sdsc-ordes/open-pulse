@@ -41,10 +41,15 @@
     <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
       <span class="card-meta" style="font-size: 12px; margin-right: 6px;">show:</span>
       {% for cat in categories %}
+        {# Inner quotes are single because the outer @click / :class
+           attributes are double-quoted. ``tojson`` would emit ``"…"``
+           which would break the attribute parser at the first inner
+           quote — single-quote the name directly. Our four topic
+           names contain no apostrophes so this is safe. #}
         <button type="button"
                 class="pill {{ cat.css }}"
-                @click="toggle({{ cat.name | tojson }})"
-                :class="active.includes({{ cat.name | tojson }}) ? '' : 'is-inactive'"
+                @click="toggle('{{ cat.name }}')"
+                :class="active.includes('{{ cat.name }}') ? '' : 'is-inactive'"
                 style="font-size: 11px; cursor: pointer; user-select: none; padding: 3px 10px;">
           {{ cat.name }}
         </button>
@@ -57,7 +62,7 @@
     </div>
 
     {% for g in groups %}
-      <section x-show="active.includes({{ g.name | tojson }})" style="margin-top: 14px;">
+      <section x-show="active.includes('{{ g.name }}')" style="margin-top: 14px;">
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
           {% if g.icon %}
             <svg class="chaoss-topic-icon" fill="none" stroke="currentColor"
