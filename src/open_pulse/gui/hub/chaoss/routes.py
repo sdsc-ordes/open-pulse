@@ -60,24 +60,48 @@ CATEGORIES: tuple[dict[str, str], ...] = (
         "css": "pill-info",
         "blurb": "Who builds and maintains the project?",
         "url": "https://chaoss.community/kbtopic/contributor/",
+        # Two-person silhouette — keeps the icon readable at 18px.
+        "icon": (
+            "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z "
+            "M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1 "
+            "M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z "
+            "M22 21v-1a5 5 0 0 0-4-4.9"
+        ),
     },
     {
         "name": "Software",
         "css": "pill-accent",
         "blurb": "What can users do with the code itself?",
         "url": "https://chaoss.community/kbtopic/software/",
+        # Stacked package / box.
+        "icon": (
+            "M12 3l9 4.5-9 4.5-9-4.5 9-4.5z "
+            "M3 12l9 4.5 9-4.5 "
+            "M3 16.5l9 4.5 9-4.5"
+        ),
     },
     {
         "name": "Lifecycle",
         "css": "pill-warn",
         "blurb": "How does work flow through the project?",
         "url": "https://chaoss.community/kbtopic/lifecycle/",
+        # Circular arrow.
+        "icon": (
+            "M21 12a9 9 0 1 1-3-6.7 "
+            "M21 4v5h-5"
+        ),
     },
     {
         "name": "Organization",
         "css": "pill",
         "blurb": "How are contributors organised across orgs?",
         "url": "https://chaoss.community/kbtopic/organization/",
+        # Office building.
+        "icon": (
+            "M3 21V7l9-4 9 4v14 "
+            "M9 21V13h6v8 "
+            "M9 9h.01 M15 9h.01"
+        ),
     },
 )
 

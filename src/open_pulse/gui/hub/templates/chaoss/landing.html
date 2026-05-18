@@ -80,7 +80,13 @@
     {% for g in groups %}
       <section x-show="active.includes({{ g.name | tojson }})"
                style="margin-top: 18px;">
-        <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          {% if g.icon %}
+            <svg class="chaoss-topic-icon" fill="none" stroke="currentColor"
+                 stroke-width="1.7" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="{{ g.icon }}" />
+            </svg>
+          {% endif %}
           <span class="pill {{ g.css }}" style="font-size: 10px;">{{ g.name }}</span>
           <span class="card-meta" style="font-size: 12px;">{{ g.blurb }}</span>
           {% if g.url %}

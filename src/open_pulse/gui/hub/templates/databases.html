@@ -715,6 +715,50 @@ function dbConsole() {
 
       await Promise.all([this.loadExamples(), this.loadSaved()]);
       this.recomputeGutter();
+
+      // Deep-link handler: if the page was opened with a fragment
+      // like ``#engine=cypher&q=…&os_mode=dsl`` (e.g. from a "Open
+      // in /databases" button on the CHAOSS dashboard), switch to
+      // that engine, spawn a fresh tab seeded with the query, and
+      // apply os_mode. Clears the fragment afterwards so the deep-
+      // link doesn't fire again on every reload.
+      this.consumeDeepLink();
+    },
+
+    consumeDeepLink() {
+      const raw = (window.location.hash || '').replace(/^#/, '');
+      if (!raw) return;
+      const params = new URLSearchParams(raw);
+      const engine = params.get('engine');
+      const q = params.get('q');
+      const osMode = params.get('os_mode');
+      if (!engine || !this.engines.includes(engine)) return;
+
+      // Switch engine first so the new tab is filed under it.
+      this.engine = engine;
+      if (osMode === 'sql' || osMode === 'dsl') {
+        this.osMode = osMode;
+      }
+      // Spawn a fresh tab seeded with the deep-linked query — we
+      // don't want to clobber whatever the user had in their
+      // scratch tab.
+      if (q) {
+        const t = {
+          id: newTabId(),
+          name: 'from CHAOSS',
+          engine,
+          content: q,
+        };
+        this.tabs.push(t);
+        saveTabs(this.tabs);
+        this.switchTab(t.id);
+      } else {
+        const found = this.tabs.find(tt => tt.engine === engine);
+        if (found) this.switchTab(found.id);
+      }
+
+      // Strip the fragment so a reload doesn't re-open the link.
+      history.replaceState(null, '', window.location.pathname + window.location.search);
     },
 
     // ── library (server-side SQLite) ─────────────────────────────
