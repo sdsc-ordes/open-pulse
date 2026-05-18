@@ -3151,6 +3151,550 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────
+#  Phase 6 — six more CHAOSS Level-0 metrics: contributor-cadence
+#  partitions (inactive / occasional) and PR-lifecycle counts
+#  (accepted / declined / duration / time-to-close).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+# ── Metric 23 · Inactive Contributors ────────────────────────────────────
+
+def _metric_inactive_contributors(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Distinct authors who *have* contributed to this repo but whose
+    most recent commit predates the window. Mirrors the "dormant"
+    bucket in ``project_demographics`` as a standalone metric.
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+    traces: list[QueryTrace] = []
+    ic_recipes = None
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "query": {"term": {"origin": origin}},
+        "aggs": {
+            "by_author": {
+                "terms": {"field": "author_name", "size": 1000},
+                "aggs": {"last": {"max": {"field": "grimoire_creation_date"}}},
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Last-commit per author on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or git index empty",
+        ))
+        return MetricResult(
+            slug="inactive_contributors", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="No git activity indexed for this repo.",
+            unification="Single OpenSearch terms agg + max-date sub-agg.",
+        )
+
+    buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
+    inactive = [
+        b for b in buckets
+        if int((b.get("last") or {}).get("value") or 0) < cutoff_ms
+    ]
+    n_total = len(buckets)
+    n_inactive = len(inactive)
+    ratio = (n_inactive / n_total) if n_total else 0.0
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"Authors whose last commit predates {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=f"{n_inactive} inactive of {n_total} all-time contributors",
+    ))
+
+    examples: list[dict[str, str]] = []
+    for b in inactive[:8]:
+        ts_s = int((b.get("last") or {}).get("value") or 0) // 1000
+        examples.append({
+            "label":  b.get("key") or "(anonymous)",
+            "detail": datetime.fromtimestamp(ts_s, tz=timezone.utc).date().isoformat() if ts_s else "",
+            "source": "OpenSearch",
+        })
+
+    # Inverse tone — high inactive share is a red flag.
+    tone = "good" if ratio < 0.3 else ("warn" if ratio < 0.7 else "danger")
+    ic_recipes = _build_recipes(
+        label="inactive_contributors",
+        traces=traces,
+        extracts=[{"python": "r1", "bash": ".", "js": "r1"}],
+        combine={
+            "python": (
+                "cutoff_ms = int((__import__('time').time() - "
+                + str(window_days) + " * 86400) * 1000)\n"
+                "buckets = v1.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('buckets', [])\n"
+                "inactive = [b for b in buckets if int((b.get('last') or {}).get('value') or 0) < cutoff_ms]\n"
+                "headline = len(inactive)"
+            ),
+            "bash": (
+                f'cutoff_ms=$(python3 -c "import time; print(int((time.time() - {window_days} * 86400) * 1000))")\n'
+                'headline=$(echo "$v1" | jq --argjson c "$cutoff_ms" '
+                "'[.raw.aggregations.by_author.buckets[] | select((.last.value // 0) < $c)] | length')"
+            ),
+            "js": (
+                f"const cutoffMs = Date.now() - {window_days} * 86400 * 1000;\n"
+                "const buckets = v1.raw?.aggregations?.by_author?.buckets || [];\n"
+                "const headline = buckets.filter(b => (b.last?.value || 0) < cutoffMs).length;"
+            ),
+        },
+    )
+
+    return MetricResult(
+        slug="inactive_contributors",
+        value=str(n_inactive),
+        label=f"no commit in last {window_days} days",
+        secondary=f"{n_inactive} of {n_total} all-time contributors · {ratio:.0%}",
+        queries=traces,
+        examples=examples,
+        recipes=ic_recipes,
+        visual={"kind": "donut", "fraction": ratio, "tone": tone},
+        headline_tone=tone,
+        unification=(
+            "Single **OpenSearch** terms agg on ``author_name`` with a "
+            "``max(grimoire_creation_date)`` sub-agg. Bucket is "
+            "inactive if its max-date predates the cutoff (now − "
+            f"{window_days}d), counted client-side."
+        ),
+        notes=(
+            "Counts authors who **have** contributed at some point but "
+            "whose most recent commit is older than the window. Pair "
+            "with ``contributors`` for the live-side balance. A rising "
+            "inactive share is a sustainability warning signal."
+        ),
+    )
+
+
+# ── Metric 24 · Occasional Contributors ──────────────────────────────────
+
+_OCCASIONAL_THRESHOLD = 4
+
+
+def _metric_occasional_contributors(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Authors with ≤ N commits in window — the "drive-by" segment.
+
+    Threshold (4) matches CHAOSS's stock Occasional-Contributors
+    definition. Counts distinct authors; a single author with 3
+    commits counts once.
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+    oc_recipes = None
+    threshold = _OCCASIONAL_THRESHOLD
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"range": {"grimoire_creation_date": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_author": {"terms": {"field": "author_name", "size": 1000}}
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Per-author commit counts on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or git index empty",
+        ))
+        return MetricResult(
+            slug="occasional_contributors", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="No git activity indexed for this repo.",
+            unification=(
+                f"Terms agg on ``author_name`` filtered to last {window_days} d, "
+                f"client-side filter to ``doc_count ≤ {threshold}``."
+            ),
+        )
+
+    buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
+    occasional = [b for b in buckets if int(b.get("doc_count") or 0) <= threshold]
+    n_total = len(buckets)
+    n_occasional = len(occasional)
+    ratio = (n_occasional / n_total) if n_total else 0.0
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"Authors with ≤ {threshold} commits in last {window_days} d",
+        query=body_text,
+        result_summary=f"{n_occasional} occasional of {n_total} active contributors",
+    ))
+
+    examples: list[dict[str, str]] = []
+    for b in occasional[:8]:
+        cnt = int(b.get("doc_count") or 0)
+        examples.append({
+            "label":  b.get("key") or "(anonymous)",
+            "detail": f"{cnt} commit" + ("s" if cnt != 1 else ""),
+            "source": "OpenSearch",
+        })
+
+    oc_recipes = _build_recipes(
+        label="occasional_contributors",
+        traces=traces,
+        extracts=[{"python": "r1", "bash": ".", "js": "r1"}],
+        combine={
+            "python": (
+                "buckets = v1.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('buckets', [])\n"
+                f"headline = sum(1 for b in buckets if int(b.get('doc_count') or 0) <= {threshold})"
+            ),
+            "bash": (
+                'headline=$(echo "$v1" | jq '
+                f"'[.raw.aggregations.by_author.buckets[] | select(.doc_count <= {threshold})] | length')"
+            ),
+            "js": (
+                "const buckets = v1.raw?.aggregations?.by_author?.buckets || [];\n"
+                f"const headline = buckets.filter(b => (b.doc_count || 0) <= {threshold}).length;"
+            ),
+        },
+    )
+
+    return MetricResult(
+        slug="occasional_contributors",
+        value=str(n_occasional),
+        label=f"≤ {threshold} commits in window",
+        secondary=f"{n_occasional} of {n_total} active contributors · {ratio:.0%}",
+        queries=traces,
+        examples=examples,
+        recipes=oc_recipes,
+        unification=(
+            f"Terms agg on ``author_name`` filtered to the window, then "
+            f"a client-side count of buckets whose ``doc_count`` is at "
+            f"most {threshold}."
+        ),
+        notes=(
+            f"Threshold {threshold} mirrors the CHAOSS catalogue's "
+            "**Occasional Contributors** definition (drive-by "
+            "contributors). A high occasional-vs-core ratio means "
+            "outreach is working but retention isn't."
+        ),
+    )
+
+
+# ── Helpers for PR-lifecycle metrics ─────────────────────────────────────
+
+def _pr_count_metric(
+    full: str,
+    window_days: int,
+    *,
+    slug: str,
+    label: str,
+    extra_must: list[dict[str, Any]],
+    date_field: str,
+    series_unit: str,
+    notes: str,
+    unification: str,
+) -> MetricResult:
+    """Shared shape for the two PR-count metrics (accepted / declined).
+    Both filter on ``pull_request:true`` plus an extra clause and a
+    date range; both expose a monthly histogram sparkline.
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "track_total_hits": True,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"term": {"pull_request": True}},
+                    *extra_must,
+                    {"range": {date_field: {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_month": {
+                "date_histogram": {
+                    "field": date_field,
+                    "calendar_interval": "month",
+                    "min_doc_count": 0,
+                }
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"{label} on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or github index empty",
+        ))
+        return MetricResult(
+            slug=slug, value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="github_*_enriched has no documents for this repo yet.",
+            unification=unification,
+        )
+    total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+    monthly: list[dict[str, Any]] = []
+    for b in ((raw.get("aggregations") or {}).get("by_month") or {}).get("buckets", []):
+        ts_ms = int(b.get("key") or 0)
+        cnt = int(b.get("doc_count") or 0)
+        monthly.append({
+            "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
+            "value": cnt,
+        })
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"{label} on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=f"{total} {series_unit}",
+    ))
+    recipes = _build_recipes(
+        label=slug,
+        traces=traces,
+        extracts=[{
+            "python": "r1.get('raw', {}).get('hits', {}).get('total', {}).get('value', 0)",
+            "bash":   ".raw.hits.total.value // 0",
+            "js":     "r1.raw?.hits?.total?.value ?? 0",
+        }],
+        combine={
+            "python": "headline = v1",
+            "bash":   "headline=$v1",
+            "js":     "const headline = v1;",
+        },
+    )
+    return MetricResult(
+        slug=slug,
+        value=str(total),
+        label=f"{label.lower()} (last {window_days} d)",
+        secondary=None,
+        queries=traces,
+        series=monthly,
+        series_unit=series_unit,
+        recipes=recipes,
+        unification=unification,
+        notes=notes,
+    )
+
+
+# ── Metric 25 · Change Request Accepted ──────────────────────────────────
+
+def _metric_cr_accepted(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    return _pr_count_metric(
+        full, window_days,
+        slug="cr_accepted",
+        label="Merged PRs",
+        extra_must=[{"term": {"merged": True}}],
+        date_field="merge_date",
+        series_unit="merged PRs",
+        unification=(
+            "Count of **OpenSearch** github docs with ``pull_request:true`` "
+            "+ ``merged:true`` + ``merge_date`` in the window."
+        ),
+        notes=(
+            "The acceptance half of ``closure_ratio`` — PRs that "
+            "actually shipped. Pair with ``cr_declined`` to read the "
+            "accept/reject split."
+        ),
+    )
+
+
+# ── Metric 26 · Change Request Declined ──────────────────────────────────
+
+def _metric_cr_declined(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    return _pr_count_metric(
+        full, window_days,
+        slug="cr_declined",
+        label="Declined PRs",
+        extra_must=[{"term": {"state": "closed"}}, {"term": {"merged": False}}],
+        date_field="closed_at",
+        series_unit="declined PRs",
+        unification=(
+            "Count of **OpenSearch** github docs with ``pull_request:true`` "
+            "+ ``state:closed`` + ``merged:false`` + ``closed_at`` in window."
+        ),
+        notes=(
+            "Closed-without-merge PRs — explicit rejections or stale "
+            "work the maintainers closed without shipping. The other "
+            "half of ``cr_accepted``."
+        ),
+    )
+
+
+# ── Shared PR percentile metric (cr_duration, pr_time_to_close) ──────────
+
+def _pr_percentile_metric(
+    full: str,
+    window_days: int,
+    *,
+    slug: str,
+    label: str,
+    extra_must: list[dict[str, Any]],
+    field: str,
+    unit: str,
+    notes: str,
+    unification: str,
+) -> MetricResult:
+    """Shared P50/P90 over a GrimoireLab-precomputed duration field
+    (``time_open_days`` or similar) for a filtered PR set."""
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "track_total_hits": True,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"term": {"pull_request": True}},
+                    *extra_must,
+                ]
+            }
+        },
+        "aggs": {
+            "p50": {"percentiles": {"field": field, "percents": [50]}},
+            "p90": {"percentiles": {"field": field, "percents": [90]}},
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"{label} percentiles on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or github index empty",
+        ))
+        return MetricResult(
+            slug=slug, value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="github_*_enriched has no documents for this repo yet.",
+            unification=unification,
+        )
+    total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+    aggs = raw.get("aggregations") or {}
+    p50_raw = ((aggs.get("p50") or {}).get("values") or {}).get("50.0")
+    p90_raw = ((aggs.get("p90") or {}).get("values") or {}).get("90.0")
+    p50 = float(p50_raw) if p50_raw is not None else None
+    p90 = float(p90_raw) if p90_raw is not None else None
+
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"P50/P90 {label} on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=(
+            f"{total} PRs · P50 {p50:.1f} {unit} · P90 {p90:.1f} {unit}"
+            if p50 is not None and p90 is not None
+            else f"{total} PRs · no percentile"
+        ),
+    ))
+    if not total or p50 is None:
+        return MetricResult(
+            slug=slug, value="—", label="no PRs in window",
+            secondary=None, queries=traces,
+            notes=notes,
+            unification=unification,
+        )
+
+    recipes = _build_recipes(
+        label=slug,
+        traces=traces,
+        extracts=[{
+            "python": f"r1.get('raw', {{}}).get('aggregations', {{}}).get('p50', {{}}).get('values', {{}}).get('50.0')",
+            "bash":   '.raw.aggregations.p50.values."50.0" // 0',
+            "js":     "r1.raw?.aggregations?.p50?.values?.['50.0'] ?? 0",
+        }],
+        combine={
+            "python": f"headline = f'{{v1:.1f}} {unit}' if v1 else '—'",
+            "bash":   f'if [ "$v1" != "null" ] && [ "$v1" != "0" ]; then headline=$(awk -v v="$v1" \'BEGIN {{ printf("%.1f {unit}", v) }}\'); else headline="—"; fi',
+            "js":     f"const headline = v1 ? `${{v1.toFixed(1)}} {unit}` : '—';",
+        },
+    )
+    return MetricResult(
+        slug=slug,
+        value=f"{p50:.1f} {unit}",
+        label=f"median {label.lower()} (last {window_days} d)",
+        secondary=(f"{total} PRs · P90 {p90:.1f} {unit}" if p90 is not None else f"{total} PRs"),
+        queries=traces,
+        recipes=recipes,
+        notes=notes,
+        unification=unification,
+    )
+
+
+# ── Metric 27 · Change Request Duration ──────────────────────────────────
+
+def _metric_cr_duration(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    return _pr_percentile_metric(
+        full, window_days,
+        slug="cr_duration",
+        label="Days from PR open to merge",
+        extra_must=[
+            {"term": {"merged": True}},
+            {"range": {"merge_date": {"gte": _iso(_now_minus_days(window_days))}}},
+        ],
+        field="time_open_days",
+        unit="d",
+        unification=(
+            "P50 of GrimoireLab's ``time_open_days`` on PRs where "
+            "``merged:true`` and ``merge_date`` falls inside the window."
+        ),
+        notes=(
+            "Acceptance speed — the time from PR open to merge for "
+            "PRs that actually shipped. A rising number can signal a "
+            "review-capacity squeeze."
+        ),
+    )
+
+
+# ── Metric 28 · Time to Close (PRs) ──────────────────────────────────────
+
+def _metric_pr_time_to_close(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    return _pr_percentile_metric(
+        full, window_days,
+        slug="pr_time_to_close",
+        label="Days from PR open to close",
+        extra_must=[
+            {"term": {"state": "closed"}},
+            {"range": {"closed_at": {"gte": _iso(_now_minus_days(window_days))}}},
+        ],
+        field="time_open_days",
+        unit="d",
+        unification=(
+            "P50 of GrimoireLab's ``time_open_days`` on PRs where "
+            "``state:closed`` (merged or declined) and ``closed_at`` "
+            "is in the window."
+        ),
+        notes=(
+            "Time-to-close considers *all* closed PRs — merged + "
+            "declined. Differs from ``cr_duration`` which is "
+            "acceptance-speed only. A wide gap between the two means "
+            "the project closes-without-merging slowly."
+        ),
+    )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────
 
 REGISTRY: list[MetricSpec] = [
@@ -3505,6 +4049,96 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=True,
         compute=_metric_code_lines,
+    ),
+    # ── Phase 6 — Level-0 quick wins ────────────────────────────────
+    MetricSpec(
+        slug="inactive_contributors",
+        name="Inactive Contributors",
+        category="Contributor",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-inactive-contributors/",
+        question="Who has stopped contributing?",
+        description=(
+            "Distinct people who *have* contributed to the repo at "
+            "some point but whose most recent commit predates the "
+            "selected window. Pair with `contributors` for the active "
+            "side of the same ledger."
+        ),
+        is_time_based=True,
+        compute=_metric_inactive_contributors,
+    ),
+    MetricSpec(
+        slug="occasional_contributors",
+        name="Occasional Contributors",
+        category="Contributor",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-occasional-contributors/",
+        question="How many drive-by contributors does the project attract?",
+        description=(
+            "Distinct authors with at most 4 commits in the window — "
+            "the CHAOSS catalogue's drive-by threshold. A community-"
+            "health signal: high outreach vs low retention."
+        ),
+        is_time_based=True,
+        compute=_metric_occasional_contributors,
+    ),
+    MetricSpec(
+        slug="cr_accepted",
+        name="Change Request Accepted",
+        category="Lifecycle",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-change-request-accepted/",
+        question="How many PRs shipped?",
+        description=(
+            "Merged pull requests in the window. The acceptance half "
+            "of `closure_ratio`; pair with `cr_declined` to read the "
+            "merge-vs-reject split."
+        ),
+        is_time_based=True,
+        compute=_metric_cr_accepted,
+    ),
+    MetricSpec(
+        slug="cr_declined",
+        name="Change Request Declined",
+        category="Lifecycle",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-change-request-declined/",
+        question="How many PRs were rejected?",
+        description=(
+            "Pull requests closed without merging — explicit "
+            "rejections or stale work cleaned up by maintainers."
+        ),
+        is_time_based=True,
+        compute=_metric_cr_declined,
+    ),
+    MetricSpec(
+        slug="cr_duration",
+        name="Change Request Duration",
+        category="Lifecycle",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-change-request-duration/",
+        question="How fast do PRs that ship actually ship?",
+        description=(
+            "Median days from PR creation to merge for PRs that "
+            "merged in the window. Acceptance-speed view."
+        ),
+        is_time_based=True,
+        compute=_metric_cr_duration,
+    ),
+    MetricSpec(
+        slug="pr_time_to_close",
+        name="Time to Close (PRs)",
+        category="Lifecycle",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-time-to-close/",
+        question="How long do PRs stay open?",
+        description=(
+            "Median days from PR creation to close — counts ALL "
+            "closed PRs (merged + declined). Differs from "
+            "`cr_duration` which is merge-only."
+        ),
+        is_time_based=True,
+        compute=_metric_pr_time_to_close,
     ),
 ]
 
