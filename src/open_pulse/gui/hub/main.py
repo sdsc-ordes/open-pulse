@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .auth import _COOKIE_NAME, clear_session, get_settings, require_auth
+from .chaoss import routes as chaoss_routes
 from .routes import crawler, databases, hub, pipeline, projects, services, stack, stats
 
 _HERE = Path(__file__).parent
@@ -74,6 +75,7 @@ app.include_router(stats.router)
 app.include_router(crawler.router)
 app.include_router(hub.router)
 app.include_router(hub.api)
+app.include_router(chaoss_routes.router)
 
 
 @app.get("/healthz")

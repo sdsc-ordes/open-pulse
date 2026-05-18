@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}CHAOSS · {{ full }}{% endblock %}
+{% block heading %}CHAOSS · {{ full }}{% endblock %}
+{% block subheading %}
+  Per-repository community-health metrics for
+  <a href="/hub/github.com/{{ full }}">{{ full }}</a>, computed live
+  against Neo4j, the SPARQL store, OpenSearch, and Qdrant. Every value
+  links back to the exact query that produced it.
+{% endblock %}
+
+{% block content %}
+
+{# highlight.js for the query trace blocks. Same theme as /databases. #}
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+<div x-data="chaossRepo({{ window }})" style="display: flex; flex-direction: column; gap: 18px;">
+
+  {# ── Top bar — repo, link out, window selector ─────────────────── #}
+  <div class="card" style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 0;">
+      <div class="card-title" style="margin: 0;">{{ full }}</div>
+      <div class="card-meta" style="font-size: 12px;">
+        <a href="{{ canonical_url }}" target="_blank" rel="noopener">{{ canonical_url }} ↗</a>
+        · <a href="/hub/github.com/{{ full }}">open in /hub</a>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <label for="window-select" class="card-meta" style="font-size: 12px;">window</label>
+      <select id="window-select" x-model.number="window" @change="changeWindow()" class="btn" style="padding: 6px 10px;">
+        {% for w in window_choices %}
+          <option value="{{ w }}" {% if w == window %}selected{% endif %}>{{ w }} days</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  {# ── Metric cards — skeleton, hydrated by chaossLoadCard() ───── #}
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;">
+    {% for m in metrics %}
+      <article class="card"
+               x-data='{ slug: "{{ m.slug }}" }'
+               x-init="chaossLoadCard($el, slug)"
+               data-metric-slug="{{ m.slug }}"
+               style="display: flex; flex-direction: column; gap: 10px; min-height: 200px;">
+        <div style="display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;">
+          <span class="pill {% if m.category == 'Community' %}pill-info{% elif m.category == 'Popularity' %}pill-accent{% else %}pill-warn{% endif %}"
+                style="font-size: 10px;">{{ m.category }}</span>
+          {% if m.is_time_based %}
+            <span class="pill" style="font-size: 10px;">⏱ time-based</span>
+          {% endif %}
+          <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener" class="card-meta"
+             style="font-size: 11px; margin-left: auto;">{{ m.chaoss_level }} ↗</a>
+        </div>
+        <div class="card-title" style="margin: 0;">{{ m.name }}</div>
+        <div class="card-meta" style="font-size: 12px;">{{ m.question }}</div>
+        <div class="chaoss-card-body" style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--fg-muted); font-size: 13px;">
+          loading…
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+
+  {# ── Footer — link back to landing + provenance ───────────────── #}
+  <div class="card-meta" style="font-size: 12px;">
+    <a href="/chaoss">← back to CHAOSS metrics</a>
+  </div>
+</div>
+
+<script>
+function chaossRepo(initialWindow) {
+  return {
+    window: initialWindow,
+    changeWindow() {
+      const u = new URL(window.location.href);
+      u.searchParams.set('window', String(this.window));
+      window.location.href = u.toString();
+    },
+  };
+}
+
+// Skeleton → live card swap. Each card lazy-loads from
+// /api/chaoss/github.com/<full>/<slug>?window=<w>.
+function chaossLoadCard(el, slug) {
+  const full = "{{ full }}";
+  const window_ = new URL(location.href).searchParams.get('window') || "{{ window }}";
+  const url = `/api/chaoss/github.com/${full}/${slug}?window=${window_}`;
+  fetch(url, { credentials: 'include' })
+    .then(r => r.text())
+    .then(html => {
+      // The endpoint returns just the body fragment we slot into the
+      // card without nesting another <article>.
+      const target = el.querySelector('.chaoss-card-body');
+      target.innerHTML = html;
+      target.style.display = 'block';
+      target.style.justifyContent = 'unset';
+      target.style.alignItems = 'unset';
+      // Re-run highlight.js on the freshly-inserted code elements.
+      if (window.hljs) {
+        target.querySelectorAll('pre code').forEach(c => {
+          c.removeAttribute('data-highlighted');
+          try { window.hljs.highlightElement(c); } catch (_) {}
+        });
+      }
+    })
+    .catch(err => {
+      const target = el.querySelector('.chaoss-card-body');
+      target.innerHTML = `<span class="card-meta">failed: ${err}</span>`;
+    });
+}
+</script>
+{% endblock %}
