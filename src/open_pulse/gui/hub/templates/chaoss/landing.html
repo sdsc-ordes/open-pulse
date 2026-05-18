@@ -61,10 +61,12 @@
       {# Filter pill row: click to toggle visibility of each topic. #}
       <div style="display: flex; gap: 6px; flex-wrap: wrap;">
         {% for cat in categories %}
+          {# Inner quotes are single because the outer attribute is
+             double-quoted. See repo.html for the longer note. #}
           <button type="button"
                   class="pill {{ cat.css }}"
-                  @click="toggle({{ cat.name | tojson }})"
-                  :class="active.includes({{ cat.name | tojson }}) ? '' : 'is-inactive'"
+                  @click="toggle('{{ cat.name }}')"
+                  :class="active.includes('{{ cat.name }}') ? '' : 'is-inactive'"
                   style="font-size: 11px; cursor: pointer; user-select: none; padding: 3px 10px;">
             {{ cat.name }}
           </button>
@@ -78,7 +80,7 @@
     </div>
 
     {% for g in groups %}
-      <section x-show="active.includes({{ g.name | tojson }})"
+      <section x-show="active.includes('{{ g.name }}')"
                style="margin-top: 18px;">
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
           {% if g.icon %}
