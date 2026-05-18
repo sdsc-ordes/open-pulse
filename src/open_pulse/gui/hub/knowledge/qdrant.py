@@ -1016,6 +1016,15 @@ def _canonical_url_for_point(collection: str, payload: dict[str, Any]) -> str:
         if isinstance(cat, str) and cat:
             return f"https://graphsearch.epfl.ch/en/category/{cat}"
 
+    # oamonitor_* collections (and a few others) stash the canonical URL
+    # straight on ``entity_id`` — accept it when it's already an HTTP(S)
+    # URL. Skipped above because that field is also used for non-URL
+    # identifiers (slugs, ORCID, openalex IDs) which the collection-
+    # specific branches above handle explicitly.
+    eid = payload.get("entity_id")
+    if isinstance(eid, str) and eid.startswith(("http://", "https://")):
+        return eid
+
     return ""
 
 
@@ -1031,6 +1040,11 @@ def _label_for_point(payload: dict[str, Any]) -> str:
         v = payload.get(f)
         if isinstance(v, str) and v.strip():
             return v.strip()
+    # oamonitor_* points only carry ``embedding_text`` ("Title | DOI: …
+    # | Year: …"). The first ``|``-separated segment is the title.
+    et = payload.get("embedding_text")
+    if isinstance(et, str) and et.strip():
+        return et.split("|", 1)[0].strip() or et.strip()
     # Last-resort: any slug-shaped id.
     for f in ("repo_id", "entity_id", "openalex_id", "ror_id"):
         v = payload.get(f)
