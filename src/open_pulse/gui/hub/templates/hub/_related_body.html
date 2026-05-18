@@ -1,0 +1,49 @@
+{# Lazy-loaded "Related" panel — siblings sharing the same owner /
+   language / license / author etc. Empty when no axis produces hits;
+   the front-end hides the placeholder in that case. #}
+{% if groups %}
+<div class="card">
+  <div class="card-title">Related</div>
+  <div class="card-meta" style="margin: 4px 0 12px;">
+    Other entries from the same source that share at least one axis with this one.
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 14px;">
+  {% for g in groups %}
+    <div>
+      <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;">
+        <span class="pill pill-neutral">{{ g.title }}</span>
+        <span class="card-meta">{{ g.items|length }} item{{ '' if g.items|length == 1 else 's' }}</span>
+      </div>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px;">
+        {% for item in g.items %}
+          <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
+            {% if item.hub_url %}
+              <span class="hub-hover" data-preview-ref="{{ item.hub_url[5:] }}">
+                {% if item.source_type %}
+                  <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ item.source_type }}</span>
+                {% endif %}
+                <a href="{{ item.hub_url }}" class="mono" style="word-break: break-all;">{{ item.label }}</a>
+                {% if item.external_url %}<a href="{{ item.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>{% endif %}
+                <span class="hub-preview" aria-hidden="true">
+                  <p class="hub-preview-title">{{ item.label }}</p>
+                  {% if item.source_type %}<div class="hub-preview-meta">{{ item.source_type }}{% if g.title %} · {{ g.title }}{% endif %}</div>{% endif %}
+                  <div class="hub-preview-description"></div>
+                  {% if item.badge %}<div class="hub-preview-badge">{{ item.badge }}</div>{% endif %}
+                  <div class="hub-preview-hint">Click to open the hub page →</div>
+                </span>
+              </span>
+            {% else %}
+              {% if item.source_type %}
+                <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ item.source_type }}</span>
+              {% endif %}
+              <span class="mono">{{ item.label }}</span>
+            {% endif %}
+            {% if item.badge %}<span class="card-meta" style="font-size: 11px;">· {{ item.badge }}</span>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+  </div>
+</div>
+{% endif %}

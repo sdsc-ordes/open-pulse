@@ -1,0 +1,52 @@
+{# Body fragment for the "we don't know this yet" page. Rendered by
+   the SSE handler when the resolver returned None. #}
+<div style="display: flex; flex-direction: column; gap: 16px;">
+
+  <div class="card {% if newly_queued %}tone-info{% else %}tone-warn{% endif %}"
+       x-data="hubEnrich('{{ ref.canonical_url }}', '{{ ref.host }}/{{ ref.path }}')">
+    <div class="card-title">{% if newly_queued %}Added to the enrichment backlog{% else %}Already on the backlog{% endif %}</div>
+    <p style="margin: 6px 0 0;">
+      {% if newly_queued %}
+        We've recorded this URL — click <strong>Enrich now</strong> to fire the
+        crawler and the metadata extractor against it. The page will fill in on
+        next reload.
+      {% else %}
+        This URL has been requested {{ row.hits }} time{{ '' if row.hits == 1 else 's' }}
+        (first seen <span class="mono">{{ row.first_seen }}</span>). Use
+        <strong>Enrich now</strong> to push it through the pipeline manually.
+      {% endif %}
+    </p>
+    <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+      <button class="btn btn-primary" @click="run()" :disabled="busy" x-show="!done">
+        <span x-show="!busy">Enrich now</span>
+        <span x-show="busy">Submitting…</span>
+      </button>
+      <span class="card-meta" x-show="done" x-cloak>
+        <strong x-text="okLabel"></strong>
+        <template x-if="crawlerJob"><span> · crawler job <span class="mono" x-text="crawlerJob"></span></span></template>
+        <template x-if="gmeJob"><span> · GME job <span class="mono" x-text="gmeJob"></span></span></template>
+      </span>
+      <span class="card-meta" style="color: var(--bad);" x-show="error" x-text="error" x-cloak></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">How the hub works</div>
+    <p style="margin: 8px 0 0; color: var(--fg-muted);">
+      The hub identifies resources by their URL. To reference any object on
+      the public web, type its address into the path after <span class="kbd">/hub/</span>:
+    </p>
+    <ul style="margin: 10px 0 0; padding-left: 18px; line-height: 1.7; color: var(--fg-muted);">
+      <li><span class="kbd">/hub/github.com/&lt;owner&gt;/&lt;repo&gt;</span></li>
+      <li><span class="kbd">/hub/zenodo.org/records/&lt;id&gt;</span></li>
+      <li><span class="kbd">/hub/ror.org/&lt;rorid&gt;</span></li>
+      <li><span class="kbd">/hub/infoscience.epfl.ch/entities/publication/&lt;id&gt;</span></li>
+      <li><span class="kbd">/hub/huggingface.co/&lt;model-or-org&gt;</span></li>
+    </ul>
+  </div>
+
+  <div>
+    <a class="btn btn-ghost" href="/hub/wanted">See all pending requests →</a>
+  </div>
+
+</div>

@@ -1,0 +1,81 @@
+{# Community panel — contributors + owners across the GitHub repos
+   this non-github entity cites. Empty body when none of the
+   connected repos are indexed in the Neo4j crawl graph; the
+   front-end hides the slot. #}
+{% if data.contributors or data.owners %}
+<div class="card">
+  <div class="card-title">Community behind the cited code</div>
+  <div class="card-meta" style="margin: 4px 0 12px;">
+    People and organizations that contribute to or own the GitHub
+    repositories this entity references.
+  </div>
+
+  {% if data.owners %}
+    <div style="margin-bottom: 14px;">
+      <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;">
+        <span class="pill pill-info" style="font-size: 11px;">Owners</span>
+        <span class="card-meta">{{ data.owners|length }} entit{{ 'y' if data.owners|length == 1 else 'ies' }}</span>
+      </div>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px;">
+        {% for o in data.owners %}
+          <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
+            <span class="hub-hover" data-preview-ref="github.com/{{ o.login }}">
+              <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">GitHub</span>
+              <span class="pill pill-neutral" style="font-size: 10px; padding: 1px 6px; text-transform: lowercase;">{{ o.kind or 'entity' }}</span>
+              <a href="/hub/github.com/{{ o.login }}" class="mono">{{ o.name or o.login }}</a>
+              <span class="hub-preview" aria-hidden="true">
+                <p class="hub-preview-title">{{ o.name or o.login }}</p>
+                <div class="hub-preview-meta">GitHub {{ o.kind.lower() if o.kind else 'entity' }} · {{ o.login }}</div>
+                <div class="hub-preview-description"></div>
+                <div class="hub-preview-badge">
+                  owns {{ o.n_repos }} of the cited repo{{ '' if o.n_repos == 1 else 's' }}
+                </div>
+                <div class="hub-preview-hint">Click to open the hub page →</div>
+              </span>
+            </span>
+            <span class="card-meta" style="font-size: 11px;">
+              · owns {{ o.n_repos }} cited repo{{ '' if o.n_repos == 1 else 's' }}
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if data.contributors %}
+    <div>
+      <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;">
+        <span class="pill pill-info" style="font-size: 11px;">Contributors</span>
+        <span class="card-meta">{{ data.contributors|length }} researcher{{ '' if data.contributors|length == 1 else 's' }}</span>
+      </div>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px;">
+        {% for c in data.contributors %}
+          <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
+            <span class="hub-hover" data-preview-ref="github.com/{{ c.login }}">
+              <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">GitHub</span>
+              <a href="/hub/github.com/{{ c.login }}" class="mono">{{ c.name or c.login }}</a>
+              <span class="hub-preview" aria-hidden="true">
+                <p class="hub-preview-title">{{ c.name or c.login }}</p>
+                <div class="hub-preview-meta">GitHub user · {{ c.login }}</div>
+                <div class="hub-preview-description"></div>
+                <div class="hub-preview-badge">
+                  contributes to {{ c.n_repos }} of the cited repo{{ '' if c.n_repos == 1 else 's' }}
+                </div>
+                {% if c.repos %}
+                  <div class="hub-preview-badge" style="margin-top: 2px;">
+                    {% for r in c.repos[:3] %}<span class="mono">{{ r }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% if c.repos|length > 3 %}, +{{ c.repos|length - 3 }} more{% endif %}
+                  </div>
+                {% endif %}
+                <div class="hub-preview-hint">Click to open the hub page →</div>
+              </span>
+            </span>
+            <span class="card-meta" style="font-size: 11px;">
+              · {{ c.n_repos }} cited repo{{ '' if c.n_repos == 1 else 's' }}
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+</div>
+{% endif %}

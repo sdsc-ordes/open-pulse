@@ -1,0 +1,41 @@
+{# Lazy-loaded backlinks fragment, served by GET /api/hub/backlinks/{ref}.
+   Empty body (no card rendered) when no other collection references
+   the entity — the Alpine wrapper hides the whole panel in that case. #}
+{% if groups %}
+<div class="card">
+  <div class="card-title">Referenced from</div>
+  <div class="card-meta" style="margin: 4px 0 12px;">
+    Records in other collections that mention this URL in their payload.
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 14px;">
+  {% for g in groups %}
+    <div>
+      <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;">
+        <span class="pill pill-info">{{ g.label }}</span>
+        <span class="card-meta">{{ g.items|length }}{% if g.truncated %}+{% endif %} match{{ '' if g.items|length == 1 and not g.truncated else 'es' }}</span>
+      </div>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px;">
+        {% for item in g.items %}
+          <li style="display: flex; gap: 8px; align-items: baseline;">
+            {% if item.hub_url %}
+              <span class="hub-hover" data-preview-ref="{{ item.hub_url[5:] }}">
+                <a href="{{ item.hub_url }}">{{ item.label }}</a>
+                {% if item.external_url %}<a href="{{ item.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>{% endif %}
+                <span class="hub-preview" aria-hidden="true">
+                  <p class="hub-preview-title">{{ item.label }}</p>
+                  <div class="hub-preview-meta">{{ g.label }}</div>
+                  <div class="hub-preview-description"></div>
+                  <div class="hub-preview-hint">Click to open the hub page →</div>
+                </span>
+              </span>
+            {% else %}
+              <span>{{ item.label }}</span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+  </div>
+</div>
+{% endif %}

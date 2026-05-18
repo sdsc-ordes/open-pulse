@@ -1,14 +1,20 @@
 {% extends "base.html" %}
 {% block heading %}Query{% endblock %}
-{% block subheading %}SPARQL · Cypher · OpenSearch consoles. Click an example chip to load it; your tabs persist locally in your browser.{% endblock %}
+{% block subheading %}Community Graph (Neo4j) · Repositories Properties (SPARQL) · Grimoire Lab (OpenSearch). Click an example chip to load it; your tabs persist locally in your browser.{% endblock %}
 
 {% block content %}
+{# highlight.js for the snippet codeblock. CDN load — the dark theme
+   (atom-one-dark) plays nicely with the existing dark code panel
+   in both light and dark hub themes. #}
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <div x-data="dbConsole()" x-init="init()" class="space-y-4">
 
   <!-- Engine picker -->
   <div class="tab-bar">
     <template x-for="t in engines" :key="t">
-      <button :class="engine === t ? 'active' : ''" @click="setEngine(t)" x-text="t"></button>
+      <button :class="engine === t ? 'active' : ''" @click="setEngine(t)" x-text="engineLabels[t] || t"></button>
     </template>
     <span class="card-meta ml-auto" style="padding: 10px 14px;" x-text="hint()"></span>
   </div>
@@ -101,7 +107,16 @@
             <button class="btn ml-auto" @click="copySnippet()" :title="snippetCopied ? 'Copied!' : 'Copy snippet'"
                     x-text="snippetCopied ? '✓ copied' : 'Copy'" style="padding: 2px 10px;"></button>
           </div>
-          <pre class="console" style="margin: 0; padding: 10px 12px; white-space: pre-wrap; max-height: 240px; overflow: auto;" x-text="renderSnippet()"></pre>
+          {# Snippet block, syntax-highlighted via highlight.js. The
+             <code> child gets its content + class re-set by
+             syncSnippetCode(), which Alpine re-runs whenever any
+             reactive dependency (query / language pill / engine /
+             os mode) changes. #}
+          <pre class="console" style="margin: 0; padding: 0; max-height: 240px; overflow: auto;"><code
+              x-ref="snippetCode"
+              x-effect="syncSnippetCode()"
+              class="hljs language-bash"
+              style="padding: 10px 12px; display: block; white-space: pre-wrap;"></code></pre>
           <p class="card-meta" style="margin-top: 6px;">Replace placeholder credentials with the values from <code>infra/env/.env</code>. Reads are public by default; writes require admin auth.</p>
         </div>
 
@@ -628,8 +643,18 @@ function _opensearchSnippet(lang, q, host, osMode) {
 }
 function dbConsole() {
   return {
-    engines: ['sparql', 'cypher', 'opensearch'],
-    engine: 'sparql',
+    // Tab order + default match the reading order on the entity
+    // pages: graph relations first (who connects to what), then
+    // semantic properties, then operational data.
+    engines: ['cypher', 'sparql', 'opensearch'],
+    engine: 'cypher',
+    // Human-readable engine names shown in the tab-bar. Keys are the
+    // canonical engine ids used everywhere else in the code.
+    engineLabels: {
+      'cypher':     'Community Graph · Neo4j',
+      'sparql':     'Repositories Properties · SPARQL',
+      'opensearch': 'Grimoire Lab · OpenSearch',
+    },
     // Snippets panel state (curl / python / js examples).
     showSnippets: false, snippetLang: 'curl', snippetCopied: false,
     osMode: 'sql',
@@ -830,6 +855,61 @@ function dbConsole() {
       return 'user (optional)';
     },
     hint() { return HINTS[this.engine] || ''; },
+
+    // ── snippet panel (curl / python / js examples) ──────────────
+    // Re-evaluated by Alpine on every reactive change — typing in
+    // the editor, switching tabs, flipping engine, swapping the
+    // language pill, or toggling osMode all re-render the snippet.
+    renderSnippet() {
+      const host = (window.location.hostname || 'localhost');
+      const q = this.query || '';
+      if (this.engine === 'sparql') {
+        return _sparqlSnippet(this.snippetLang, q, host);
+      }
+      if (this.engine === 'cypher') {
+        return _cypherSnippet(this.snippetLang, q, host);
+      }
+      if (this.engine === 'opensearch') {
+        return _opensearchSnippet(this.snippetLang, q, host, this.osMode);
+      }
+      return '';
+    },
+    // Map the language pill to a highlight.js language id. ``bash``
+    // is intentionally used for ``curl`` (highlight.js doesn't have
+    // a separate curl mode but the shell mode reads it fine).
+    snippetHljsLang() {
+      return ({
+        curl: 'bash',
+        python: 'python',
+        js: 'javascript',
+      })[this.snippetLang] || 'bash';
+    },
+    // Push the latest snippet text into the <code> element and ask
+    // highlight.js to re-paint it. Called by an Alpine x-effect so
+    // changes to any reactive dependency trigger a re-render.
+    syncSnippetCode() {
+      const el = this.$refs.snippetCode;
+      if (!el) return;
+      const text = this.renderSnippet();
+      el.textContent = text;
+      // highlight.js refuses to re-highlight an element that already
+      // carries the ``data-highlighted`` attribute, so clear it.
+      el.removeAttribute('data-highlighted');
+      el.className = 'hljs language-' + this.snippetHljsLang();
+      if (window.hljs) {
+        try { window.hljs.highlightElement(el); } catch (_) {}
+      }
+    },
+    async copySnippet() {
+      try {
+        await navigator.clipboard.writeText(this.renderSnippet());
+        this.snippetCopied = true;
+        setTimeout(() => { this.snippetCopied = false; }, 1500);
+      } catch (_) {
+        // Clipboard blocked (insecure context).
+        this.snippetCopied = false;
+      }
+    },
 
     // ── examples ─────────────────────────────────────────────────
     async loadExamples() {
