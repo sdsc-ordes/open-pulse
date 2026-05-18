@@ -70,11 +70,15 @@
 
     <div class="flex flex-1">
       <aside class="sidebar">
-        <div class="sidebar-brand">
+        {# Brand block doubles as a "home" link — visitors expect the
+           product name in the top-left to click back to the overview.
+           The <a> reset is inline so we don't have to touch app.css. #}
+        <a href="/" class="sidebar-brand" title="Back to overview"
+           style="text-decoration: none; color: inherit;">
           <span class="brand-pulse"></span>
-          <span class="brand-name">open-pulse</span>
+          <span class="brand-name">OpenPulse</span>
           <span class="brand-tag">hub</span>
-        </div>
+        </a>
         <nav class="sidebar-nav">
           {# User-facing surfaces — what people open day-to-day. Overview here
              is the trends view (charts over time); the live snapshot moved
