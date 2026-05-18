@@ -3,7 +3,7 @@
 Each metric in this module is a tiny pipeline:
 
 1. Build the query text for each store it touches (Neo4j / SPARQL /
-   OpenSearch / Qdrant). The query text is kept around verbatim so it
+   OpenSearch). The query text is kept around verbatim so it
    can be displayed on the page — the *transparency* property is the
    whole point of this section: a visitor must be able to see the
    exact statement that produced the number, copy it, and run it
@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from ..knowledge import opensearch as os_mod, qdrant, stores
+from ..knowledge import opensearch as os_mod, stores
 
 log = logging.getLogger(__name__)
 
@@ -1048,116 +1048,109 @@ def _short_license(iri: str) -> str:
 # ── Metric 5 · Academic OS Project Impact ────────────────────────────────
 
 def _metric_academic_impact(full: str, canonical_url: str, window_days: int) -> MetricResult:
-    """Hybrid metric: which papers cite / mention this software?
+    """Academic-impact proxy via the SPARQL graph.
 
-    There's no direct ``schema:isBasedOn`` triple in the current
-    ontology between scholarly articles and repos, so we go through
-    the Qdrant vector store: collections of Infoscience articles,
-    ETHZ research-collection articles, OpenAlex works, and Zenodo
-    records are searched for points whose payload mentions the
-    repo's GitHub URL.
+    The current ontology has no direct article→repo predicate (e.g.
+    schema:isBasedOn / schema:codeRepository / schema:citation are
+    not emitted), so we lean on the strongest indirect link the data
+    plane gives us: a *shared author*. We list ScholarlyArticles
+    whose schema:author also has a pulse:hasContribution to the
+    target repo. That answers the question "what academic work has
+    the contributor community published?" — a weaker but transparent
+    stand-in for "what cites the software".
+
+    No vector store / RAG. Everything is reproducible by pasting the
+    query into the ``/databases`` console.
     """
     traces: list[QueryTrace] = []
-    impact_collections = (
-        "infoscience_articles",
-        "ethz_research_collection_articles",
-        "works",  # OpenAlex
-        "zenodo_records",
+
+    sparql = (
+        "# Shared-author chain: scholarly articles whose author has\n"
+        "# contributed to the target repo. The OPTIONAL clauses pull\n"
+        "# title and publication date so the examples row stays\n"
+        "# readable and the secondary line can show the year span.\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "SELECT DISTINCT ?article ?title ?datePublished WHERE {\n"
+        f'  ?repo pulse:githubRepositoryHandle "{full}" .\n'
+        "  ?person pulse:hasContribution ?contrib .\n"
+        "  ?contrib pulse:contributionTo ?repo .\n"
+        "  ?article a schema:ScholarlyArticle ;\n"
+        "           schema:author ?person .\n"
+        "  OPTIONAL { ?article schema:name ?title }\n"
+        "  OPTIONAL { ?article schema:datePublished ?datePublished }\n"
+        "}\n"
+        "ORDER BY DESC(?datePublished)"
     )
-
-    # We reuse the same backlinks-style filter used elsewhere in the
-    # hub, then prune to the academic collections.
-    qdrant_query = {
-        "filter": {
-            "should": [
-                {"key": "url",         "match": {"text": canonical_url}},
-                {"key": "html_url",    "match": {"text": canonical_url}},
-                {"key": "homepage",    "match": {"text": canonical_url}},
-                {"key": "code_repository", "match": {"text": canonical_url}},
-                {"key": "text",        "match": {"text": full}},
-            ]
-        },
-        "limit": 50,
-        "with_payload": True,
-    }
-    query_text = json.dumps(qdrant_query, indent=2)
-    examples: list[dict[str, str]] = []
-    total = 0
-    by_kind: dict[str, int] = {}
-
-    for col in impact_collections:
-        try:
-            points = qdrant._autocomplete_one(
-                col,
-                ("url", "html_url", "homepage", "code_repository", "text",
-                 "title", "name"),
-                full,
-                limit=5,
-                timeout=2.0,
-            )
-        except Exception as exc:  # noqa: BLE001
-            traces.append(QueryTrace(
-                store=f"Qdrant · {col}",
-                engine="opensearch", mode="dsl",
-                title=f"Mentions of {full} in {col}",
-                query=query_text, result_summary="error", error=str(exc),
-            ))
-            continue
-        by_kind[col] = len(points)
-        total += len(points)
-        for p in points[:3]:
-            payload = p.get("payload") or {}
-            title = (
-                payload.get("title")
-                or payload.get("name")
-                or payload.get("display_name")
-                or "(untitled)"
-            )
-            doi = payload.get("doi") or payload.get("identifier") or ""
-            examples.append({
-                "label": str(title)[:90],
-                "detail": str(doi)[:80] if doi else col,
-                "source": col,
-            })
+    rows: list[dict[str, Any]] = []
+    try:
+        rows = stores.sparql_select(sparql) or []
         traces.append(QueryTrace(
-            store=f"Qdrant · {col}",
-            engine="opensearch", mode="dsl",
-            title=f"Text-match for {full} in {col}",
-            query=query_text,
-            result_summary=f"{len(points)} mention" + ("s" if len(points) != 1 else ""),
+            store="SPARQL", engine="sparql",
+            title=f"Scholarly articles authored by contributors of {full}",
+            query=sparql,
+            result_summary=f"{len(rows)} article" + ("s" if len(rows) != 1 else ""),
+        ))
+    except Exception as exc:  # noqa: BLE001
+        traces.append(QueryTrace(
+            store="SPARQL", engine="sparql",
+            title=f"Scholarly articles authored by contributors of {full}",
+            query=sparql, result_summary="error", error=str(exc),
         ))
 
-    if total == 0:
+    if not rows:
         return MetricResult(
             slug="academic_impact",
             value="0",
-            label="no academic mentions found",
+            label="no linked academic articles",
             secondary=None,
             queries=traces,
             notes=(
-                "We searched four scholarly collections in Qdrant for "
-                "any payload field that contains the repository's "
-                "owner/name slug. A zero here means none was indexed — "
-                "not that no paper cites this repo (e.g. a paper that "
-                "only links via DOI wouldn't match)."
+                "The current ontology has no direct article ↔ repo "
+                "predicate, so this metric uses a shared-author chain: "
+                "papers whose author also has a pulse:hasContribution "
+                "to this repo. A zero can mean the contributors haven't "
+                "linked publications in Infoscience, the publications "
+                "are crawled but with un-matched author IDs, or simply "
+                "that there are none. It does NOT mean no paper cites "
+                "the software."
             ),
         )
 
-    bits = [f"{k}: {v}" for k, v in by_kind.items() if v]
+    examples: list[dict[str, str]] = []
+    for r in rows[:8]:
+        title = (r.get("title") or {}).get("value") or "(no title)"
+        date = ((r.get("datePublished") or {}).get("value") or "")[:10]
+        examples.append({
+            "label": title[:90],
+            "detail": date,
+            "source": "SPARQL",
+        })
+
+    years: list[str] = []
+    for r in rows:
+        v = (r.get("datePublished") or {}).get("value") or ""
+        if len(v) >= 4 and v[:4].isdigit():
+            years.append(v[:4])
+    span = ""
+    if years:
+        yrs = sorted(years)
+        span = f"{yrs[0]} → {yrs[-1]}" if yrs[0] != yrs[-1] else yrs[0]
+
     return MetricResult(
         slug="academic_impact",
-        value=str(total),
-        label="academic mentions across 4 stores",
-        secondary=" · ".join(bits),
+        value=str(len(rows)),
+        label="papers by contributors",
+        secondary=(f"publication span: {span}" if span else None),
         queries=traces,
         examples=examples,
         notes=(
-            "Counts Qdrant points (papers, records, works) whose "
-            "payload mentions this repository. Each collection covers "
-            "a different surface: Infoscience for EPFL papers, ETHZ "
-            "research-collection for ETHZ outputs, OpenAlex (works) "
-            "globally, and Zenodo for software releases that picked up "
-            "citations."
+            "Proxy metric: scholarly articles whose authors have a "
+            "pulse:hasContribution to this repo. Computed entirely in "
+            "SPARQL — no vector search, no RAG. Once the ontology "
+            "emits a direct article↔repo predicate (schema:isBasedOn / "
+            "schema:codeRepository / schema:citation), this metric "
+            "will switch to it and become exact."
         ),
     )
 
@@ -2250,10 +2243,10 @@ REGISTRY: list[MetricSpec] = [
         ),
         question="How much does the software influence academic outputs?",
         description=(
-            "Searches the Qdrant scholarly collections (Infoscience, "
-            "ETHZ research-collection, OpenAlex works, Zenodo records) "
-            "for points whose payload mentions this repository's URL "
-            "or owner/name slug."
+            "Proxy via the SPARQL graph: scholarly articles whose "
+            "authors also have a pulse:hasContribution to this repo. "
+            "No RAG / vector search — fully reproducible by hand from "
+            "the /databases console."
         ),
         is_time_based=False,
         compute=_metric_academic_impact,
