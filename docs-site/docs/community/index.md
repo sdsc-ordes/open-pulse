@@ -81,6 +81,6 @@ the browser-only node-builder form. The first listed node is
 
 ## Contact
 
-- carlos.vivarrios@epfl.ch (SDSC)
-- aruni.senaratne@epfl.ch (EPFL Open Science)
+- <carlos.vivarrios@epfl.ch> (SDSC)
+- <aruni.senaratne@epfl.ch> (EPFL Open Science)
 - GitHub: [sdsc-ordes/open-pulse](https://github.com/sdsc-ordes/open-pulse)
