@@ -11,14 +11,28 @@
 <div x-data="overview()" x-init="init()" class="space-y-6">
 
   <!-- ── Range picker + meta ──────────────────────────────────────── -->
-  <div class="card" style="display: flex; align-items: center; gap: 12px;">
+  <div class="card" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
     <span class="card-title">Window</span>
     <div class="range-buttons">
       <template x-for="r in ranges" :key="r">
         <button class="btn"
                 :class="range === r ? 'btn-primary' : 'btn-ghost'"
-                @click="setRange(r)" x-text="r"></button>
+                @click="setRange(r)" x-text="r === 'custom' ? 'custom…' : r"></button>
       </template>
+    </div>
+    <!-- Custom date range, only visible when 'custom' is selected. -->
+    <div x-show="range === 'custom'" x-cloak
+         style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+      <label class="card-meta" style="font-size: 11px;">from</label>
+      <input type="datetime-local" x-model="customFrom"
+             style="font-size: 12px; padding: 3px 6px; background: var(--surface-sunk);
+                    border: 1px solid var(--border); border-radius: 4px; color: var(--fg);" />
+      <label class="card-meta" style="font-size: 11px;">to</label>
+      <input type="datetime-local" x-model="customTo"
+             style="font-size: 12px; padding: 3px 6px; background: var(--surface-sunk);
+                    border: 1px solid var(--border); border-radius: 4px; color: var(--fg);" />
+      <button class="btn btn-primary" @click="applyCustom()"
+              :disabled="!customFrom || !customTo">Apply</button>
     </div>
     <span class="card-meta ml-auto" x-text="metaLine"></span>
     <button class="btn btn-ghost" @click="reload()">↻</button>
@@ -190,8 +204,12 @@
 <script>
 function overview() {
   return {
-    ranges: ['1h', '6h', '24h', '7d', '30d'],
+    ranges: ['1h', '6h', '24h', '7d', '30d', 'custom'],
     range: localStorage.getItem('op:hub:overview-range') || '6h',
+    // Custom range bounds. Restored from localStorage so the user's
+    // last custom window survives a page reload.
+    customFrom: localStorage.getItem('op:hub:overview-custom-from') || '',
+    customTo:   localStorage.getItem('op:hub:overview-custom-to')   || '',
     samples: [],
     loading: false,
     metaLine: '',
@@ -199,14 +217,29 @@ function overview() {
               sparql_repos: 0, neo4j_nodes: 0, neo4j_rels: 0,
               uptime_max_seconds: 0 },
     charts: {},
+    // Track which range the charts were last rendered with — if the
+    // user switches ranges, Chart.js can leave its time-scale state
+    // in an inconsistent place and the next ``chart.update()`` throws
+    // "Cannot set properties of undefined (setting 'fullSize')". The
+    // safe fix is to destroy + recreate the chart on range change.
+    _lastRange: null,
     pollHandle: null,
 
     async init() {
       // Wait for Chart.js + the luxon adapter to land — they're CDN'd.
       await this._waitForChartJs();
+      // If the user's last session left them on 'custom' without a
+      // saved pair, fall back to '6h' so the first load doesn't 400.
+      if (this.range === 'custom' && (!this.customFrom || !this.customTo)) {
+        this.range = '6h';
+      }
       await this.reload();
       // Refresh every minute (the sampler interval) so the page is live.
-      this.pollHandle = setInterval(() => this.reload(/*silent=*/true), 60_000);
+      // Skip auto-refresh on the custom window — the user explicitly
+      // pinned that range.
+      this.pollHandle = setInterval(() => {
+        if (this.range !== 'custom') this.reload(/*silent=*/true);
+      }, 60_000);
     },
 
     async _waitForChartJs() {
@@ -219,19 +252,66 @@ function overview() {
     setRange(r) {
       this.range = r;
       localStorage.setItem('op:hub:overview-range', r);
+      // For custom we wait for the user to pick the two bounds + hit
+      // Apply; the fetch fires from applyCustom(). Everything else
+      // reloads immediately.
+      if (r !== 'custom') {
+        this.reload();
+      } else if (this.customFrom && this.customTo) {
+        this.applyCustom();
+      }
+    },
+
+    applyCustom() {
+      if (!this.customFrom || !this.customTo) return;
+      localStorage.setItem('op:hub:overview-custom-from', this.customFrom);
+      localStorage.setItem('op:hub:overview-custom-to',   this.customTo);
       this.reload();
     },
 
-    bucketFor(range) {
+    bucketFor(range, samplesSpanSeconds) {
       // Match approximate point density: aim for ~120 points per chart.
+      if (range === 'custom') {
+        // Pick a bucket that keeps the series under ~150 points; the
+        // sampler runs every 60s, so a 1h span = 60 raw rows = no
+        // bucketing needed.
+        if (!samplesSpanSeconds) return 0;
+        const target = 150;
+        return Math.max(0, Math.floor(samplesSpanSeconds / target / 60) * 60);
+      }
       return ({ '1h': 0, '6h': 60, '24h': 300, '7d': 1800, '30d': 7200 })[range] || 0;
     },
 
     async reload(silent) {
       if (!silent) this.loading = true;
       try {
-        const bucket = this.bucketFor(this.range);
-        const r = await fetch(`/api/stats/history?range=${this.range}&bucket_seconds=${bucket}`);
+        // For the custom range, compute the span first so we can pick
+        // a sensible bucket width.
+        let bucket;
+        let url;
+        if (this.range === 'custom') {
+          if (!this.customFrom || !this.customTo) {
+            this.metaLine = 'pick from + to and click Apply';
+            return;
+          }
+          const span = Math.max(
+            0,
+            (new Date(this.customTo).getTime() - new Date(this.customFrom).getTime()) / 1000,
+          );
+          bucket = this.bucketFor('custom', span);
+          // ``datetime-local`` values are local-naive; turn them into
+          // ISO with Z so SQLite's ``ts BETWEEN`` matches the rows
+          // we persist as UTC.
+          const startIso = new Date(this.customFrom).toISOString();
+          const endIso   = new Date(this.customTo).toISOString();
+          url = `/api/stats/history?range=custom&bucket_seconds=${bucket}`
+              + `&start=${encodeURIComponent(startIso)}`
+              + `&end=${encodeURIComponent(endIso)}`;
+        } else {
+          bucket = this.bucketFor(this.range);
+          url = `/api/stats/history?range=${this.range}&bucket_seconds=${bucket}`;
+        }
+        const r = await fetch(url);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
         this.samples = j.samples || [];
@@ -312,14 +392,37 @@ function overview() {
         nodes:    this.$refs.cNodes,
         rels:     this.$refs.cRels,
       };
+      // Range changed since the last render? Tear every chart down
+      // so the next constructor sees a clean canvas. Chart.js can't
+      // safely ``update()`` a time-scale chart with a vastly
+      // different data range — its layout calc throws
+      // "Cannot set properties of undefined (setting 'fullSize')".
+      const rangeChanged = this._lastRange !== this.range;
+      if (rangeChanged) {
+        for (const k of Object.keys(this.charts)) {
+          try { this.charts[k].destroy(); } catch (_) { /* noop */ }
+          delete this.charts[k];
+        }
+      }
+      this._lastRange = this.range;
+
       for (const key of Object.keys(refs)) {
         const ctx = refs[key];
         if (!ctx) continue;
         if (this.charts[key]) {
-          this.charts[key].data.labels = labels;
-          this.charts[key].data.datasets = datasets[key];
-          this.charts[key].update('none');
-        } else {
+          // Same range, just newer data (polling). Update in place.
+          try {
+            this.charts[key].data.labels = labels;
+            this.charts[key].data.datasets = datasets[key];
+            this.charts[key].update('none');
+          } catch (e) {
+            // Defensive fallback: any Chart.js layout glitch → drop
+            // the chart and rebuild from scratch on the next pass.
+            try { this.charts[key].destroy(); } catch (_) {}
+            delete this.charts[key];
+          }
+        }
+        if (!this.charts[key]) {
           this.charts[key] = new Chart(ctx, {
             type: 'line',
             data: { labels, datasets: datasets[key] },
