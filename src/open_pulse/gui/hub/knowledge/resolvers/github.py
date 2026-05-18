@@ -80,7 +80,6 @@ def _enrich_user_or_org(login: str, entity: Entity | None) -> Entity | None:
         # already attached graph neighbours when it ran — if it
         # returned None, neighbours_from_neo4j must have been empty,
         # meaning Neo4j has the node but no edges. Render anyway.
-        from ..stores import neo4j_user_or_org_neighbours
 
         canonical = f"https://github.com/{login}"
         entity = Entity(
@@ -164,8 +163,6 @@ def _extract_identifiers(bindings: list[dict]) -> list[Fact]:
         if not v:
             continue
         out.append(
-            Fact(
-                label=wanted[p], value=v, href=v if v.startswith("http") else ""
-            )
+            Fact(label=wanted[p], value=v, href=v if v.startswith("http") else "")
         )
     return out

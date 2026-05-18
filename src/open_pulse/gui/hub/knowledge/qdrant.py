@@ -153,6 +153,7 @@ def _is_placeholder(v: Any) -> bool:
             return True
     return False
 
+
 _TEXT_FIELDS = ("text", "abstract", "summary", "description")
 
 
@@ -174,9 +175,7 @@ def _scroll(
         return []
     client, headers = pair
     settings = get_settings()
-    url = (
-        f"{settings.qdrant_url.rstrip('/')}/collections/{collection}/points/scroll"
-    )
+    url = f"{settings.qdrant_url.rstrip('/')}/collections/{collection}/points/scroll"
     body = {
         "filter": payload_filter,
         "limit": int(limit),
@@ -254,7 +253,11 @@ def _candidate_keys(ref: HubRef) -> list[tuple[str, Any]]:
         if full:
             pairs.append(("entity_id", full))
             pairs.append(("repo_id", full))
-    elif host == "zenodo.org" and len(parts) >= 2 and parts[0].lower() in {"record", "records"}:
+    elif (
+        host == "zenodo.org"
+        and len(parts) >= 2
+        and parts[0].lower() in {"record", "records"}
+    ):
         rec = parts[1]
         pairs.append(("entity_id", rec))
         pairs.append(("zenodo_id", rec))
@@ -612,24 +615,24 @@ def list_collections() -> list[str]:
 # merges them client-side. Qdrant silently ignores fields a
 # collection doesn't index, so this list can stay broad.
 _AUTOCOMPLETE_COLLECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("github_repos",          ("name", "full_name", "owner", "repo_id")),
-    ("hf_models",             ("name", "author", "repo_id")),
-    ("hf_datasets",           ("name", "author", "repo_id")),
-    ("hf_orgs",               ("name", "login")),
-    ("hf_spaces",             ("name", "author", "repo_id")),
-    ("zenodo_records",        ("title", "doi")),
-    ("infoscience_articles",  ("title", "authors")),
-    ("infoscience_persons",   ("name", "family_name", "given_name")),
+    ("github_repos", ("name", "full_name", "owner", "repo_id")),
+    ("hf_models", ("name", "author", "repo_id")),
+    ("hf_datasets", ("name", "author", "repo_id")),
+    ("hf_orgs", ("name", "login")),
+    ("hf_spaces", ("name", "author", "repo_id")),
+    ("zenodo_records", ("title", "doi")),
+    ("infoscience_articles", ("title", "authors")),
+    ("infoscience_persons", ("name", "family_name", "given_name")),
     ("infoscience_organizations", ("name",)),
-    ("ror_worldwide",         ("name",)),
-    ("ror_switzerland",       ("name",)),
-    ("ror_epfl_ethz",         ("name",)),
-    ("works",                 ("title",)),
-    ("authors",               ("display_name", "name")),
-    ("institutions",          ("display_name",)),
-    ("renkulab_projects",     ("name", "slug", "namespace")),
+    ("ror_worldwide", ("name",)),
+    ("ror_switzerland", ("name",)),
+    ("ror_epfl_ethz", ("name",)),
+    ("works", ("title",)),
+    ("authors", ("display_name", "name")),
+    ("institutions", ("display_name",)),
+    ("renkulab_projects", ("name", "slug", "namespace")),
     ("ethz_research_collection_articles", ("title",)),
-    ("ethz_research_collection_persons",  ("name",)),
+    ("ethz_research_collection_persons", ("name",)),
 )
 
 
@@ -655,10 +658,7 @@ def _autocomplete_one(
         return []
     _, headers = pair
     settings = get_settings()
-    url = (
-        f"{settings.qdrant_url.rstrip('/')}"
-        f"/collections/{collection}/points/scroll"
-    )
+    url = f"{settings.qdrant_url.rstrip('/')}/collections/{collection}/points/scroll"
     try:
         with httpx.Client(timeout=timeout) as client:
             r = client.post(url, json=body, headers=headers)
@@ -831,12 +831,12 @@ def count_points(collection: str) -> int | None:
 # the should-block tight so a sub-second scan is realistic when the
 # index is warm.
 _BACKLINK_URL_FIELDS = (
-    "matched_urls",      # list of URLs the record matched (most reliable)
-    "related_urls",      # list of related URLs
-    "url",               # generic
-    "html_url",          # GitHub-style
-    "homepage",          # research orgs / projects
-    "repository",        # publication / dataset → code link
+    "matched_urls",  # list of URLs the record matched (most reliable)
+    "related_urls",  # list of related URLs
+    "url",  # generic
+    "html_url",  # GitHub-style
+    "homepage",  # research orgs / projects
+    "repository",  # publication / dataset → code link
     "repository_url",
     "code_repository",
 )
@@ -985,9 +985,7 @@ def _canonical_url_for_point(collection: str, payload: dict[str, Any]) -> str:
         # All orcid_* collections key off the bare ORCID identifier
         # (e.g. ``0000-0002-5899-551X``). Build the canonical URL.
         orcid = (
-            payload.get("orcid_id")
-            or payload.get("orcid")
-            or payload.get("entity_id")
+            payload.get("orcid_id") or payload.get("orcid") or payload.get("entity_id")
         )
         if isinstance(orcid, str) and orcid:
             return f"https://orcid.org/{orcid}"
@@ -1151,9 +1149,7 @@ def lookup_backlinks(
     # zero return on cross-reference lookups.
     available = set(list_collections())
     collections = [
-        c
-        for c in _BACKLINK_TARGET_COLLECTIONS
-        if c in available and c not in exclude
+        c for c in _BACKLINK_TARGET_COLLECTIONS if c in available and c not in exclude
     ]
 
     def _emit(msg: str) -> None:
@@ -1191,9 +1187,7 @@ def lookup_backlinks(
                 for pending in futures:
                     pending.cancel()
                 timed_out = [
-                    c
-                    for f, c in futures.items()
-                    if not f.done() and not f.cancelled()
+                    c for f, c in futures.items() if not f.done() and not f.cancelled()
                 ]
                 break
             try:
@@ -1219,9 +1213,7 @@ def lookup_backlinks(
                         stripped = stripped[len("www.") :]
                     hub = f"/hub/{stripped.rstrip('/')}"
                 items.append(
-                    BackLinkItem(
-                        label=label, hub_url=hub, external_url=external
-                    )
+                    BackLinkItem(label=label, hub_url=hub, external_url=external)
                 )
 
             if items:
@@ -1241,9 +1233,7 @@ def lookup_backlinks(
             f"(skipped {len(timed_out)} that exceeded the wall budget)"
         )
     else:
-        _emit(
-            f"Backlinks: {total} refs across {len(out)} collections"
-        )
+        _emit(f"Backlinks: {total} refs across {len(out)} collections")
 
     # Stable display order: most matches first, then collection name.
     out.sort(key=lambda g: (-len(g.items), g.collection))
@@ -1424,9 +1414,7 @@ def lookup_related(ref: HubRef, *, per_group_limit: int = 6) -> list[RelatedGrou
         f = {"must": filter_must}
         if must_not:
             f["must_not"] = must_not
-        points = _scroll_with_timeout(
-            coll, f, limit, timeout=_BACKLINK_TIMEOUT
-        )
+        points = _scroll_with_timeout(coll, f, limit, timeout=_BACKLINK_TIMEOUT)
         items = _items_from_points(coll, ref.host, points, skip_slug=own_slug)
         if not items:
             return
@@ -1487,11 +1475,7 @@ def lookup_related(ref: HubRef, *, per_group_limit: int = 6) -> list[RelatedGrou
                 limit=3,
             )
 
-        if (
-            lang
-            and isinstance(lang, str)
-            and lang.lower() not in ("", "none")
-        ):
+        if lang and isinstance(lang, str) and lang.lower() not in ("", "none"):
             _add(
                 [{"key": "primary_language", "match": {"value": lang}}],
                 f"Other {lang} repositories",
@@ -1542,11 +1526,7 @@ def lookup_related(ref: HubRef, *, per_group_limit: int = 6) -> list[RelatedGrou
                 [{"key": "library_name", "match": {"value": library}}],
                 f"Other {library} models",
             )
-        if (
-            pipeline
-            and isinstance(pipeline, str)
-            and pipeline.lower() != "none"
-        ):
+        if pipeline and isinstance(pipeline, str) and pipeline.lower() != "none":
             _add(
                 [{"key": "pipeline_tag", "match": {"value": pipeline}}],
                 f"Other {pipeline} models",
@@ -1568,7 +1548,7 @@ def lookup_related(ref: HubRef, *, per_group_limit: int = 6) -> list[RelatedGrou
         if doi and isinstance(doi, str):
             _add(
                 [{"key": "doi", "match": {"value": doi}}],
-                f"OpenAlex citation for this DOI",
+                "OpenAlex citation for this DOI",
                 target_collection="works",
                 limit=3,
             )
@@ -1759,9 +1739,7 @@ def _lookup_connected_github_via_lookup(
     return []
 
 
-def _items_for_github_slugs(
-    slugs: list[str], *, limit: int
-) -> list[RelatedItem]:
+def _items_for_github_slugs(slugs: list[str], *, limit: int) -> list[RelatedItem]:
     """Resolve each ``owner/repo`` slug to a RelatedItem, decorated
     with the github_repos payload (stars / language / license) when
     available AND with Neo4j community stats (contributors / owning

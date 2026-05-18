@@ -67,7 +67,9 @@ def sparql_select(query: str) -> list[dict[str, Any]]:
     return list((body.get("results") or {}).get("bindings") or [])
 
 
-def neo4j_run(cypher: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def neo4j_run(
+    cypher: str, params: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     """Run a Cypher query and return rows as dicts.
 
     Importing the neo4j driver is deferred so the hub can boot without
@@ -118,10 +120,7 @@ def sparql_describe(subject_iri: str, limit: int = 200) -> list[dict[str, Any]]:
     Used by every resolver as the first probe — if the store has any
     statements about the canonical URL, the entity counts as known.
     """
-    query = (
-        f"SELECT ?p ?o WHERE {{ <{subject_iri}> ?p ?o }} "
-        f"LIMIT {int(limit)}"
-    )
+    query = f"SELECT ?p ?o WHERE {{ <{subject_iri}> ?p ?o }} LIMIT {int(limit)}"
     return sparql_select(query)
 
 
@@ -258,9 +257,7 @@ def neo4j_repo_community(slugs: list[str], *, limit: int = 25) -> dict[str, Any]
         "ORDER BY n_repos DESC, login "
         "LIMIT $limit"
     )
-    c_rows = neo4j_run(
-        contributors_cypher, {"slugs": slugs, "limit": limit}
-    )
+    c_rows = neo4j_run(contributors_cypher, {"slugs": slugs, "limit": limit})
     o_rows = neo4j_run(owner_cypher, {"slugs": slugs, "limit": limit})
     return {
         "contributors": [

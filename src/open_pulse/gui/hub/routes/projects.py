@@ -275,12 +275,12 @@ async def _decorate_wikidata_labels(
         for v in facet.get("values") or []:
             iri = v.get("value") or ""
             if iri.startswith(_WIKIDATA_IRI_PREFIX):
-                qid = iri[len(_WIKIDATA_IRI_PREFIX):]
+                qid = iri[len(_WIKIDATA_IRI_PREFIX) :]
                 if qid and qid not in _WIKIDATA_LABEL_CACHE:
                     needed.add(qid)
     if needed:
         # The MediaWiki API allows up to 50 IDs per call. Batch.
-        chunks = [list(needed)[i:i + 50] for i in range(0, len(needed), 50)]
+        chunks = [list(needed)[i : i + 50] for i in range(0, len(needed), 50)]
         for chunk in chunks:
             try:
                 # Wikidata's API rejects requests whose User-Agent
@@ -313,7 +313,9 @@ async def _decorate_wikidata_labels(
             except Exception:  # noqa: BLE001 — never fatal
                 continue
             for qid, ent in (payload.get("entities") or {}).items():
-                label = (((ent.get("labels") or {}).get("en") or {}).get("value")) or qid
+                label = (
+                    ((ent.get("labels") or {}).get("en") or {}).get("value")
+                ) or qid
                 _WIKIDATA_LABEL_CACHE[qid] = label
 
     # Now annotate every facet value in place.
@@ -321,7 +323,7 @@ async def _decorate_wikidata_labels(
         for v in facet.get("values") or []:
             iri = v.get("value") or ""
             if iri.startswith(_WIKIDATA_IRI_PREFIX):
-                qid = iri[len(_WIKIDATA_IRI_PREFIX):]
+                qid = iri[len(_WIKIDATA_IRI_PREFIX) :]
                 lbl = _WIKIDATA_LABEL_CACHE.get(qid)
                 if lbl:
                     v["label"] = lbl

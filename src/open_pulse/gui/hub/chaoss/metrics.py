@@ -37,7 +37,6 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-import datetime as _dt
 from typing import Any, Callable
 
 from ..knowledge import opensearch as os_mod, stores
@@ -46,6 +45,7 @@ log = logging.getLogger(__name__)
 
 
 # ── Data structures ──────────────────────────────────────────────────────
+
 
 @dataclass
 class QueryTrace:
@@ -120,8 +120,8 @@ class MetricSpec:
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 _API_PATH_BY_ENGINE = {
-    "cypher":     "/api/databases/cypher/query",
-    "sparql":     "/api/databases/sparql/query",
+    "cypher": "/api/databases/cypher/query",
+    "sparql": "/api/databases/sparql/query",
     "opensearch": "/api/databases/opensearch/query",
 }
 
@@ -214,9 +214,13 @@ def _build_recipes(
             py.append(f"r{i} = post({path!r}, body{i})")
         else:
             # Triple-quoted string literal keeps the query readable.
-            triple_q = '"""' + t.query.replace("\\", "\\\\").replace('"""', '\\"\\"\\"') + '"""'
+            triple_q = (
+                '"""'
+                + t.query.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+                + '"""'
+            )
             py.append(f"query{i} = {triple_q}")
-            py.append(f"r{i} = post({path!r}, {{\"query\": query{i}}})")
+            py.append(f'r{i} = post({path!r}, {{"query": query{i}}})')
         py.append(f"v{i} = {ex['python']}")
         py.append("")
     py.append("# ── unification ──")
@@ -239,7 +243,9 @@ def _build_recipes(
         if t.engine == "opensearch":
             try:
                 qobj = json.loads(t.query)
-                body_json = json.dumps({"mode": t.mode or "dsl", "query": qobj}, indent=2)
+                body_json = json.dumps(
+                    {"mode": t.mode or "dsl", "query": qobj}, indent=2
+                )
             except Exception:  # noqa: BLE001
                 body_json = json.dumps({"mode": t.mode or "dsl", "query": t.query})
         else:
@@ -290,9 +296,13 @@ def _build_recipes(
         if t.engine == "opensearch":
             try:
                 qobj = json.loads(t.query)
-                body_str = _js_pretty_object({"mode": t.mode or "dsl", "query": qobj}, indent=2)
+                body_str = _js_pretty_object(
+                    {"mode": t.mode or "dsl", "query": qobj}, indent=2
+                )
             except Exception:  # noqa: BLE001
-                body_str = _js_pretty_object({"mode": t.mode or "dsl", "query": t.query})
+                body_str = _js_pretty_object(
+                    {"mode": t.mode or "dsl", "query": t.query}
+                )
             # Re-indent so the literal sits inside the IIFE.
             body_str = "\n".join("  " + ln for ln in body_str.splitlines())
             js.append(f"  const r{i} = await post({json.dumps(path)},\n{body_str});")
@@ -308,7 +318,7 @@ def _build_recipes(
     js.append("  // ── unification ──")
     for line in combine["js"].splitlines():
         js.append(f"  {line}")
-    js.append(f'  console.log(`{label} = ${{headline}}`);')
+    js.append(f"  console.log(`{label} = ${{headline}}`);")
     js.append("})();")
     js_script = "\n".join(js)
 
@@ -336,7 +346,10 @@ def _xsd_datetime(dt: datetime) -> str:
 
 # ── Metric 1 · Contributors ───────────────────────────────────────────────
 
-def _metric_contributors(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_contributors(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """How many distinct people contributed to this repo? Counted both
     over the configured time window (OpenSearch / SPARQL) and as an
     all-time community total (Neo4j).
@@ -358,18 +371,26 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
         rows = stores.neo4j_run(cypher)
         n = int(rows[0].get("contributors") or 0) if rows else 0
         values["neo4j"] = n
-        traces.append(QueryTrace(
-            store="Neo4j", engine="cypher",
-            title="All-time distinct contributors in the community graph",
-            query=cypher,
-            result_summary=f"{n} distinct users",
-        ))
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title="All-time distinct contributors in the community graph",
+                query=cypher,
+                result_summary=f"{n} distinct users",
+            )
+        )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="Neo4j", engine="cypher",
-            title="All-time distinct contributors in the community graph",
-            query=cypher, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title="All-time distinct contributors in the community graph",
+                query=cypher,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     # ── SPARQL — distinct contributors active in the window ──────────
     sparql = (
@@ -391,18 +412,26 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
         rows = stores.sparql_select(sparql)
         n = int(rows[0]["n"]["value"]) if rows else 0
         values["sparql"] = n
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Contributors with activity since {cutoff_iso[:10]}",
-            query=sparql,
-            result_summary=f"{n} distinct persons",
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Contributors with activity since {cutoff_iso[:10]}",
+                query=sparql,
+                result_summary=f"{n} distinct persons",
+            )
+        )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Contributors with activity since {cutoff_iso[:10]}",
-            query=sparql, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Contributors with activity since {cutoff_iso[:10]}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     # ── OpenSearch — distinct git authors in the window + monthly
     # trend so the card can render a sparkline. One round-trip; the
@@ -427,9 +456,7 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
                     "calendar_interval": "month",
                     "min_doc_count": 0,
                 },
-                "aggs": {
-                    "unique_authors": {"cardinality": {"field": "author_name"}}
-                },
+                "aggs": {"unique_authors": {"cardinality": {"field": "author_name"}}},
             },
         },
     }
@@ -443,22 +470,36 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
         for b in (aggs.get("by_month") or {}).get("buckets", []):
             ts_ms = int(b.get("key") or 0)
             authors = int((b.get("unique_authors") or {}).get("value") or 0)
-            contrib_series.append({
-                "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
-                "value": authors,
-            })
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Cardinality of git authors on {origin} since {cutoff_iso[:10]} (with monthly trend)",
-            query=body_text,
-            result_summary=f"{n} distinct authors · {len(contrib_series)} months",
-        ))
+            contrib_series.append(
+                {
+                    "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                    .date()
+                    .isoformat()[:7],
+                    "value": authors,
+                }
+            )
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Cardinality of git authors on {origin} since {cutoff_iso[:10]} (with monthly trend)",
+                query=body_text,
+                result_summary=f"{n} distinct authors · {len(contrib_series)} months",
+            )
+        )
     else:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Cardinality of git authors on {origin} since {cutoff_iso[:10]}",
-            query=body_text, result_summary="no response", error="OpenSearch unreachable or empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Cardinality of git authors on {origin} since {cutoff_iso[:10]}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or empty",
+            )
+        )
 
     # Headline: prefer the largest observed non-zero value among the
     # windowed stores (OpenSearch / SPARQL), falling back to Neo4j's
@@ -467,8 +508,8 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
     # indexed yet", not "this repo has no contributors".
     candidates = [
         ("opensearch", values["opensearch"], f"last {window_days} days · OpenSearch"),
-        ("sparql",     values["sparql"],     f"last {window_days} days · SPARQL"),
-        ("neo4j",      values["neo4j"],      "all-time · Neo4j community graph"),
+        ("sparql", values["sparql"], f"last {window_days} days · SPARQL"),
+        ("neo4j", values["neo4j"], "all-time · Neo4j community graph"),
     ]
     winner = next(((v, lbl) for _, v, lbl in candidates if v), None)
     if winner is None:
@@ -477,13 +518,16 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
         observed = [(v, lbl) for _, v, lbl in candidates if v is not None]
         if not observed:
             return MetricResult(
-                slug="contributors", value="—", label="no contributor data",
-                secondary=None, queries=traces,
+                slug="contributors",
+                value="—",
+                label="no contributor data",
+                secondary=None,
+                queries=traces,
                 notes="None of the three stores returned a value for this repo.",
-            unification=(
-            "Largest non-zero of three stores: **OpenSearch** (windowed git-cardinality) · **SPARQL** (windowed contribution graph) · **Neo4j** (all-time edges). Fallback ladder skips zeros so an empty index can't hide a real signal."
-        ),
-    )
+                unification=(
+                    "Largest non-zero of three stores: **OpenSearch** (windowed git-cardinality) · **SPARQL** (windowed contribution graph) · **Neo4j** (all-time edges). Fallback ladder skips zeros so an empty index can't hide a real signal."
+                ),
+            )
         winner = observed[0]
     headline, label = winner
 
@@ -502,24 +546,32 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
         traces=traces,
         extracts=[
             # trace 1 — Neo4j ``count(DISTINCT u)``
-            {"python": "r1['rows'][0][0] if r1.get('rows') else 0",
-             "bash":   ".rows[0][0] // 0",
-             "js":     "(r1.rows && r1.rows[0]) ? r1.rows[0][0] : 0"},
+            {
+                "python": "r1['rows'][0][0] if r1.get('rows') else 0",
+                "bash": ".rows[0][0] // 0",
+                "js": "(r1.rows && r1.rows[0]) ? r1.rows[0][0] : 0",
+            },
             # trace 2 — SPARQL ``COUNT(DISTINCT ?person)``
-            {"python": "int(r2['rows'][0][0]) if r2.get('rows') else 0",
-             "bash":   ".rows[0][0] | tonumber? // 0",
-             "js":     "(r2.rows && r2.rows[0]) ? Number(r2.rows[0][0]) : 0"},
+            {
+                "python": "int(r2['rows'][0][0]) if r2.get('rows') else 0",
+                "bash": ".rows[0][0] | tonumber? // 0",
+                "js": "(r2.rows && r2.rows[0]) ? Number(r2.rows[0][0]) : 0",
+            },
             # trace 3 — OpenSearch ``cardinality(author_name)``
-            {"python": "r3.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('value', 0)",
-             "bash":   ".raw.aggregations.by_author.value // 0",
-             "js":     "r3.raw?.aggregations?.by_author?.value ?? 0"},
+            {
+                "python": "r3.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('value', 0)",
+                "bash": ".raw.aggregations.by_author.value // 0",
+                "js": "r3.raw?.aggregations?.by_author?.value ?? 0",
+            },
         ],
         combine={
             "python": "headline = next((v for v in (v3, v2, v1) if v), 0)",
-            "bash":   ('if [ "$v3" != "0" ]; then headline=$v3;'
-                       ' elif [ "$v2" != "0" ]; then headline=$v2;'
-                       ' else headline=$v1; fi'),
-            "js":     "const headline = [v3, v2, v1].find(v => v) ?? 0;",
+            "bash": (
+                'if [ "$v3" != "0" ]; then headline=$v3;'
+                ' elif [ "$v2" != "0" ]; then headline=$v2;'
+                " else headline=$v1; fi"
+            ),
+            "js": "const headline = [v3, v2, v1].find(v => v) ?? 0;",
         },
     )
     return MetricResult(
@@ -537,7 +589,7 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
             "``pulse:lastContributionDate`` on the Contribution node. "
             "Neo4j is an all-time edge count — it ignores the window."
         ),
-    unification=(
+        unification=(
             "Largest non-zero of three stores: **OpenSearch** (windowed git-cardinality) · **SPARQL** (windowed contribution graph) · **Neo4j** (all-time edges). Fallback ladder skips zeros so an empty index can't hide a real signal."
         ),
     )
@@ -545,7 +597,10 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
 
 # ── Metric 2 · New Contributors ───────────────────────────────────────────
 
-def _metric_new_contributors(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_new_contributors(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Contributors whose *first* contribution to this repo happened
     inside the window.
     """
@@ -585,18 +640,26 @@ def _metric_new_contributors(full: str, canonical_url: str, window_days: int) ->
             }
             for r in rows[:8]
         )
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Persons whose first contribution is after {cutoff_iso[:10]}",
-            query=sparql,
-            result_summary=f"{len(rows)} new contributors",
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Persons whose first contribution is after {cutoff_iso[:10]}",
+                query=sparql,
+                result_summary=f"{len(rows)} new contributors",
+            )
+        )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Persons whose first contribution is after {cutoff_iso[:10]}",
-            query=sparql, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Persons whose first contribution is after {cutoff_iso[:10]}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     # ── OpenSearch — terms agg + min(date) sub-agg, filter in Python ──
     # bucket_selector / having would push the filter into the cluster
@@ -609,48 +672,65 @@ def _metric_new_contributors(full: str, canonical_url: str, window_days: int) ->
         "aggs": {
             "by_author": {
                 "terms": {"field": "author_name", "size": 1000},
-                "aggs": {
-                    "first_commit": {"min": {"field": "grimoire_creation_date"}}
-                },
+                "aggs": {"first_commit": {"min": {"field": "grimoire_creation_date"}}},
             }
         },
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/git_*_enriched/_search", body)
     if raw is not None:
-        buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
+        buckets = (
+            (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
+        )
         cutoff_ms = int(cutoff.timestamp() * 1000)
-        new = [b for b in buckets if (b.get("first_commit", {}).get("value") or 0) >= cutoff_ms]
+        new = [
+            b
+            for b in buckets
+            if (b.get("first_commit", {}).get("value") or 0) >= cutoff_ms
+        ]
         values["opensearch"] = len(new)
         for b in new[:8]:
             ts = int(b.get("first_commit", {}).get("value") or 0) // 1000
-            examples.append({
-                "label": b.get("key", ""),
-                "detail": datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat(),
-                "source": "OpenSearch",
-            })
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=(
-                f"First commit per author on {origin}; filter buckets "
-                f"with first ≥ {cutoff_iso[:10]} client-side"
-            ),
-            query=body_text,
-            result_summary=f"{len(new)} new authors out of {len(buckets)} total",
-        ))
+            examples.append(
+                {
+                    "label": b.get("key", ""),
+                    "detail": datetime.fromtimestamp(ts, tz=timezone.utc)
+                    .date()
+                    .isoformat(),
+                    "source": "OpenSearch",
+                }
+            )
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=(
+                    f"First commit per author on {origin}; filter buckets "
+                    f"with first ≥ {cutoff_iso[:10]} client-side"
+                ),
+                query=body_text,
+                result_summary=f"{len(new)} new authors out of {len(buckets)} total",
+            )
+        )
     else:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"First commit per author on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"First commit per author on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or empty",
+            )
+        )
 
     # Same "skip zeros if another store has a signal" rule as
     # ``_metric_contributors`` — protects against GrimoireLab simply
     # not having ingested this repo's commits.
     candidates = [
-        ("sparql",     values["sparql"],     f"last {window_days} days · SPARQL"),
+        ("sparql", values["sparql"], f"last {window_days} days · SPARQL"),
         ("opensearch", values["opensearch"], f"last {window_days} days · OpenSearch"),
     ]
     winner = next(((v, lbl) for _, v, lbl in candidates if v), None)
@@ -658,14 +738,17 @@ def _metric_new_contributors(full: str, canonical_url: str, window_days: int) ->
         observed = [(v, lbl) for _, v, lbl in candidates if v is not None]
         if not observed:
             return MetricResult(
-        recipes=nc_recipes,
-                slug="new_contributors", value="—", label="no data",
-                secondary=None, queries=traces,
+                recipes=nc_recipes,
+                slug="new_contributors",
+                value="—",
+                label="no data",
+                secondary=None,
+                queries=traces,
                 notes="Couldn't reach either store with first-contribution data.",
-            unification=(
-            "Largest non-zero of windowed **SPARQL** (`pulse:firstContributionDate` filter) and **OpenSearch** (terms agg + min commit date per author, filtered client-side)."
-        ),
-    )
+                unification=(
+                    "Largest non-zero of windowed **SPARQL** (`pulse:firstContributionDate` filter) and **OpenSearch** (terms agg + min commit date per author, filtered client-side)."
+                ),
+            )
         winner = observed[0]
     headline, label = winner
 
@@ -674,27 +757,33 @@ def _metric_new_contributors(full: str, canonical_url: str, window_days: int) ->
         bits.append(f"SPARQL: {values['sparql']}")
     if values["opensearch"] is not None:
         bits.append(f"OpenSearch: {values['opensearch']}")
-    
-    _ci = (cutoff if isinstance(cutoff, str) else cutoff_iso)
+
+    _ci = cutoff if isinstance(cutoff, str) else cutoff_iso
     nc_recipes = _build_recipes(
-        label='new_contributors',
+        label="new_contributors",
         traces=traces,
         extracts=[
-                    {
-                        'python': "len(r1.get('rows', []))",
-                        'bash':   '[.rows[]] | length',
-                        'js':     '(r1.rows || []).length',
-                    },
-                    {
-                        'python': 'r2',
-                        'bash':   '.',
-                        'js':     'r2',
-                    },
-                ],
+            {
+                "python": "len(r1.get('rows', []))",
+                "bash": "[.rows[]] | length",
+                "js": "(r1.rows || []).length",
+            },
+            {
+                "python": "r2",
+                "bash": ".",
+                "js": "r2",
+            },
+        ],
         combine={
-            'python': "cutoff_ms = int(_dt.datetime.fromisoformat('{cutoff_iso}').timestamp() * 1000) if '{cutoff_iso}' else 0\nbuckets = v2.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('buckets', [])\nv2_count = sum(1 for b in buckets if (b.get('first_commit', {}).get('value') or 0) >= cutoff_ms)\nheadline = next((v for v in (v1, v2_count) if v), 0)".replace('{cutoff_iso}', _ci),
-            'bash':   'cutoff_ms=$(python3 -c \'import datetime as d; print(int(d.datetime.fromisoformat("{cutoff_iso}").timestamp()*1000))\')\nv2_count=$(echo "$v2" | jq --argjson c "$cutoff_ms" \'[.raw.aggregations.by_author.buckets[] | select((.first_commit.value // 0) >= $c)] | length\')\nif [ "$v1" -gt 0 ]; then headline=$v1; elif [ "$v2_count" -gt 0 ]; then headline=$v2_count; else headline=0; fi'.replace('{cutoff_iso}', _ci),
-            'js':     "const cutoffMs = new Date('{cutoff_iso}').getTime();\nconst buckets = v2.raw?.aggregations?.by_author?.buckets || [];\nconst v2Count = buckets.filter(b => (b.first_commit?.value || 0) >= cutoffMs).length;\nconst headline = [v1, v2Count].find(v => v) || 0;".replace('{cutoff_iso}', _ci),
+            "python": "cutoff_ms = int(_dt.datetime.fromisoformat('{cutoff_iso}').timestamp() * 1000) if '{cutoff_iso}' else 0\nbuckets = v2.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('buckets', [])\nv2_count = sum(1 for b in buckets if (b.get('first_commit', {}).get('value') or 0) >= cutoff_ms)\nheadline = next((v for v in (v1, v2_count) if v), 0)".replace(
+                "{cutoff_iso}", _ci
+            ),
+            "bash": 'cutoff_ms=$(python3 -c \'import datetime as d; print(int(d.datetime.fromisoformat("{cutoff_iso}").timestamp()*1000))\')\nv2_count=$(echo "$v2" | jq --argjson c "$cutoff_ms" \'[.raw.aggregations.by_author.buckets[] | select((.first_commit.value // 0) >= $c)] | length\')\nif [ "$v1" -gt 0 ]; then headline=$v1; elif [ "$v2_count" -gt 0 ]; then headline=$v2_count; else headline=0; fi'.replace(
+                "{cutoff_iso}", _ci
+            ),
+            "js": "const cutoffMs = new Date('{cutoff_iso}').getTime();\nconst buckets = v2.raw?.aggregations?.by_author?.buckets || [];\nconst v2Count = buckets.filter(b => (b.first_commit?.value || 0) >= cutoffMs).length;\nconst headline = [v1, v2Count].find(v => v) || 0;".replace(
+                "{cutoff_iso}", _ci
+            ),
         },
     )
     return MetricResult(
@@ -719,7 +808,10 @@ def _metric_new_contributors(full: str, canonical_url: str, window_days: int) ->
 
 # ── Metric 3 · Technical Fork ─────────────────────────────────────────────
 
-def _metric_technical_fork(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_technical_fork(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Snapshot: how many forks exist? Two views — the *observed* fork
     count from inbound FORK_OF edges in Neo4j, and the GitHub-reported
     count materialised as ``pulse:githubRepoForks`` in the RDF graph.
@@ -741,17 +833,26 @@ def _metric_technical_fork(full: str, canonical_url: str, window_days: int) -> M
         rows = stores.neo4j_run(cypher)
         n = int(rows[0].get("observed_forks") or 0) if rows else 0
         values["neo4j"] = n
-        traces.append(QueryTrace(
-            store="Neo4j", engine="cypher",
-            title=f"Forks observed in graph for {full}",
-            query=cypher, result_summary=f"{n} forks in graph",
-        ))
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title=f"Forks observed in graph for {full}",
+                query=cypher,
+                result_summary=f"{n} forks in graph",
+            )
+        )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="Neo4j", engine="cypher",
-            title=f"Forks observed in graph for {full}",
-            query=cypher, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title=f"Forks observed in graph for {full}",
+                query=cypher,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     # ── SPARQL — what GitHub said the fork count was at crawl time ──
     sparql = (
@@ -770,61 +871,79 @@ def _metric_technical_fork(full: str, canonical_url: str, window_days: int) -> M
         if rows:
             n = int(rows[0]["forks"]["value"])
             values["sparql"] = n
-            traces.append(QueryTrace(
-                store="SPARQL", engine="sparql",
-                title=f"GitHub-reported fork count for {full}",
-                query=sparql, result_summary=f"{n} forks (GitHub)",
-            ))
+            traces.append(
+                QueryTrace(
+                    store="SPARQL",
+                    engine="sparql",
+                    title=f"GitHub-reported fork count for {full}",
+                    query=sparql,
+                    result_summary=f"{n} forks (GitHub)",
+                )
+            )
         else:
-            traces.append(QueryTrace(
-                store="SPARQL", engine="sparql",
-                title=f"GitHub-reported fork count for {full}",
-                query=sparql, result_summary="no triple matched",
-            ))
+            traces.append(
+                QueryTrace(
+                    store="SPARQL",
+                    engine="sparql",
+                    title=f"GitHub-reported fork count for {full}",
+                    query=sparql,
+                    result_summary="no triple matched",
+                )
+            )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"GitHub-reported fork count for {full}",
-            query=sparql, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"GitHub-reported fork count for {full}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
-    headline = next((values[k] for k in ("sparql", "neo4j") if values[k] is not None), None)
+    headline = next(
+        (values[k] for k in ("sparql", "neo4j") if values[k] is not None), None
+    )
     if headline is None:
         return MetricResult(
-        recipes=tf_recipes,
-            slug="technical_fork", value="—", label="no fork data",
-            secondary=None, queries=traces,
+            recipes=tf_recipes,
+            slug="technical_fork",
+            value="—",
+            label="no fork data",
+            secondary=None,
+            queries=traces,
             notes="No fork count available from either store.",
-        unification=(
-            "**SPARQL** GitHub-reported takes precedence; **Neo4j** in-graph observed-fork count is shown as a secondary signal."
-        ),
-    )
+            unification=(
+                "**SPARQL** GitHub-reported takes precedence; **Neo4j** in-graph observed-fork count is shown as a secondary signal."
+            ),
+        )
     bits = []
     if values["sparql"] is not None:
         bits.append(f"GitHub-reported: {values['sparql']}")
     if values["neo4j"] is not None:
         bits.append(f"in graph: {values['neo4j']}")
-    
+
     tf_recipes = _build_recipes(
-        label='technical_fork',
+        label="technical_fork",
         traces=traces,
         extracts=[
-                    {
-                        'python': "r1['rows'][0][0] if r1.get('rows') else 0",
-                        'bash':   '.rows[0][0] // 0',
-                        'js':     '(r1.rows && r1.rows[0]) ? r1.rows[0][0] : 0',
-                    },
-                    {
-                        'python': "int(r2['rows'][0][0]) if r2.get('rows') and r2['rows'] else 0",
-                        'bash':   '.rows[0][0] | tonumber? // 0',
-                        'js':     '(r2.rows && r2.rows[0]) ? Number(r2.rows[0][0]) : 0',
-                    },
-                ],
+            {
+                "python": "r1['rows'][0][0] if r1.get('rows') else 0",
+                "bash": ".rows[0][0] // 0",
+                "js": "(r1.rows && r1.rows[0]) ? r1.rows[0][0] : 0",
+            },
+            {
+                "python": "int(r2['rows'][0][0]) if r2.get('rows') and r2['rows'] else 0",
+                "bash": ".rows[0][0] | tonumber? // 0",
+                "js": "(r2.rows && r2.rows[0]) ? Number(r2.rows[0][0]) : 0",
+            },
+        ],
         combine={
-                    'python': 'headline = v2 if v2 else v1',
-                    'bash':   'if [ "$v2" != "0" ]; then headline=$v2; else headline=$v1; fi',
-                    'js':     'const headline = v2 || v1;',
-                },
+            "python": "headline = v2 if v2 else v1",
+            "bash": 'if [ "$v2" != "0" ]; then headline=$v2; else headline=$v1; fi',
+            "js": "const headline = v2 || v1;",
+        },
     )
     return MetricResult(
         recipes=tf_recipes,
@@ -842,6 +961,7 @@ def _metric_technical_fork(full: str, canonical_url: str, window_days: int) -> M
 
 
 # ── Metric 4 · Licenses Declared ──────────────────────────────────────────
+
 
 def _metric_licenses(full: str, canonical_url: str, window_days: int) -> MetricResult:
     """FAIR/quality snapshot: does the repo declare a license, and
@@ -866,25 +986,33 @@ def _metric_licenses(full: str, canonical_url: str, window_days: int) -> MetricR
     try:
         rows = stores.sparql_select(sparql)
         licenses = [r["license"]["value"] for r in rows]
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"License IRIs / strings declared for {full}",
-            query=sparql,
-            result_summary=(
-                f"{len(licenses)} declared license"
-                + ("s" if len(licenses) != 1 else "")
-            ),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"License IRIs / strings declared for {full}",
+                query=sparql,
+                result_summary=(
+                    f"{len(licenses)} declared license"
+                    + ("s" if len(licenses) != 1 else "")
+                ),
+            )
+        )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"License IRIs / strings declared for {full}",
-            query=sparql, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"License IRIs / strings declared for {full}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     if not licenses:
         return MetricResult(
-        recipes=lic_recipes,
+            recipes=lic_recipes,
             slug="licenses_declared",
             value="✗",
             label="no license declared",
@@ -895,30 +1023,30 @@ def _metric_licenses(full: str, canonical_url: str, window_days: int) -> MetricR
                 "it just means the metadata extractor didn't find one. "
                 "Triggering enrichment may surface it."
             ),
-        unification=(
-            "Presence flag: ✓ if **SPARQL** returns ≥ 1 `schema:license` triple, ✗ otherwise."
-        ),
-    )
+            unification=(
+                "Presence flag: ✓ if **SPARQL** returns ≥ 1 `schema:license` triple, ✗ otherwise."
+            ),
+        )
 
-    display = ", ".join(_short_license(l) for l in licenses[:3])
+    display = ", ".join(_short_license(lic) for lic in licenses[:3])
     if len(licenses) > 3:
         display += f", +{len(licenses) - 3}"
-    
+
     lic_recipes = _build_recipes(
-        label='licenses_declared',
+        label="licenses_declared",
         traces=traces,
         extracts=[
-                    {
-                        'python': "[row[0] for row in r1.get('rows', [])]",
-                        'bash':   '[.rows[][0]]',
-                        'js':     '(r1.rows || []).map(row => row[0])',
-                    },
-                ],
+            {
+                "python": "[row[0] for row in r1.get('rows', [])]",
+                "bash": "[.rows[][0]]",
+                "js": "(r1.rows || []).map(row => row[0])",
+            },
+        ],
         combine={
-                    'python': "headline = '✓' if v1 else '✗'",
-                    'bash':   'if [ "$(echo "$v1" | jq length)" -gt 0 ]; then headline="✓"; else headline="✗"; fi',
-                    'js':     "const headline = v1.length ? '✓' : '✗';",
-                },
+            "python": "headline = '✓' if v1 else '✗'",
+            "bash": 'if [ "$(echo "$v1" | jq length)" -gt 0 ]; then headline="✓"; else headline="✗"; fi',
+            "js": "const headline = v1.length ? '✓' : '✗';",
+        },
     )
     return MetricResult(
         recipes=lic_recipes,
@@ -927,7 +1055,10 @@ def _metric_licenses(full: str, canonical_url: str, window_days: int) -> MetricR
         label=display,
         secondary=f"{len(licenses)} declared",
         queries=traces,
-        examples=[{"label": _short_license(l), "detail": l, "source": "SPARQL"} for l in licenses],
+        examples=[
+            {"label": _short_license(lic), "detail": lic, "source": "SPARQL"}
+            for lic in licenses
+        ],
         notes=(
             "Snapshot — the SPARQL store keeps the latest crawl's "
             "license triple. Re-enriching this repo will update it. "
@@ -939,7 +1070,10 @@ def _metric_licenses(full: str, canonical_url: str, window_days: int) -> MetricR
 
 # ── Metric 6 · Project Popularity (stars + forks + dependents) ──────────
 
-def _metric_project_popularity(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_project_popularity(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Composite popularity snapshot: stars, forks, and — importantly
     for the academic context — the *dependents* count from the
     DEPENDS_ON edges Neo4j keeps. CHAOSS doesn't single out dependents
@@ -969,24 +1103,36 @@ def _metric_project_popularity(full: str, canonical_url: str, window_days: int) 
         if rows:
             stars = int(rows[0]["stars"]["value"]) if rows[0].get("stars") else None
             forks = int(rows[0]["forks"]["value"]) if rows[0].get("forks") else None
-            traces.append(QueryTrace(
-                store="SPARQL", engine="sparql",
+            traces.append(
+                QueryTrace(
+                    store="SPARQL",
+                    engine="sparql",
+                    title=f"Stars + fork count for {full}",
+                    query=sparql,
+                    result_summary=f"{stars or 0} stars · {forks or 0} forks",
+                )
+            )
+        else:
+            traces.append(
+                QueryTrace(
+                    store="SPARQL",
+                    engine="sparql",
+                    title=f"Stars + fork count for {full}",
+                    query=sparql,
+                    result_summary="repo not in graph",
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
                 title=f"Stars + fork count for {full}",
                 query=sparql,
-                result_summary=f"{stars or 0} stars · {forks or 0} forks",
-            ))
-        else:
-            traces.append(QueryTrace(
-                store="SPARQL", engine="sparql",
-                title=f"Stars + fork count for {full}",
-                query=sparql, result_summary="repo not in graph",
-            ))
-    except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Stars + fork count for {full}",
-            query=sparql, result_summary="error", error=str(exc),
-        ))
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     # ── Neo4j — DEPENDS_ON dependents ────────────────────────────────
     cypher = (
@@ -1010,18 +1156,26 @@ def _metric_project_popularity(full: str, canonical_url: str, window_days: int) 
         )
         count_rows = stores.neo4j_run(count_cypher)
         dependents = int(count_rows[0].get("n") or 0) if count_rows else 0
-        traces.append(QueryTrace(
-            store="Neo4j", engine="cypher",
-            title=f"Top-20 dependents of {full}",
-            query=cypher,
-            result_summary=f"{dependents} total dependents in graph",
-        ))
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title=f"Top-20 dependents of {full}",
+                query=cypher,
+                result_summary=f"{dependents} total dependents in graph",
+            )
+        )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="Neo4j", engine="cypher",
-            title=f"Top-20 dependents of {full}",
-            query=cypher, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title=f"Top-20 dependents of {full}",
+                query=cypher,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     # Headline: stars when known (universally recognised), else the
     # dependent count, else forks.
@@ -1049,26 +1203,32 @@ def _metric_project_popularity(full: str, canonical_url: str, window_days: int) 
     # Three-tile mini stat row so each component is glanceable.
     tiles = []
     if stars is not None:
-        tiles.append({"label": "stars",      "value": stars,      "icon": "★", "tone": "warn"})
+        tiles.append({"label": "stars", "value": stars, "icon": "★", "tone": "warn"})
     if forks is not None:
-        tiles.append({"label": "forks",      "value": forks,      "icon": "⑂", "tone": "info"})
+        tiles.append({"label": "forks", "value": forks, "icon": "⑂", "tone": "info"})
     if dependents:
-        tiles.append({"label": "dependents", "value": dependents, "icon": "↘", "tone": "good"})
+        tiles.append(
+            {"label": "dependents", "value": dependents, "icon": "↘", "tone": "good"}
+        )
 
     popularity_recipes = _build_recipes(
         label="project_popularity",
         traces=traces,
         extracts=[
             # trace 1 — SPARQL stars + forks (two columns, ?stars + ?forks)
-            {"python": "(int(r1['rows'][0][0]) if r1.get('rows') and r1['rows'][0][0] is not None else None,"
-                       " int(r1['rows'][0][1]) if r1.get('rows') and r1['rows'][0][1] is not None else None)",
-             "bash":   "[(.rows[0][0] // 0), (.rows[0][1] // 0)]",
-             "js":     "[r1.rows?.[0]?.[0] != null ? Number(r1.rows[0][0]) : null,"
-                       "  r1.rows?.[0]?.[1] != null ? Number(r1.rows[0][1]) : null]"},
+            {
+                "python": "(int(r1['rows'][0][0]) if r1.get('rows') and r1['rows'][0][0] is not None else None,"
+                " int(r1['rows'][0][1]) if r1.get('rows') and r1['rows'][0][1] is not None else None)",
+                "bash": "[(.rows[0][0] // 0), (.rows[0][1] // 0)]",
+                "js": "[r1.rows?.[0]?.[0] != null ? Number(r1.rows[0][0]) : null,"
+                "  r1.rows?.[0]?.[1] != null ? Number(r1.rows[0][1]) : null]",
+            },
             # trace 2 — Neo4j list of dependents (top 20)
-            {"python": "[row[0] for row in r2.get('rows', [])]",
-             "bash":   "[.rows[][0]]",
-             "js":     "(r2.rows ?? []).map(row => row[0])"},
+            {
+                "python": "[row[0] for row in r2.get('rows', [])]",
+                "bash": "[.rows[][0]]",
+                "js": "(r2.rows ?? []).map(row => row[0])",
+            },
         ],
         combine={
             "python": (
@@ -1081,7 +1241,7 @@ def _metric_project_popularity(full: str, canonical_url: str, window_days: int) 
                 "dependents=$(echo \"$v2\" | jq 'length')\n"
                 'if [ "$stars" != "0" ] && [ "$stars" != "null" ]; then headline=$stars;\n'
                 'elif [ "$dependents" != "0" ];                  then headline=$dependents;\n'
-                'else                                                  headline=$forks; fi'
+                "else                                                  headline=$forks; fi"
             ),
             "js": (
                 "const [stars, forks] = v1;\n"
@@ -1114,6 +1274,7 @@ def _metric_project_popularity(full: str, canonical_url: str, window_days: int) 
 
 # ── Metric 7 · Programming Language Distribution ────────────────────────
 
+
 def _metric_languages(full: str, canonical_url: str, window_days: int) -> MetricResult:
     """Which programming languages does the repo declare? The metadata
     extractor stores one ``schema:programmingLanguage`` triple per
@@ -1138,22 +1299,31 @@ def _metric_languages(full: str, canonical_url: str, window_days: int) -> Metric
     try:
         rows = stores.sparql_select(sparql)
         languages = [r["lang"]["value"] for r in rows]
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Programming languages declared for {full}",
-            query=sparql,
-            result_summary=f"{len(languages)} language" + ("s" if len(languages) != 1 else ""),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Programming languages declared for {full}",
+                query=sparql,
+                result_summary=f"{len(languages)} language"
+                + ("s" if len(languages) != 1 else ""),
+            )
+        )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Programming languages declared for {full}",
-            query=sparql, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Programming languages declared for {full}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     if not languages:
         return MetricResult(
-        recipes=pl_recipes,
+            recipes=pl_recipes,
             slug="programming_languages",
             value="—",
             label="no language declared",
@@ -1164,26 +1334,26 @@ def _metric_languages(full: str, canonical_url: str, window_days: int) -> Metric
                 "for this repo. Re-running enrichment will refresh "
                 "the triples."
             ),
-        unification=(
-            "Distinct `schema:programmingLanguage` triples in **SPARQL** (presence, not byte share — that's a Phase-3 ontology upgrade)."
-        ),
-    )
-    
+            unification=(
+                "Distinct `schema:programmingLanguage` triples in **SPARQL** (presence, not byte share — that's a Phase-3 ontology upgrade)."
+            ),
+        )
+
     pl_recipes = _build_recipes(
-        label='programming_languages',
+        label="programming_languages",
         traces=traces,
         extracts=[
-                    {
-                        'python': "[row[0] for row in r1.get('rows', [])]",
-                        'bash':   '[.rows[][0]]',
-                        'js':     '(r1.rows || []).map(row => row[0])',
-                    },
-                ],
+            {
+                "python": "[row[0] for row in r1.get('rows', [])]",
+                "bash": "[.rows[][0]]",
+                "js": "(r1.rows || []).map(row => row[0])",
+            },
+        ],
         combine={
-                    'python': 'headline = len(v1)',
-                    'bash':   'headline=$(echo "$v1" | jq length)',
-                    'js':     'const headline = v1.length;',
-                },
+            "python": "headline = len(v1)",
+            "bash": 'headline=$(echo "$v1" | jq length)',
+            "js": "const headline = v1.length;",
+        },
     )
     return MetricResult(
         recipes=pl_recipes,
@@ -1192,7 +1362,9 @@ def _metric_languages(full: str, canonical_url: str, window_days: int) -> Metric
         label="languages",
         secondary=None,
         queries=traces,
-        examples=[{"label": l, "detail": "", "source": "SPARQL"} for l in languages],
+        examples=[
+            {"label": lang, "detail": "", "source": "SPARQL"} for lang in languages
+        ],
         visual={"kind": "pill_cloud", "pills": languages},
         notes=(
             "Snapshot. The current ontology stores languages as a flat "
@@ -1205,7 +1377,10 @@ def _metric_languages(full: str, canonical_url: str, window_days: int) -> Metric
 
 # ── Metric 8 · Activity Dates and Times ─────────────────────────────────
 
-def _metric_activity_dates(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_activity_dates(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Monthly commit activity from GrimoireLab's git index. Returns a
     series so the card can render a sparkline.
     """
@@ -1245,27 +1420,40 @@ def _metric_activity_dates(full: str, canonical_url: str, window_days: int) -> M
             ts_ms = int(b.get("key") or 0)
             count = int(b.get("doc_count") or 0)
             total += count
-            series.append({
-                "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
-                "value": count,
-            })
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Monthly commit histogram on {origin} since {cutoff_iso[:10]}",
-            query=body_text,
-            result_summary=f"{total} commits in {len(series)} months",
-        ))
+            series.append(
+                {
+                    "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                    .date()
+                    .isoformat()[:7],
+                    "value": count,
+                }
+            )
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Monthly commit histogram on {origin} since {cutoff_iso[:10]}",
+                query=body_text,
+                result_summary=f"{total} commits in {len(series)} months",
+            )
+        )
     else:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Monthly commit histogram on {origin} since {cutoff_iso[:10]}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Monthly commit histogram on {origin} since {cutoff_iso[:10]}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or empty",
+            )
+        )
 
     if total == 0:
         return MetricResult(
-        recipes=ad_recipes,
+            recipes=ad_recipes,
             slug="activity_dates",
             value="0",
             label="no commits in window",
@@ -1276,28 +1464,28 @@ def _metric_activity_dates(full: str, canonical_url: str, window_days: int) -> M
                 "had no commits in the selected window. The /hub entity "
                 "page's sparkline runs the same agg over all time."
             ),
-        unification=(
-            "Sum of monthly bucket counts from one **OpenSearch** `date_histogram` on `grimoire_creation_date`."
-        ),
-    )
+            unification=(
+                "Sum of monthly bucket counts from one **OpenSearch** `date_histogram` on `grimoire_creation_date`."
+            ),
+        )
 
     busiest = max(series, key=lambda r: r["value"])
-    
+
     ad_recipes = _build_recipes(
-        label='activity_dates',
+        label="activity_dates",
         traces=traces,
         extracts=[
-                    {
-                        'python': "sum(b['doc_count'] for b in r1.get('raw', {}).get('aggregations', {}).get('by_month', {}).get('buckets', []))",
-                        'bash':   '[.raw.aggregations.by_month.buckets[].doc_count] | add // 0',
-                        'js':     '(r1.raw?.aggregations?.by_month?.buckets || []).reduce((s, b) => s + b.doc_count, 0)',
-                    },
-                ],
+            {
+                "python": "sum(b['doc_count'] for b in r1.get('raw', {}).get('aggregations', {}).get('by_month', {}).get('buckets', []))",
+                "bash": "[.raw.aggregations.by_month.buckets[].doc_count] | add // 0",
+                "js": "(r1.raw?.aggregations?.by_month?.buckets || []).reduce((s, b) => s + b.doc_count, 0)",
+            },
+        ],
         combine={
-                    'python': 'headline = v1',
-                    'bash':   'headline=$v1',
-                    'js':     'const headline = v1;',
-                },
+            "python": "headline = v1",
+            "bash": "headline=$v1",
+            "js": "const headline = v1;",
+        },
     )
     return MetricResult(
         recipes=ad_recipes,
@@ -1319,7 +1507,10 @@ def _metric_activity_dates(full: str, canonical_url: str, window_days: int) -> M
 
 # ── Metric 9 · Change Request Closure Ratio ─────────────────────────────
 
-def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_closure_ratio(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Of every pull request created on this repo in the window, what
     fraction was closed (merged or rejected)?
     """
@@ -1348,7 +1539,7 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
         },
         "aggs": {
             "by_state": {"terms": {"field": "state", "size": 5}},
-            "merged":   {"filter": {"term": {"merged": True}}},
+            "merged": {"filter": {"term": {"merged": True}}},
         },
     }
     body_text = json.dumps(body, indent=2)
@@ -1362,20 +1553,31 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
                 closed = int(b.get("doc_count") or 0)
             elif key == "open":
                 open_ = int(b.get("doc_count") or 0)
-        merged = int(((raw.get("aggregations") or {}).get("merged") or {}).get("doc_count") or 0)
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"PR state breakdown on {origin} since {cutoff_iso[:10]}",
-            query=body_text,
-            result_summary=f"{total} PRs · {closed} closed · {merged} merged · {open_} open",
-        ))
+        merged = int(
+            ((raw.get("aggregations") or {}).get("merged") or {}).get("doc_count") or 0
+        )
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"PR state breakdown on {origin} since {cutoff_iso[:10]}",
+                query=body_text,
+                result_summary=f"{total} PRs · {closed} closed · {merged} merged · {open_} open",
+            )
+        )
     else:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"PR state breakdown on {origin} since {cutoff_iso[:10]}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or github index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"PR state breakdown on {origin} since {cutoff_iso[:10]}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
 
     if total == 0:
         return MetricResult(
@@ -1389,10 +1591,10 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
                 "or GrimoireLab hasn't ingested this repo's github "
                 "stream yet."
             ),
-        unification=(
-            "`closed / total` from one **OpenSearch** PR aggregation (`state.terms` + `merged` filter on PRs created in window)."
-        ),
-    )
+            unification=(
+                "`closed / total` from one **OpenSearch** PR aggregation (`state.terms` + `merged` filter on PRs created in window)."
+            ),
+        )
 
     ratio = closed / total
     closure_recipes = _build_recipes(
@@ -1401,9 +1603,7 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
         extracts=[
             # trace 1 — OpenSearch PR aggregation (one trace, multiple values)
             # We pull the whole response and let combine() destructure it.
-            {"python": "r1",
-             "bash":   ".",
-             "js":     "r1"},
+            {"python": "r1", "bash": ".", "js": "r1"},
         ],
         combine={
             "python": (
@@ -1416,7 +1616,7 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
             ),
             "bash": (
                 "total=$(echo \"$v1\" | jq '.raw.hits.total.value // 0')\n"
-                "closed=$(echo \"$v1\" | jq '[.raw.aggregations.by_state.buckets[] | select(.key == \"closed\") | .doc_count][0] // 0')\n"
+                'closed=$(echo "$v1" | jq \'[.raw.aggregations.by_state.buckets[] | select(.key == "closed") | .doc_count][0] // 0\')\n'
                 'if [ "$total" -gt 0 ]; then\n'
                 '  headline=$(awk -v c="$closed" -v t="$total" \'BEGIN { printf("%.0f%%", c/t*100) }\')\n'
                 'else headline="—"; fi'
@@ -1450,7 +1650,10 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
 
 # ── Metric 10 · Organizational Diversity ────────────────────────────────
 
-def _metric_org_diversity(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_org_diversity(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """How many distinct organisations does the contributor pool span?
 
     We use Path 1 — the ``pulse:ownedBy`` ownership chain — exclusively.
@@ -1497,19 +1700,27 @@ def _metric_org_diversity(full: str, canonical_url: str, window_days: int) -> Me
         # rows look like [{"orgName": {"value": "..."}, "n": {"value": "..."}}, …]
         org_names = [r["orgName"]["value"] for r in rows]
         org_count = len(org_names)
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Distinct ownership orgs reachable from {full} contributors",
-            query=sparql,
-            result_summary=f"{org_count} distinct organisation"
-                          + ("s" if org_count != 1 else ""),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Distinct ownership orgs reachable from {full} contributors",
+                query=sparql,
+                result_summary=f"{org_count} distinct organisation"
+                + ("s" if org_count != 1 else ""),
+            )
+        )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Distinct ownership orgs reachable from {full} contributors",
-            query=sparql, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Distinct ownership orgs reachable from {full} contributors",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     if org_count == 0:
         return MetricResult(
@@ -1533,19 +1744,19 @@ def _metric_org_diversity(full: str, canonical_url: str, window_days: int) -> Me
         )
 
     od_recipes = _build_recipes(
-        label='org_diversity',
+        label="org_diversity",
         traces=traces,
         extracts=[
             {
-                'python': "[row[0] for row in r1.get('rows', [])]",
-                'bash':   '[.rows[][0]]',
-                'js':     '(r1.rows || []).map(row => row[0])',
+                "python": "[row[0] for row in r1.get('rows', [])]",
+                "bash": "[.rows[][0]]",
+                "js": "(r1.rows || []).map(row => row[0])",
             },
         ],
         combine={
-            'python': 'headline = len(v1)',
-            'bash':   'headline=$(echo "$v1" | jq length)',
-            'js':     'const headline = v1.length;',
+            "python": "headline = len(v1)",
+            "bash": 'headline=$(echo "$v1" | jq length)',
+            "js": "const headline = v1.length;",
         },
     )
     return MetricResult(
@@ -1553,7 +1764,8 @@ def _metric_org_diversity(full: str, canonical_url: str, window_days: int) -> Me
         slug="org_diversity",
         value=str(org_count),
         label="ownership orgs reachable",
-        secondary=", ".join(org_names[:5]) + (f", +{org_count - 5}" if org_count > 5 else ""),
+        secondary=", ".join(org_names[:5])
+        + (f", +{org_count - 5}" if org_count > 5 else ""),
         queries=traces,
         examples=[{"label": n, "detail": "", "source": "SPARQL"} for n in org_names],
         notes=(
@@ -1587,7 +1799,10 @@ def _short_license(iri: str) -> str:
 
 # ── Metric 5 · Academic OS Project Impact ────────────────────────────────
 
-def _metric_academic_impact(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_academic_impact(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Academic-impact proxy via the SPARQL graph.
 
     The current ontology has no direct article→repo predicate (e.g.
@@ -1626,22 +1841,30 @@ def _metric_academic_impact(full: str, canonical_url: str, window_days: int) -> 
     rows: list[dict[str, Any]] = []
     try:
         rows = stores.sparql_select(sparql) or []
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Scholarly articles authored by contributors of {full}",
-            query=sparql,
-            result_summary=f"{len(rows)} article" + ("s" if len(rows) != 1 else ""),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Scholarly articles authored by contributors of {full}",
+                query=sparql,
+                result_summary=f"{len(rows)} article" + ("s" if len(rows) != 1 else ""),
+            )
+        )
     except Exception as exc:  # noqa: BLE001
-        traces.append(QueryTrace(
-            store="SPARQL", engine="sparql",
-            title=f"Scholarly articles authored by contributors of {full}",
-            query=sparql, result_summary="error", error=str(exc),
-        ))
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"Scholarly articles authored by contributors of {full}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
 
     if not rows:
         return MetricResult(
-        recipes=ai_recipes,
+            recipes=ai_recipes,
             slug="academic_impact",
             value="0",
             label="no linked academic articles",
@@ -1657,20 +1880,22 @@ def _metric_academic_impact(full: str, canonical_url: str, window_days: int) -> 
                 "that there are none. It does NOT mean no paper cites "
                 "the software."
             ),
-        unification=(
-            "Count of **SPARQL** shared-author chain results: `Article → schema:author → Person → pulse:hasContribution → Repo` (no direct article↔repo predicate exists yet)."
-        ),
-    )
+            unification=(
+                "Count of **SPARQL** shared-author chain results: `Article → schema:author → Person → pulse:hasContribution → Repo` (no direct article↔repo predicate exists yet)."
+            ),
+        )
 
     examples: list[dict[str, str]] = []
     for r in rows[:8]:
         title = (r.get("title") or {}).get("value") or "(no title)"
         date = ((r.get("datePublished") or {}).get("value") or "")[:10]
-        examples.append({
-            "label": title[:90],
-            "detail": date,
-            "source": "SPARQL",
-        })
+        examples.append(
+            {
+                "label": title[:90],
+                "detail": date,
+                "source": "SPARQL",
+            }
+        )
 
     years: list[str] = []
     for r in rows:
@@ -1686,27 +1911,27 @@ def _metric_academic_impact(full: str, canonical_url: str, window_days: int) -> 
         # reflects gaps (no-publication years) instead of compressing
         # them out.
         from collections import Counter
+
         counts = Counter(yrs)
         first_y, last_y = int(yrs[0]), int(yrs[-1])
         for y in range(first_y, last_y + 1):
             yearly_series.append({"date": str(y), "value": counts.get(str(y), 0)})
 
-    
     ai_recipes = _build_recipes(
-        label='academic_impact',
+        label="academic_impact",
         traces=traces,
         extracts=[
-                    {
-                        'python': "len(r1.get('rows', []))",
-                        'bash':   '[.rows[]] | length',
-                        'js':     '(r1.rows || []).length',
-                    },
-                ],
+            {
+                "python": "len(r1.get('rows', []))",
+                "bash": "[.rows[]] | length",
+                "js": "(r1.rows || []).length",
+            },
+        ],
         combine={
-                    'python': 'headline = v1',
-                    'bash':   'headline=$v1',
-                    'js':     'const headline = v1;',
-                },
+            "python": "headline = v1",
+            "bash": "headline=$v1",
+            "js": "const headline = v1;",
+        },
     )
     return MetricResult(
         recipes=ai_recipes,
@@ -1731,7 +1956,10 @@ def _metric_academic_impact(full: str, canonical_url: str, window_days: int) -> 
 
 # ── Metric 11 · Time to First Response ──────────────────────────────────
 
-def _metric_first_response(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_first_response(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Median hours from PR/issue creation to the first response by
     someone other than the author. GrimoireLab enriches every github
     document with ``time_to_first_attention_without_bot`` (or
@@ -1774,25 +2002,33 @@ def _metric_first_response(full: str, canonical_url: str, window_days: int) -> M
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"P50/P90 time to first response on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or github index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"P50/P90 time to first response on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
         return MetricResult(
-        recipes=fr_recipes,
-            slug="first_response", value="—", label="no data",
-            secondary=None, queries=traces,
+            recipes=fr_recipes,
+            slug="first_response",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes=(
                 "GrimoireLab hasn't indexed pull-request/issue traffic "
                 "for this repo. The query above is what we'd run once "
                 "github_*_enriched starts receiving documents."
             ),
-        unification=(
-            "P50 of GrimoireLab's pre-computed `time_to_first_attention_without_bot` enrichment via an **OpenSearch** percentiles agg."
-        ),
-    )
+            unification=(
+                "P50 of GrimoireLab's pre-computed `time_to_first_attention_without_bot` enrichment via an **OpenSearch** percentiles agg."
+            ),
+        )
 
     aggs = raw.get("aggregations") or {}
     n = int(((aggs.get("count_with_response") or {}).get("doc_count") or 0))
@@ -1801,56 +2037,64 @@ def _metric_first_response(full: str, canonical_url: str, window_days: int) -> M
     p50 = float(p50_raw) if p50_raw is not None else None
     p90 = float(p90_raw) if p90_raw is not None else None
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"P50/P90 time to first response on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=(
-            f"{n} responses · P50 {p50:.1f} h · P90 {p90:.1f} h"
-            if p50 is not None and p90 is not None
-            else f"{n} responses, no percentile available"
-        ),
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"P50/P90 time to first response on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=(
+                f"{n} responses · P50 {p50:.1f} h · P90 {p90:.1f} h"
+                if p50 is not None and p90 is not None
+                else f"{n} responses, no percentile available"
+            ),
+        )
+    )
 
     if not n or p50 is None:
         return MetricResult(
-        recipes=fr_recipes,
-            slug="first_response", value="—", label="no responses in window",
-            secondary=None, queries=traces,
+            recipes=fr_recipes,
+            slug="first_response",
+            value="—",
+            label="no responses in window",
+            secondary=None,
+            queries=traces,
             notes=(
                 "No github documents in the window carried a "
                 "time_to_first_attention_without_bot value — either "
                 "no PRs/issues opened, or none have been responded "
                 "to yet."
             ),
-        unification=(
-            "P50 of GrimoireLab's pre-computed `time_to_first_attention_without_bot` enrichment via an **OpenSearch** percentiles agg."
-        ),
-    )
+            unification=(
+                "P50 of GrimoireLab's pre-computed `time_to_first_attention_without_bot` enrichment via an **OpenSearch** percentiles agg."
+            ),
+        )
 
-    
     fr_recipes = _build_recipes(
-        label='first_response',
+        label="first_response",
         traces=traces,
         extracts=[
-                    {
-                        'python': "r1.get('raw', {}).get('aggregations', {}).get('median', {}).get('values', {}).get('50.0')",
-                        'bash':   '.raw.aggregations.median.values."50.0" // 0',
-                        'js':     "r1.raw?.aggregations?.median?.values?.['50.0'] ?? 0",
-                    },
-                ],
+            {
+                "python": "r1.get('raw', {}).get('aggregations', {}).get('median', {}).get('values', {}).get('50.0')",
+                "bash": '.raw.aggregations.median.values."50.0" // 0',
+                "js": "r1.raw?.aggregations?.median?.values?.['50.0'] ?? 0",
+            },
+        ],
         combine={
-                    'python': "headline = f'{v1:.1f} h' if v1 else '—'",
-                    'bash':   'if [ "$v1" != "null" ] && [ "$v1" != "0" ]; then headline=$(awk -v v="$v1" \'BEGIN { printf("%.1f h", v) }\'); else headline="—"; fi',
-                    'js':     "const headline = v1 ? `${v1.toFixed(1)} h` : '—';",
-                },
+            "python": "headline = f'{v1:.1f} h' if v1 else '—'",
+            "bash": 'if [ "$v1" != "null" ] && [ "$v1" != "0" ]; then headline=$(awk -v v="$v1" \'BEGIN { printf("%.1f h", v) }\'); else headline="—"; fi',
+            "js": "const headline = v1 ? `${v1.toFixed(1)} h` : '—';",
+        },
     )
     return MetricResult(
         recipes=fr_recipes,
         slug="first_response",
         value=f"{p50:.1f} h",
         label=f"median response (last {window_days} days)",
-        secondary=f"{n} responses · P90 {p90:.1f} h" if p90 is not None else f"{n} responses",
+        secondary=f"{n} responses · P90 {p90:.1f} h"
+        if p90 is not None
+        else f"{n} responses",
         queries=traces,
         notes=(
             "Median hours from PR/issue creation to the first comment "
@@ -1863,7 +2107,10 @@ def _metric_first_response(full: str, canonical_url: str, window_days: int) -> M
 
 # ── Metric 12 · Issue Resolution Duration ───────────────────────────────
 
-def _metric_issue_resolution(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_issue_resolution(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Median days to close an issue (excludes PRs)."""
     cutoff = _now_minus_days(window_days)
     cutoff_iso = _iso(cutoff)
@@ -1888,29 +2135,35 @@ def _metric_issue_resolution(full: str, canonical_url: str, window_days: int) ->
             "median_days": {
                 "percentiles": {"field": "time_open_days", "percents": [50]}
             },
-            "p90_days": {
-                "percentiles": {"field": "time_open_days", "percents": [90]}
-            },
+            "p90_days": {"percentiles": {"field": "time_open_days", "percents": [90]}},
         },
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"P50/P90 issue close duration on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or github index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"P50/P90 issue close duration on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
         return MetricResult(
-        recipes=ir_recipes,
-            slug="issue_resolution", value="—", label="no data",
-            secondary=None, queries=traces,
+            recipes=ir_recipes,
+            slug="issue_resolution",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
-        unification=(
-            "P50 of GrimoireLab's `time_open_days` for issues (`pull_request:false`) that closed in the window — via **OpenSearch** percentiles agg."
-        ),
-    )
+            unification=(
+                "P50 of GrimoireLab's `time_open_days` for issues (`pull_request:false`) that closed in the window — via **OpenSearch** percentiles agg."
+            ),
+        )
 
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
     aggs = raw.get("aggregations") or {}
@@ -1919,44 +2172,50 @@ def _metric_issue_resolution(full: str, canonical_url: str, window_days: int) ->
     p50 = float(p50_raw) if p50_raw is not None else None
     p90 = float(p90_raw) if p90_raw is not None else None
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"Issue close duration on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=(
-            f"{total} closed issues · P50 {p50:.1f} d · P90 {p90:.1f} d"
-            if p50 is not None and p90 is not None
-            else f"{total} closed issues, no percentile"
-        ),
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Issue close duration on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=(
+                f"{total} closed issues · P50 {p50:.1f} d · P90 {p90:.1f} d"
+                if p50 is not None and p90 is not None
+                else f"{total} closed issues, no percentile"
+            ),
+        )
+    )
 
     if not total or p50 is None:
         return MetricResult(
-        recipes=ir_recipes,
-            slug="issue_resolution", value="—",
+            recipes=ir_recipes,
+            slug="issue_resolution",
+            value="—",
             label="no closed issues in window",
-            secondary=None, queries=traces,
+            secondary=None,
+            queries=traces,
             notes="No issues closed in the window for this repo.",
-        unification=(
-            "P50 of GrimoireLab's `time_open_days` for issues (`pull_request:false`) that closed in the window — via **OpenSearch** percentiles agg."
-        ),
-    )
-    
+            unification=(
+                "P50 of GrimoireLab's `time_open_days` for issues (`pull_request:false`) that closed in the window — via **OpenSearch** percentiles agg."
+            ),
+        )
+
     ir_recipes = _build_recipes(
-        label='issue_resolution',
+        label="issue_resolution",
         traces=traces,
         extracts=[
-                    {
-                        'python': "r1.get('raw', {}).get('aggregations', {}).get('median_days', {}).get('values', {}).get('50.0')",
-                        'bash':   '.raw.aggregations.median_days.values."50.0" // 0',
-                        'js':     "r1.raw?.aggregations?.median_days?.values?.['50.0'] ?? 0",
-                    },
-                ],
+            {
+                "python": "r1.get('raw', {}).get('aggregations', {}).get('median_days', {}).get('values', {}).get('50.0')",
+                "bash": '.raw.aggregations.median_days.values."50.0" // 0',
+                "js": "r1.raw?.aggregations?.median_days?.values?.['50.0'] ?? 0",
+            },
+        ],
         combine={
-                    'python': "headline = f'{v1:.1f} d' if v1 else '—'",
-                    'bash':   'if [ "$v1" != "null" ] && [ "$v1" != "0" ]; then headline=$(awk -v v="$v1" \'BEGIN { printf("%.1f d", v) }\'); else headline="—"; fi',
-                    'js':     "const headline = v1 ? `${v1.toFixed(1)} d` : '—';",
-                },
+            "python": "headline = f'{v1:.1f} d' if v1 else '—'",
+            "bash": 'if [ "$v1" != "null" ] && [ "$v1" != "0" ]; then headline=$(awk -v v="$v1" \'BEGIN { printf("%.1f d", v) }\'); else headline="—"; fi',
+            "js": "const headline = v1 ? `${v1.toFixed(1)} d` : '—';",
+        },
     )
     return MetricResult(
         recipes=ir_recipes,
@@ -1964,7 +2223,9 @@ def _metric_issue_resolution(full: str, canonical_url: str, window_days: int) ->
         value=f"{p50:.1f} d",
         label=f"median time to close (last {window_days} days)",
         secondary=(
-            f"{total} closed · P90 {p90:.1f} d" if p90 is not None else f"{total} closed"
+            f"{total} closed · P90 {p90:.1f} d"
+            if p90 is not None
+            else f"{total} closed"
         ),
         queries=traces,
         notes=(
@@ -1976,6 +2237,7 @@ def _metric_issue_resolution(full: str, canonical_url: str, window_days: int) ->
 
 
 # ── Metric 13 · Self Merge Rate ─────────────────────────────────────────
+
 
 def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> MetricResult:
     """Fraction of merged PRs where the author also performed the merge."""
@@ -2018,62 +2280,79 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Self-merged vs merged PRs on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or github index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Self-merged vs merged PRs on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
         return MetricResult(
-        recipes=sm_recipes,
-            slug="self_merge", value="—", label="no data",
-            secondary=None, queries=traces,
+            recipes=sm_recipes,
+            slug="self_merge",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
-        unification=(
-            "`self-merged / total-merged` — Painless script compares `user_login` vs `merge_author_login` inside an **OpenSearch** filter agg."
-        ),
-    )
+            unification=(
+                "`self-merged / total-merged` — Painless script compares `user_login` vs `merge_author_login` inside an **OpenSearch** filter agg."
+            ),
+        )
 
     total_merged = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
-    self_merged = int(((raw.get("aggregations") or {}).get("self_merged") or {}).get("doc_count") or 0)
+    self_merged = int(
+        ((raw.get("aggregations") or {}).get("self_merged") or {}).get("doc_count") or 0
+    )
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"Self-merged vs merged PRs on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=f"{self_merged} self / {total_merged} merged",
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Self-merged vs merged PRs on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{self_merged} self / {total_merged} merged",
+        )
+    )
 
     if not total_merged:
         return MetricResult(
-        recipes=sm_recipes,
-            slug="self_merge", value="—", label="no merged PRs in window",
-            secondary=None, queries=traces,
+            recipes=sm_recipes,
+            slug="self_merge",
+            value="—",
+            label="no merged PRs in window",
+            secondary=None,
+            queries=traces,
             notes="No PRs merged on this repo in the window.",
-        unification=(
-            "`self-merged / total-merged` — Painless script compares `user_login` vs `merge_author_login` inside an **OpenSearch** filter agg."
-        ),
-    )
+            unification=(
+                "`self-merged / total-merged` — Painless script compares `user_login` vs `merge_author_login` inside an **OpenSearch** filter agg."
+            ),
+        )
     ratio = self_merged / total_merged
     # Self-merge is a signal we read inversely: high → weak review
     # gate, low → strong. Tone the donut accordingly.
     tone = "danger" if ratio >= 0.5 else "warn" if ratio >= 0.2 else "good"
-    
+
     sm_recipes = _build_recipes(
-        label='self_merge',
+        label="self_merge",
         traces=traces,
         extracts=[
-                    {
-                        'python': 'r1',
-                        'bash':   '.',
-                        'js':     'r1',
-                    },
-                ],
+            {
+                "python": "r1",
+                "bash": ".",
+                "js": "r1",
+            },
+        ],
         combine={
-                    'python': "total = v1.get('raw', {}).get('hits', {}).get('total', {}).get('value', 0)\nself_merged = v1.get('raw', {}).get('aggregations', {}).get('self_merged', {}).get('doc_count', 0)\nheadline = f'{(self_merged/total):.0%}' if total else '—'",
-                    'bash':   'total=$(echo "$v1" | jq \'.raw.hits.total.value // 0\')\nself_merged=$(echo "$v1" | jq \'.raw.aggregations.self_merged.doc_count // 0\')\nif [ "$total" -gt 0 ]; then headline=$(awk -v s="$self_merged" -v t="$total" \'BEGIN { printf("%.0f%%", s/t*100) }\'); else headline="—"; fi',
-                    'js':     "const total = v1.raw?.hits?.total?.value ?? 0;\nconst selfMerged = v1.raw?.aggregations?.self_merged?.doc_count ?? 0;\nconst headline = total ? `${Math.round(selfMerged/total*100)}%` : '—';",
-                },
+            "python": "total = v1.get('raw', {}).get('hits', {}).get('total', {}).get('value', 0)\nself_merged = v1.get('raw', {}).get('aggregations', {}).get('self_merged', {}).get('doc_count', 0)\nheadline = f'{(self_merged/total):.0%}' if total else '—'",
+            "bash": 'total=$(echo "$v1" | jq \'.raw.hits.total.value // 0\')\nself_merged=$(echo "$v1" | jq \'.raw.aggregations.self_merged.doc_count // 0\')\nif [ "$total" -gt 0 ]; then headline=$(awk -v s="$self_merged" -v t="$total" \'BEGIN { printf("%.0f%%", s/t*100) }\'); else headline="—"; fi',
+            "js": "const total = v1.raw?.hits?.total?.value ?? 0;\nconst selfMerged = v1.raw?.aggregations?.self_merged?.doc_count ?? 0;\nconst headline = total ? `${Math.round(selfMerged/total*100)}%` : '—';",
+        },
     )
     return MetricResult(
         recipes=sm_recipes,
@@ -2095,6 +2374,7 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
 
 
 # ── Metric 14 · Burstiness ──────────────────────────────────────────────
+
 
 def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> MetricResult:
     """CHAOSS Burstiness B = (σ - μ) / (σ + μ) of the inter-arrival
@@ -2135,45 +2415,59 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/git_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Daily commit histogram on {origin} for burstiness",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or git index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Daily commit histogram on {origin} for burstiness",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or git index empty",
+            )
+        )
         return MetricResult(
-        recipes=burst_recipes,
-            slug="burstiness", value="—", label="no data",
-            secondary=None, queries=traces,
+            recipes=burst_recipes,
+            slug="burstiness",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="No git activity indexed for this repo.",
-        unification=(
-            "B = (σ − μ) / (σ + μ) on inter-arrival days between commit-days. Daily histogram from **OpenSearch**, post-processed in Python (`statistics.pstdev` + mean)."
-        ),
-    )
+            unification=(
+                "B = (σ − μ) / (σ + μ) on inter-arrival days between commit-days. Daily histogram from **OpenSearch**, post-processed in Python (`statistics.pstdev` + mean)."
+            ),
+        )
 
     buckets = (raw.get("aggregations") or {}).get("by_day", {}).get("buckets", [])
     active_days = len(buckets)
     if active_days < 3:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Daily commit histogram on {origin} for burstiness",
-            query=body_text,
-            result_summary=f"{active_days} active days — too few for burstiness",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Daily commit histogram on {origin} for burstiness",
+                query=body_text,
+                result_summary=f"{active_days} active days — too few for burstiness",
+            )
+        )
         return MetricResult(
-        recipes=burst_recipes,
-            slug="burstiness", value="—",
+            recipes=burst_recipes,
+            slug="burstiness",
+            value="—",
             label=f"only {active_days} active days",
-            secondary=None, queries=traces,
+            secondary=None,
+            queries=traces,
             notes=(
                 "Burstiness needs at least three active days in the "
                 "window to compute inter-arrival gaps. Widen the "
                 "window or pick a more active repo."
             ),
-        unification=(
-            "B = (σ − μ) / (σ + μ) on inter-arrival days between commit-days. Daily histogram from **OpenSearch**, post-processed in Python (`statistics.pstdev` + mean)."
-        ),
-    )
+            unification=(
+                "B = (σ − μ) / (σ + μ) on inter-arrival days between commit-days. Daily histogram from **OpenSearch**, post-processed in Python (`statistics.pstdev` + mean)."
+            ),
+        )
 
     # Compute inter-arrival times in days. ``key`` on the bucket is
     # ms-since-epoch; we convert and difference consecutive entries.
@@ -2203,37 +2497,40 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
         regime = "Poisson-like (random)"
         tone = "info"
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"Daily commit histogram on {origin} for burstiness",
-        query=body_text,
-        result_summary=(
-            f"{active_days} active days · mean gap {mu:.2f} d · "
-            f"σ {sigma:.2f} d → B={burstiness:.3f}"
-        ),
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Daily commit histogram on {origin} for burstiness",
+            query=body_text,
+            result_summary=(
+                f"{active_days} active days · mean gap {mu:.2f} d · "
+                f"σ {sigma:.2f} d → B={burstiness:.3f}"
+            ),
+        )
+    )
 
     # Gauge visual: mark where on the [-1, +1] spectrum we sit. The
     # marker position (in %) is (B + 1) / 2 — so −1 = 0 % (far left),
     # 0 = 50 % (middle), +1 = 100 % (far right).
     marker_pct = round((burstiness + 1) / 2 * 100, 1)
 
-    
     burst_recipes = _build_recipes(
-        label='burstiness',
+        label="burstiness",
         traces=traces,
         extracts=[
-                    {
-                        'python': 'r1',
-                        'bash':   '.',
-                        'js':     'r1',
-                    },
-                ],
+            {
+                "python": "r1",
+                "bash": ".",
+                "js": "r1",
+            },
+        ],
         combine={
-                    'python': "import statistics\nbuckets = v1.get('raw', {}).get('aggregations', {}).get('by_day', {}).get('buckets', [])\nif len(buckets) < 3:\n    headline = '—'\nelse:\n    ts = [b['key'] for b in buckets]\n    gaps = [(ts[i+1]-ts[i])/1000/86400 for i in range(len(ts)-1)]\n    mu = statistics.fmean(gaps)\n    sigma = statistics.pstdev(gaps) if len(gaps) > 1 else 0\n    B = (sigma - mu) / (sigma + mu) if (sigma + mu) else 0\n    headline = f'{B:+.2f}'",
-                    'bash':   'buckets=$(echo "$v1" | jq -c \'.raw.aggregations.by_day.buckets // []\')\nn=$(echo "$buckets" | jq length)\nif [ "$n" -lt 3 ]; then headline="—"; else\n  headline=$(echo "$buckets" | python3 -c \'import sys, json, statistics; bs=json.load(sys.stdin); ts=[b["key"] for b in bs]; gaps=[(ts[i+1]-ts[i])/1000/86400 for i in range(len(ts)-1)]; mu=statistics.fmean(gaps); sigma=statistics.pstdev(gaps) if len(gaps)>1 else 0; B=(sigma-mu)/(sigma+mu) if (sigma+mu) else 0; print(f"{B:+.2f}")\')\nfi',
-                    'js':     "const buckets = v1.raw?.aggregations?.by_day?.buckets || [];\nlet headline;\nif (buckets.length < 3) { headline = '—'; }\nelse {\n  const ts = buckets.map(b => b.key);\n  const gaps = ts.slice(1).map((t, i) => (t - ts[i]) / 1000 / 86400);\n  const mu = gaps.reduce((a, b) => a + b, 0) / gaps.length;\n  const variance = gaps.reduce((s, g) => s + (g - mu) ** 2, 0) / gaps.length;\n  const sigma = Math.sqrt(variance);\n  const B = (sigma + mu) ? (sigma - mu) / (sigma + mu) : 0;\n  headline = (B >= 0 ? '+' : '') + B.toFixed(2);\n}",
-                },
+            "python": "import statistics\nbuckets = v1.get('raw', {}).get('aggregations', {}).get('by_day', {}).get('buckets', [])\nif len(buckets) < 3:\n    headline = '—'\nelse:\n    ts = [b['key'] for b in buckets]\n    gaps = [(ts[i+1]-ts[i])/1000/86400 for i in range(len(ts)-1)]\n    mu = statistics.fmean(gaps)\n    sigma = statistics.pstdev(gaps) if len(gaps) > 1 else 0\n    B = (sigma - mu) / (sigma + mu) if (sigma + mu) else 0\n    headline = f'{B:+.2f}'",
+            "bash": 'buckets=$(echo "$v1" | jq -c \'.raw.aggregations.by_day.buckets // []\')\nn=$(echo "$buckets" | jq length)\nif [ "$n" -lt 3 ]; then headline="—"; else\n  headline=$(echo "$buckets" | python3 -c \'import sys, json, statistics; bs=json.load(sys.stdin); ts=[b["key"] for b in bs]; gaps=[(ts[i+1]-ts[i])/1000/86400 for i in range(len(ts)-1)]; mu=statistics.fmean(gaps); sigma=statistics.pstdev(gaps) if len(gaps)>1 else 0; B=(sigma-mu)/(sigma+mu) if (sigma+mu) else 0; print(f"{B:+.2f}")\')\nfi',
+            "js": "const buckets = v1.raw?.aggregations?.by_day?.buckets || [];\nlet headline;\nif (buckets.length < 3) { headline = '—'; }\nelse {\n  const ts = buckets.map(b => b.key);\n  const gaps = ts.slice(1).map((t, i) => (t - ts[i]) / 1000 / 86400);\n  const mu = gaps.reduce((a, b) => a + b, 0) / gaps.length;\n  const variance = gaps.reduce((s, g) => s + (g - mu) ** 2, 0) / gaps.length;\n  const sigma = Math.sqrt(variance);\n  const B = (sigma + mu) ? (sigma - mu) / (sigma + mu) : 0;\n  headline = (B >= 0 ? '+' : '') + B.toFixed(2);\n}",
+        },
     )
     return MetricResult(
         recipes=burst_recipes,
@@ -2248,7 +2545,7 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
             "kind": "gauge",
             "tone": tone,
             "marker_pct": marker_pct,
-            "left_label":  "−1 periodic",
+            "left_label": "−1 periodic",
             "right_label": "+1 bursty",
         },
         notes=(
@@ -2266,7 +2563,10 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
 
 # ── Metric 15 · Contributor Absence Factor (a.k.a. bus factor) ──────────
 
-def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_absence_factor(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """CHAOSS-defined Contributor Absence Factor: the smallest number
     of distinct authors whose *combined* commit count is at least 50 %
     of the total. Low values mean the project depends on a tiny
@@ -2292,49 +2592,60 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
                 ]
             }
         },
-        "aggs": {
-            "by_author": {
-                "terms": {"field": "author_name", "size": 500}
-            }
-        },
+        "aggs": {"by_author": {"terms": {"field": "author_name", "size": 500}}},
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/git_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Per-author commit counts on {origin} for bus-factor",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or git index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Per-author commit counts on {origin} for bus-factor",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or git index empty",
+            )
+        )
         return MetricResult(
-        recipes=abs_recipes,
-            slug="absence_factor", value="—", label="no data",
-            secondary=None, queries=traces,
+            recipes=abs_recipes,
+            slug="absence_factor",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="No git activity indexed for this repo.",
-        unification=(
-            "Walk descending **OpenSearch** terms agg until cumulative commits ≥ 50 %. Headline = N at threshold; example list shows each top contributor's share."
-        ),
-    )
+            unification=(
+                "Walk descending **OpenSearch** terms agg until cumulative commits ≥ 50 %. Headline = N at threshold; example list shows each top contributor's share."
+            ),
+        )
 
     buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
     total = sum(int(b.get("doc_count") or 0) for b in buckets)
     if total == 0:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Per-author commit counts on {origin}",
-            query=body_text,
-            result_summary="0 commits in window",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Per-author commit counts on {origin}",
+                query=body_text,
+                result_summary="0 commits in window",
+            )
+        )
         return MetricResult(
-        recipes=abs_recipes,
-            slug="absence_factor", value="—", label="no commits in window",
-            secondary=None, queries=traces,
+            recipes=abs_recipes,
+            slug="absence_factor",
+            value="—",
+            label="no commits in window",
+            secondary=None,
+            queries=traces,
             notes="Widen the window — the bus factor needs at least one commit.",
-        unification=(
-            "Walk descending **OpenSearch** terms agg until cumulative commits ≥ 50 %. Headline = N at threshold; example list shows each top contributor's share."
-        ),
-    )
+            unification=(
+                "Walk descending **OpenSearch** terms agg until cumulative commits ≥ 50 %. Headline = N at threshold; example list shows each top contributor's share."
+            ),
+        )
 
     # Walk the (already-sorted-desc) bucket list and accumulate.
     factor = 0
@@ -2345,11 +2656,13 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
         cnt = int(b.get("doc_count") or 0)
         cumul += cnt
         factor = i + 1
-        top_share.append({
-            "label": b.get("key") or "(anonymous)",
-            "detail": f"{cnt} commits · {cnt / total:.0%}",
-            "source": "OpenSearch",
-        })
+        top_share.append(
+            {
+                "label": b.get("key") or "(anonymous)",
+                "detail": f"{cnt} commits · {cnt / total:.0%}",
+                "source": "OpenSearch",
+            }
+        )
         if cumul >= half:
             break
 
@@ -2364,15 +2677,19 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
         regime = "distributed"
         tone = "good"
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"Per-author commit counts on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=(
-            f"{len(buckets)} contributors · top {factor} = "
-            f"{cumul / total:.0%} of {total} commits"
-        ),
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Per-author commit counts on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=(
+                f"{len(buckets)} contributors · top {factor} = "
+                f"{cumul / total:.0%} of {total} commits"
+            ),
+        )
+    )
 
     # Rank-bar data — top-N contributors with their per-author share.
     # Use the full bucket list (truncated to 8) so the bars span the
@@ -2382,29 +2699,30 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
         top = buckets[0].get("doc_count", 0) or 1
         for b in buckets[:8]:
             cnt = int(b.get("doc_count") or 0)
-            rank_items.append({
-                "label": b.get("key") or "(anonymous)",
-                "value": cnt,
-                "share": cnt / total if total else 0,
-                "bar":   cnt / top,  # 0..1 for the bar width
-            })
+            rank_items.append(
+                {
+                    "label": b.get("key") or "(anonymous)",
+                    "value": cnt,
+                    "share": cnt / total if total else 0,
+                    "bar": cnt / top,  # 0..1 for the bar width
+                }
+            )
 
-    
     abs_recipes = _build_recipes(
-        label='absence_factor',
+        label="absence_factor",
         traces=traces,
         extracts=[
-                    {
-                        'python': 'r1',
-                        'bash':   '.',
-                        'js':     'r1',
-                    },
-                ],
+            {
+                "python": "r1",
+                "bash": ".",
+                "js": "r1",
+            },
+        ],
         combine={
-                    'python': "buckets = v1.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('buckets', [])\ntotal = sum(b['doc_count'] for b in buckets)\nhalf = 0.5 * total\nheadline = 0\ncumul = 0\nfor i, b in enumerate(buckets):\n    cumul += b['doc_count']\n    headline = i + 1\n    if cumul >= half:\n        break",
-                    'bash':   'buckets=$(echo "$v1" | jq -c \'.raw.aggregations.by_author.buckets // []\')\ntotal=$(echo "$buckets" | jq \'[.[] | .doc_count] | add // 0\')\nheadline=$(echo "$buckets" | python3 -c \'import sys, json; bs=json.load(sys.stdin); t=sum(b["doc_count"] for b in bs); half=t*0.5; c=0; f=0\nfor i,b in enumerate(bs):\n    c+=b["doc_count"]; f=i+1\n    if c>=half: break\nprint(f)\')',
-                    'js':     'const buckets = v1.raw?.aggregations?.by_author?.buckets || [];\nconst total = buckets.reduce((s, b) => s + b.doc_count, 0);\nconst half = total * 0.5;\nlet headline = 0, cumul = 0;\nfor (let i = 0; i < buckets.length; i++) {\n  cumul += buckets[i].doc_count;\n  headline = i + 1;\n  if (cumul >= half) break;\n}',
-                },
+            "python": "buckets = v1.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('buckets', [])\ntotal = sum(b['doc_count'] for b in buckets)\nhalf = 0.5 * total\nheadline = 0\ncumul = 0\nfor i, b in enumerate(buckets):\n    cumul += b['doc_count']\n    headline = i + 1\n    if cumul >= half:\n        break",
+            "bash": 'buckets=$(echo "$v1" | jq -c \'.raw.aggregations.by_author.buckets // []\')\ntotal=$(echo "$buckets" | jq \'[.[] | .doc_count] | add // 0\')\nheadline=$(echo "$buckets" | python3 -c \'import sys, json; bs=json.load(sys.stdin); t=sum(b["doc_count"] for b in bs); half=t*0.5; c=0; f=0\nfor i,b in enumerate(bs):\n    c+=b["doc_count"]; f=i+1\n    if c>=half: break\nprint(f)\')',
+            "js": "const buckets = v1.raw?.aggregations?.by_author?.buckets || [];\nconst total = buckets.reduce((s, b) => s + b.doc_count, 0);\nconst half = total * 0.5;\nlet headline = 0, cumul = 0;\nfor (let i = 0; i < buckets.length; i++) {\n  cumul += buckets[i].doc_count;\n  headline = i + 1;\n  if (cumul >= half) break;\n}",
+        },
     )
     return MetricResult(
         recipes=abs_recipes,
@@ -2431,7 +2749,10 @@ def _metric_absence_factor(full: str, canonical_url: str, window_days: int) -> M
 
 # ── Metric 16 · Project Demographics ────────────────────────────────────
 
-def _metric_demographics(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_demographics(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """A simple population breakdown of the contributor pool: total,
     'core' (top contributors covering 80 % of commits), 'recent
     arrivals' (first commit in last 90 days), and 'dormant' (had
@@ -2452,7 +2773,7 @@ def _metric_demographics(full: str, canonical_url: str, window_days: int) -> Met
                 "terms": {"field": "author_name", "size": 500},
                 "aggs": {
                     "first": {"min": {"field": "grimoire_creation_date"}},
-                    "last":  {"max": {"field": "grimoire_creation_date"}},
+                    "last": {"max": {"field": "grimoire_creation_date"}},
                 },
             }
         },
@@ -2460,34 +2781,45 @@ def _metric_demographics(full: str, canonical_url: str, window_days: int) -> Met
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/git_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Per-author first/last commit + count on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or git index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Per-author first/last commit + count on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or git index empty",
+            )
+        )
         return MetricResult(
-        recipes=dem_recipes,
-            slug="project_demographics", value="—", label="no data",
-            secondary=None, queries=traces,
+            recipes=dem_recipes,
+            slug="project_demographics",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="No git activity indexed for this repo.",
-        unification=(
-            "**OpenSearch** terms agg with `min`/`max` sub-aggs per author. Buckets (`core`/`active`/`recent`/`dormant`) partitioned client-side."
-        ),
-    )
+            unification=(
+                "**OpenSearch** terms agg with `min`/`max` sub-aggs per author. Buckets (`core`/`active`/`recent`/`dormant`) partitioned client-side."
+            ),
+        )
 
     buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
     total_contribs = len(buckets)
     if total_contribs == 0:
         return MetricResult(
-        recipes=dem_recipes,
-            slug="project_demographics", value="0", label="no contributors",
-            secondary=None, queries=traces,
+            recipes=dem_recipes,
+            slug="project_demographics",
+            value="0",
+            label="no contributors",
+            secondary=None,
+            queries=traces,
             notes="No commits indexed for this repo.",
-        unification=(
-            "**OpenSearch** terms agg with `min`/`max` sub-aggs per author. Buckets (`core`/`active`/`recent`/`dormant`) partitioned client-side."
-        ),
-    )
+            unification=(
+                "**OpenSearch** terms agg with `min`/`max` sub-aggs per author. Buckets (`core`/`active`/`recent`/`dormant`) partitioned client-side."
+            ),
+        )
 
     total_commits = sum(int(b.get("doc_count") or 0) for b in buckets)
 
@@ -2507,23 +2839,29 @@ def _metric_demographics(full: str, canonical_url: str, window_days: int) -> Met
     ninety_days_ms = 90 * 86400 * 1000
     one_eighty_days_ms = 180 * 86400 * 1000
     recent = sum(
-        1 for b in buckets
+        1
+        for b in buckets
         if int((b.get("first") or {}).get("value") or 0) >= now_ms - ninety_days_ms
     )
     dormant = sum(
-        1 for b in buckets
+        1
+        for b in buckets
         if int((b.get("last") or {}).get("value") or 0) < now_ms - one_eighty_days_ms
     )
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"Per-author first/last commit + count on {origin}",
-        query=body_text,
-        result_summary=(
-            f"{total_contribs} contributors · core {core} · "
-            f"recent {recent} · dormant {dormant}"
-        ),
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Per-author first/last commit + count on {origin}",
+            query=body_text,
+            result_summary=(
+                f"{total_contribs} contributors · core {core} · "
+                f"recent {recent} · dormant {dormant}"
+            ),
+        )
+    )
 
     # Compose a 4-segment stacked bar covering the whole pool. The
     # buckets overlap conceptually (a "recent arrival" can also be
@@ -2549,28 +2887,27 @@ def _metric_demographics(full: str, canonical_url: str, window_days: int) -> Met
     if other < 0:
         other = 0
     segments = [
-        {"label": "core",    "value": len(core_set),    "tone": "good"},
-        {"label": "active",  "value": other,            "tone": "info"},
-        {"label": "recent",  "value": len(recent_set),  "tone": "warn"},
+        {"label": "core", "value": len(core_set), "tone": "good"},
+        {"label": "active", "value": other, "tone": "info"},
+        {"label": "recent", "value": len(recent_set), "tone": "warn"},
         {"label": "dormant", "value": len(dormant_set), "tone": "danger"},
     ]
 
-    
     dem_recipes = _build_recipes(
-        label='project_demographics',
+        label="project_demographics",
         traces=traces,
         extracts=[
-                    {
-                        'python': "len(r1.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('buckets', []))",
-                        'bash':   '.raw.aggregations.by_author.buckets | length',
-                        'js':     '(r1.raw?.aggregations?.by_author?.buckets || []).length',
-                    },
-                ],
+            {
+                "python": "len(r1.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('buckets', []))",
+                "bash": ".raw.aggregations.by_author.buckets | length",
+                "js": "(r1.raw?.aggregations?.by_author?.buckets || []).length",
+            },
+        ],
         combine={
-                    'python': 'headline = v1',
-                    'bash':   'headline=$v1',
-                    'js':     'const headline = v1;',
-                },
+            "python": "headline = v1",
+            "bash": "headline=$v1",
+            "js": "const headline = v1;",
+        },
     )
     return MetricResult(
         recipes=dem_recipes,
@@ -2613,7 +2950,9 @@ _BOT_PATTERNS: tuple[str, ...] = (
 )
 
 
-def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> MetricResult:
+def _metric_bot_activity(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Fraction of commits authored by recognised bots — high values
     are not inherently bad (security bots, lockfile bots, CI signers
     are all useful) but they distort raw commit counts."""
@@ -2628,10 +2967,9 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
     # Using both is belt-and-braces: GrimoireLab catches bots that
     # don't match our patterns (e.g. a custom CI signing identity),
     # and the wildcards catch bots GrimoireLab hasn't yet flagged.
-    bot_should = (
-        [{"term": {"author_bot": True}}]
-        + [{"wildcard": {"author_name": p}} for p in _BOT_PATTERNS]
-    )
+    bot_should = [{"term": {"author_bot": True}}] + [
+        {"wildcard": {"author_name": p}} for p in _BOT_PATTERNS
+    ]
     body = {
         "size": 0,
         "track_total_hits": True,
@@ -2646,11 +2984,7 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
         "aggs": {
             "bots": {
                 "filter": {"bool": {"should": bot_should, "minimum_should_match": 1}},
-                "aggs": {
-                    "by_bot": {
-                        "terms": {"field": "author_name", "size": 10}
-                    }
-                },
+                "aggs": {"by_bot": {"terms": {"field": "author_name", "size": 10}}},
             },
             "by_month": {
                 "date_histogram": {
@@ -2660,7 +2994,9 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
                 },
                 "aggs": {
                     "bot_count": {
-                        "filter": {"bool": {"should": bot_should, "minimum_should_match": 1}}
+                        "filter": {
+                            "bool": {"should": bot_should, "minimum_should_match": 1}
+                        }
                     }
                 },
             },
@@ -2669,73 +3005,94 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/git_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Commits matching known bot patterns on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or git index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Commits matching known bot patterns on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or git index empty",
+            )
+        )
         return MetricResult(
-        recipes=bot_recipes,
-            slug="bot_activity", value="—", label="no data",
-            secondary=None, queries=traces,
+            recipes=bot_recipes,
+            slug="bot_activity",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="No git activity indexed for this repo.",
-        unification=(
-            "bot-matching commits / total. Detection = **OpenSearch** `author_bot:true` OR any of 10 wildcard author-name patterns (`*[bot]*`, `*dependabot*`, …)."
-        ),
-    )
+            unification=(
+                "bot-matching commits / total. Detection = **OpenSearch** `author_bot:true` OR any of 10 wildcard author-name patterns (`*[bot]*`, `*dependabot*`, …)."
+            ),
+        )
 
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
-    bot_doc_count = int(((raw.get("aggregations") or {}).get("bots") or {}).get("doc_count") or 0)
+    bot_doc_count = int(
+        ((raw.get("aggregations") or {}).get("bots") or {}).get("doc_count") or 0
+    )
     bot_buckets = (
         ((raw.get("aggregations") or {}).get("bots") or {})
         .get("by_bot", {})
         .get("buckets", [])
     )
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"Bot vs human commits on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=f"{bot_doc_count} bot commits of {total} total",
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Bot vs human commits on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{bot_doc_count} bot commits of {total} total",
+        )
+    )
 
     if not total:
         return MetricResult(
-        recipes=bot_recipes,
-            slug="bot_activity", value="—", label="no commits in window",
-            secondary=None, queries=traces,
+            recipes=bot_recipes,
+            slug="bot_activity",
+            value="—",
+            label="no commits in window",
+            secondary=None,
+            queries=traces,
             notes="Widen the window to compute bot share.",
-        unification=(
-            "bot-matching commits / total. Detection = **OpenSearch** `author_bot:true` OR any of 10 wildcard author-name patterns (`*[bot]*`, `*dependabot*`, …)."
-        ),
-    )
+            unification=(
+                "bot-matching commits / total. Detection = **OpenSearch** `author_bot:true` OR any of 10 wildcard author-name patterns (`*[bot]*`, `*dependabot*`, …)."
+            ),
+        )
 
     ratio = bot_doc_count / total
     bot_series: list[dict[str, Any]] = []
     for b in ((raw.get("aggregations") or {}).get("by_month") or {}).get("buckets", []):
         ts_ms = int(b.get("key") or 0)
         cnt = int((b.get("bot_count") or {}).get("doc_count") or 0)
-        bot_series.append({
-            "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
-            "value": cnt,
-        })
-    
+        bot_series.append(
+            {
+                "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                .date()
+                .isoformat()[:7],
+                "value": cnt,
+            }
+        )
+
     bot_recipes = _build_recipes(
-        label='bot_activity',
+        label="bot_activity",
         traces=traces,
         extracts=[
-                    {
-                        'python': 'r1',
-                        'bash':   '.',
-                        'js':     'r1',
-                    },
-                ],
+            {
+                "python": "r1",
+                "bash": ".",
+                "js": "r1",
+            },
+        ],
         combine={
-                    'python': "total = v1.get('raw', {}).get('hits', {}).get('total', {}).get('value', 0)\nbots = v1.get('raw', {}).get('aggregations', {}).get('bots', {}).get('doc_count', 0)\nheadline = f'{(bots/total):.0%}' if total else '—'",
-                    'bash':   'total=$(echo "$v1" | jq \'.raw.hits.total.value // 0\')\nbots=$(echo "$v1" | jq \'.raw.aggregations.bots.doc_count // 0\')\nif [ "$total" -gt 0 ]; then headline=$(awk -v b="$bots" -v t="$total" \'BEGIN { printf("%.0f%%", b/t*100) }\'); else headline="—"; fi',
-                    'js':     "const total = v1.raw?.hits?.total?.value ?? 0;\nconst bots = v1.raw?.aggregations?.bots?.doc_count ?? 0;\nconst headline = total ? `${Math.round(bots/total*100)}%` : '—';",
-                },
+            "python": "total = v1.get('raw', {}).get('hits', {}).get('total', {}).get('value', 0)\nbots = v1.get('raw', {}).get('aggregations', {}).get('bots', {}).get('doc_count', 0)\nheadline = f'{(bots/total):.0%}' if total else '—'",
+            "bash": 'total=$(echo "$v1" | jq \'.raw.hits.total.value // 0\')\nbots=$(echo "$v1" | jq \'.raw.aggregations.bots.doc_count // 0\')\nif [ "$total" -gt 0 ]; then headline=$(awk -v b="$bots" -v t="$total" \'BEGIN { printf("%.0f%%", b/t*100) }\'); else headline="—"; fi',
+            "js": "const total = v1.raw?.hits?.total?.value ?? 0;\nconst bots = v1.raw?.aggregations?.bots?.doc_count ?? 0;\nconst headline = total ? `${Math.round(bots/total*100)}%` : '—';",
+        },
     )
     return MetricResult(
         recipes=bot_recipes,
@@ -2770,6 +3127,7 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
 
 
 # ── Metric 18-20 · Issues lifecycle (New / Active / Closed) ─────────────
+
 
 def _issues_count(
     full: str,
@@ -2822,15 +3180,23 @@ def _issues_count(
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"{title} on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or github index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"{title} on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
         return MetricResult(
-            slug=slug, value="—", label="no data",
-            secondary=None, queries=traces,
+            slug=slug,
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
         )
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
@@ -2838,32 +3204,49 @@ def _issues_count(
     for b in ((raw.get("aggregations") or {}).get("by_month") or {}).get("buckets", []):
         ts_ms = int(b.get("key") or 0)
         cnt = int(b.get("doc_count") or 0)
-        monthly.append({
-            "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
-            "value": cnt,
-        })
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"{title} on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=f"{total} issues · {len(monthly)} months in series",
-    ))
+        monthly.append(
+            {
+                "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                .date()
+                .isoformat()[:7],
+                "value": cnt,
+            }
+        )
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"{title} on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{total} issues · {len(monthly)} months in series",
+        )
+    )
     if not total:
         return MetricResult(
-            slug=slug, value="0", label=label,
-            secondary=None, queries=traces,
+            slug=slug,
+            value="0",
+            label=label,
+            secondary=None,
+            queries=traces,
             notes=notes,
         )
     return MetricResult(
-        slug=slug, value=str(total), label=label,
-        secondary=None, queries=traces, notes=notes,
-        series=monthly, series_unit="issues",
+        slug=slug,
+        value=str(total),
+        label=label,
+        secondary=None,
+        queries=traces,
+        notes=notes,
+        series=monthly,
+        series_unit="issues",
     )
 
 
 def _metric_issues_new(full: str, canonical_url: str, window_days: int) -> MetricResult:
     return _issues_count(
-        full, window_days,
+        full,
+        window_days,
         slug="issues_new",
         title="Issues newly opened",
         extra_must=[],
@@ -2877,9 +3260,12 @@ def _metric_issues_new(full: str, canonical_url: str, window_days: int) -> Metri
     )
 
 
-def _metric_issues_active(full: str, canonical_url: str, window_days: int) -> MetricResult:
+def _metric_issues_active(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     return _issues_count(
-        full, window_days,
+        full,
+        window_days,
         slug="issues_active",
         title="Issues with any activity",
         extra_must=[],
@@ -2892,9 +3278,12 @@ def _metric_issues_active(full: str, canonical_url: str, window_days: int) -> Me
     )
 
 
-def _metric_issues_closed(full: str, canonical_url: str, window_days: int) -> MetricResult:
+def _metric_issues_closed(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     return _issues_count(
-        full, window_days,
+        full,
+        window_days,
         slug="issues_closed",
         title="Issues closed",
         extra_must=[{"term": {"state": "closed"}}],
@@ -2909,6 +3298,7 @@ def _metric_issues_closed(full: str, canonical_url: str, window_days: int) -> Me
 
 
 # ── Metric 21 · Change Request Reviews ──────────────────────────────────
+
 
 def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> MetricResult:
     """How many pull requests received any review in the window?
@@ -2936,69 +3326,82 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
         },
         "aggs": {
             "reviewed": {
-                "filter": {
-                    "range": {
-                        "num_review_comments_without_bot": {"gt": 0}
-                    }
-                }
+                "filter": {"range": {"num_review_comments_without_bot": {"gt": 0}}}
             }
         },
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Reviewed PR count on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or github index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Reviewed PR count on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
         return MetricResult(
-        recipes=cr_recipes,
-            slug="cr_reviews", value="—", label="no data",
-            secondary=None, queries=traces,
+            recipes=cr_recipes,
+            slug="cr_reviews",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
-        unification=(
-            "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
-        ),
-    )
+            unification=(
+                "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
+            ),
+        )
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
-    reviewed = int(((raw.get("aggregations") or {}).get("reviewed") or {}).get("doc_count") or 0)
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"PRs with at least one non-bot review on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=f"{reviewed} reviewed of {total} PRs",
-    ))
+    reviewed = int(
+        ((raw.get("aggregations") or {}).get("reviewed") or {}).get("doc_count") or 0
+    )
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"PRs with at least one non-bot review on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{reviewed} reviewed of {total} PRs",
+        )
+    )
     if not total:
         return MetricResult(
-        recipes=cr_recipes,
-            slug="cr_reviews", value="—", label="no PRs in window",
-            secondary=None, queries=traces,
+            recipes=cr_recipes,
+            slug="cr_reviews",
+            value="—",
+            label="no PRs in window",
+            secondary=None,
+            queries=traces,
             notes="No pull requests opened on this repo in the window.",
-        unification=(
-            "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
-        ),
-    )
+            unification=(
+                "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
+            ),
+        )
     ratio = reviewed / total
     # High review-rate = healthy review culture; low = concerning.
     tone = "good" if ratio >= 0.6 else "warn" if ratio >= 0.3 else "danger"
-    
+
     cr_recipes = _build_recipes(
-        label='cr_reviews',
+        label="cr_reviews",
         traces=traces,
         extracts=[
-                    {
-                        'python': "r1.get('raw', {}).get('aggregations', {}).get('reviewed', {}).get('doc_count', 0)",
-                        'bash':   '.raw.aggregations.reviewed.doc_count // 0',
-                        'js':     'r1.raw?.aggregations?.reviewed?.doc_count ?? 0',
-                    },
-                ],
+            {
+                "python": "r1.get('raw', {}).get('aggregations', {}).get('reviewed', {}).get('doc_count', 0)",
+                "bash": ".raw.aggregations.reviewed.doc_count // 0",
+                "js": "r1.raw?.aggregations?.reviewed?.doc_count ?? 0",
+            },
+        ],
         combine={
-                    'python': 'headline = v1',
-                    'bash':   'headline=$v1',
-                    'js':     'const headline = v1;',
-                },
+            "python": "headline = v1",
+            "bash": "headline=$v1",
+            "js": "const headline = v1;",
+        },
     )
     return MetricResult(
         recipes=cr_recipes,
@@ -3013,13 +3416,14 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
             "positive — i.e. at least one review comment from a human. "
             "Pair with self_merge to read code-review culture."
         ),
-    unification=(
+        unification=(
             "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
         ),
     )
 
 
 # ── Metric 22 · Code Changes Lines ──────────────────────────────────────
+
 
 def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> MetricResult:
     """Sum of lines added + removed across commits in the window."""
@@ -3041,9 +3445,9 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
             }
         },
         "aggs": {
-            "lines_added":   {"sum": {"field": "lines_added"}},
+            "lines_added": {"sum": {"field": "lines_added"}},
             "lines_removed": {"sum": {"field": "lines_removed"}},
-            "files":         {"sum": {"field": "files"}},
+            "files": {"sum": {"field": "files"}},
             "by_month": {
                 "date_histogram": {
                     "field": "grimoire_creation_date",
@@ -3051,7 +3455,7 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
                     "min_doc_count": 0,
                 },
                 "aggs": {
-                    "added":   {"sum": {"field": "lines_added"}},
+                    "added": {"sum": {"field": "lines_added"}},
                     "removed": {"sum": {"field": "lines_removed"}},
                 },
             },
@@ -3060,26 +3464,34 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/git_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Lines added + removed on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or git index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Lines added + removed on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or git index empty",
+            )
+        )
         return MetricResult(
-        recipes=cl_recipes,
-            slug="code_lines", value="—", label="no data",
-            secondary=None, queries=traces,
+            recipes=cl_recipes,
+            slug="code_lines",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="No git activity indexed for this repo.",
-        unification=(
-            "`sum(lines_added) + sum(lines_removed)` across commits in window from **OpenSearch**. Monthly churn histogram drives the sparkline."
-        ),
-    )
+            unification=(
+                "`sum(lines_added) + sum(lines_removed)` across commits in window from **OpenSearch**. Monthly churn histogram drives the sparkline."
+            ),
+        )
     commits = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
     aggs = raw.get("aggregations") or {}
-    added   = int((aggs.get("lines_added")   or {}).get("value") or 0)
+    added = int((aggs.get("lines_added") or {}).get("value") or 0)
     removed = int((aggs.get("lines_removed") or {}).get("value") or 0)
-    files   = int((aggs.get("files")         or {}).get("value") or 0)
+    files = int((aggs.get("files") or {}).get("value") or 0)
     delta = added + removed
     # Median lines-per-commit — gives the user a sense of commit size
     # (a few giant commits vs many small ones produce the same total).
@@ -3087,44 +3499,55 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
     monthly_churn: list[dict[str, Any]] = []
     for b in (aggs.get("by_month") or {}).get("buckets", []):
         ts_ms = int(b.get("key") or 0)
-        a = int((b.get("added")   or {}).get("value") or 0)
+        a = int((b.get("added") or {}).get("value") or 0)
         r = int((b.get("removed") or {}).get("value") or 0)
-        monthly_churn.append({
-            "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
-            "value": a + r,
-        })
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"Lines changed on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=f"+{added} −{removed} across {commits} commits / {files} files",
-    ))
+        monthly_churn.append(
+            {
+                "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                .date()
+                .isoformat()[:7],
+                "value": a + r,
+            }
+        )
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Lines changed on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"+{added} −{removed} across {commits} commits / {files} files",
+        )
+    )
     if not commits:
         return MetricResult(
-        recipes=cl_recipes,
-            slug="code_lines", value="—", label="no commits in window",
-            secondary=None, queries=traces,
+            recipes=cl_recipes,
+            slug="code_lines",
+            value="—",
+            label="no commits in window",
+            secondary=None,
+            queries=traces,
             notes="Widen the window to compute line churn.",
-        unification=(
-            "`sum(lines_added) + sum(lines_removed)` across commits in window from **OpenSearch**. Monthly churn histogram drives the sparkline."
-        ),
-    )
-    
+            unification=(
+                "`sum(lines_added) + sum(lines_removed)` across commits in window from **OpenSearch**. Monthly churn histogram drives the sparkline."
+            ),
+        )
+
     cl_recipes = _build_recipes(
-        label='code_lines',
+        label="code_lines",
         traces=traces,
         extracts=[
-                    {
-                        'python': "(int(r1.get('raw', {}).get('aggregations', {}).get('lines_added', {}).get('value', 0)), int(r1.get('raw', {}).get('aggregations', {}).get('lines_removed', {}).get('value', 0)))",
-                        'bash':   '{added: (.raw.aggregations.lines_added.value // 0), removed: (.raw.aggregations.lines_removed.value // 0)}',
-                        'js':     '({added: r1.raw?.aggregations?.lines_added?.value ?? 0, removed: r1.raw?.aggregations?.lines_removed?.value ?? 0})',
-                    },
-                ],
+            {
+                "python": "(int(r1.get('raw', {}).get('aggregations', {}).get('lines_added', {}).get('value', 0)), int(r1.get('raw', {}).get('aggregations', {}).get('lines_removed', {}).get('value', 0)))",
+                "bash": "{added: (.raw.aggregations.lines_added.value // 0), removed: (.raw.aggregations.lines_removed.value // 0)}",
+                "js": "({added: r1.raw?.aggregations?.lines_added?.value ?? 0, removed: r1.raw?.aggregations?.lines_removed?.value ?? 0})",
+            },
+        ],
         combine={
-                    'python': "added, removed = v1\nheadline = f'{added + removed:,}'",
-                    'bash':   'added=$(echo "$v1" | jq \'.added\'); removed=$(echo "$v1" | jq \'.removed\')\nheadline=$(awk -v a="$added" -v r="$removed" \'BEGIN { printf("%\\047d", a + r) }\')',
-                    'js':     'const headline = (v1.added + v1.removed).toLocaleString();',
-                },
+            "python": "added, removed = v1\nheadline = f'{added + removed:,}'",
+            "bash": 'added=$(echo "$v1" | jq \'.added\'); removed=$(echo "$v1" | jq \'.removed\')\nheadline=$(awk -v a="$added" -v r="$removed" \'BEGIN { printf("%\\047d", a + r) }\')',
+            "js": "const headline = (v1.added + v1.removed).toLocaleString();",
+        },
     )
     return MetricResult(
         recipes=cl_recipes,
@@ -3145,7 +3568,7 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
             "this — a one-line refactor can still touch thousands of "
             "lines if a lockfile lives in the repo."
         ),
-    unification=(
+        unification=(
             "`sum(lines_added) + sum(lines_removed)` across commits in window from **OpenSearch**. Monthly churn histogram drives the sparkline."
         ),
     )
@@ -3160,7 +3583,10 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
 
 # ── Metric 23 · Inactive Contributors ────────────────────────────────────
 
-def _metric_inactive_contributors(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_inactive_contributors(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Distinct authors who *have* contributed to this repo but whose
     most recent commit predates the window. Mirrors the "dormant"
     bucket in ``project_demographics`` as a standalone metric.
@@ -3185,43 +3611,60 @@ def _metric_inactive_contributors(full: str, canonical_url: str, window_days: in
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/git_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Last-commit per author on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or git index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Last-commit per author on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or git index empty",
+            )
+        )
         return MetricResult(
-            slug="inactive_contributors", value="—", label="no data",
-            secondary=None, queries=traces,
+            slug="inactive_contributors",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="No git activity indexed for this repo.",
             unification="Single OpenSearch terms agg + max-date sub-agg.",
         )
 
     buckets = (raw.get("aggregations") or {}).get("by_author", {}).get("buckets", [])
     inactive = [
-        b for b in buckets
-        if int((b.get("last") or {}).get("value") or 0) < cutoff_ms
+        b for b in buckets if int((b.get("last") or {}).get("value") or 0) < cutoff_ms
     ]
     n_total = len(buckets)
     n_inactive = len(inactive)
     ratio = (n_inactive / n_total) if n_total else 0.0
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"Authors whose last commit predates {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=f"{n_inactive} inactive of {n_total} all-time contributors",
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Authors whose last commit predates {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{n_inactive} inactive of {n_total} all-time contributors",
+        )
+    )
 
     examples: list[dict[str, str]] = []
     for b in inactive[:8]:
         ts_s = int((b.get("last") or {}).get("value") or 0) // 1000
-        examples.append({
-            "label":  b.get("key") or "(anonymous)",
-            "detail": datetime.fromtimestamp(ts_s, tz=timezone.utc).date().isoformat() if ts_s else "",
-            "source": "OpenSearch",
-        })
+        examples.append(
+            {
+                "label": b.get("key") or "(anonymous)",
+                "detail": datetime.fromtimestamp(ts_s, tz=timezone.utc)
+                .date()
+                .isoformat()
+                if ts_s
+                else "",
+                "source": "OpenSearch",
+            }
+        )
 
     # Inverse tone — high inactive share is a red flag.
     tone = "good" if ratio < 0.3 else ("warn" if ratio < 0.7 else "danger")
@@ -3232,7 +3675,8 @@ def _metric_inactive_contributors(full: str, canonical_url: str, window_days: in
         combine={
             "python": (
                 "cutoff_ms = int((__import__('time').time() - "
-                + str(window_days) + " * 86400) * 1000)\n"
+                + str(window_days)
+                + " * 86400) * 1000)\n"
                 "buckets = v1.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('buckets', [])\n"
                 "inactive = [b for b in buckets if int((b.get('last') or {}).get('value') or 0) < cutoff_ms]\n"
                 "headline = len(inactive)"
@@ -3280,7 +3724,9 @@ def _metric_inactive_contributors(full: str, canonical_url: str, window_days: in
 _OCCASIONAL_THRESHOLD = 4
 
 
-def _metric_occasional_contributors(full: str, canonical_url: str, window_days: int) -> MetricResult:
+def _metric_occasional_contributors(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     """Authors with ≤ N commits in window — the "drive-by" segment.
 
     Threshold (4) matches CHAOSS's stock Occasional-Contributors
@@ -3304,22 +3750,28 @@ def _metric_occasional_contributors(full: str, canonical_url: str, window_days: 
                 ]
             }
         },
-        "aggs": {
-            "by_author": {"terms": {"field": "author_name", "size": 1000}}
-        },
+        "aggs": {"by_author": {"terms": {"field": "author_name", "size": 1000}}},
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/git_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"Per-author commit counts on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or git index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Per-author commit counts on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or git index empty",
+            )
+        )
         return MetricResult(
-            slug="occasional_contributors", value="—", label="no data",
-            secondary=None, queries=traces,
+            slug="occasional_contributors",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="No git activity indexed for this repo.",
             unification=(
                 f"Terms agg on ``author_name`` filtered to last {window_days} d, "
@@ -3333,21 +3785,27 @@ def _metric_occasional_contributors(full: str, canonical_url: str, window_days: 
     n_occasional = len(occasional)
     ratio = (n_occasional / n_total) if n_total else 0.0
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"Authors with ≤ {threshold} commits in last {window_days} d",
-        query=body_text,
-        result_summary=f"{n_occasional} occasional of {n_total} active contributors",
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Authors with ≤ {threshold} commits in last {window_days} d",
+            query=body_text,
+            result_summary=f"{n_occasional} occasional of {n_total} active contributors",
+        )
+    )
 
     examples: list[dict[str, str]] = []
     for b in occasional[:8]:
         cnt = int(b.get("doc_count") or 0)
-        examples.append({
-            "label":  b.get("key") or "(anonymous)",
-            "detail": f"{cnt} commit" + ("s" if cnt != 1 else ""),
-            "source": "OpenSearch",
-        })
+        examples.append(
+            {
+                "label": b.get("key") or "(anonymous)",
+                "detail": f"{cnt} commit" + ("s" if cnt != 1 else ""),
+                "source": "OpenSearch",
+            }
+        )
 
     oc_recipes = _build_recipes(
         label="occasional_contributors",
@@ -3392,6 +3850,7 @@ def _metric_occasional_contributors(full: str, canonical_url: str, window_days: 
 
 
 # ── Helpers for PR-lifecycle metrics ─────────────────────────────────────
+
 
 def _pr_count_metric(
     full: str,
@@ -3440,15 +3899,23 @@ def _pr_count_metric(
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"{label} on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or github index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"{label} on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
         return MetricResult(
-            slug=slug, value="—", label="no data",
-            secondary=None, queries=traces,
+            slug=slug,
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
             unification=unification,
         )
@@ -3457,28 +3924,38 @@ def _pr_count_metric(
     for b in ((raw.get("aggregations") or {}).get("by_month") or {}).get("buckets", []):
         ts_ms = int(b.get("key") or 0)
         cnt = int(b.get("doc_count") or 0)
-        monthly.append({
-            "date":  datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date().isoformat()[:7],
-            "value": cnt,
-        })
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"{label} on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=f"{total} {series_unit}",
-    ))
+        monthly.append(
+            {
+                "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                .date()
+                .isoformat()[:7],
+                "value": cnt,
+            }
+        )
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"{label} on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{total} {series_unit}",
+        )
+    )
     recipes = _build_recipes(
         label=slug,
         traces=traces,
-        extracts=[{
-            "python": "r1.get('raw', {}).get('hits', {}).get('total', {}).get('value', 0)",
-            "bash":   ".raw.hits.total.value // 0",
-            "js":     "r1.raw?.hits?.total?.value ?? 0",
-        }],
+        extracts=[
+            {
+                "python": "r1.get('raw', {}).get('hits', {}).get('total', {}).get('value', 0)",
+                "bash": ".raw.hits.total.value // 0",
+                "js": "r1.raw?.hits?.total?.value ?? 0",
+            }
+        ],
         combine={
             "python": "headline = v1",
-            "bash":   "headline=$v1",
-            "js":     "const headline = v1;",
+            "bash": "headline=$v1",
+            "js": "const headline = v1;",
         },
     )
     return MetricResult(
@@ -3497,9 +3974,13 @@ def _pr_count_metric(
 
 # ── Metric 25 · Change Request Accepted ──────────────────────────────────
 
-def _metric_cr_accepted(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_cr_accepted(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     return _pr_count_metric(
-        full, window_days,
+        full,
+        window_days,
         slug="cr_accepted",
         label="Merged PRs",
         extra_must=[{"term": {"merged": True}}],
@@ -3519,9 +4000,13 @@ def _metric_cr_accepted(full: str, canonical_url: str, window_days: int) -> Metr
 
 # ── Metric 26 · Change Request Declined ──────────────────────────────────
 
-def _metric_cr_declined(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_cr_declined(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     return _pr_count_metric(
-        full, window_days,
+        full,
+        window_days,
         slug="cr_declined",
         label="Declined PRs",
         extra_must=[{"term": {"state": "closed"}}, {"term": {"merged": False}}],
@@ -3540,6 +4025,7 @@ def _metric_cr_declined(full: str, canonical_url: str, window_days: int) -> Metr
 
 
 # ── Shared PR percentile metric (cr_duration, pr_time_to_close) ──────────
+
 
 def _pr_percentile_metric(
     full: str,
@@ -3580,15 +4066,23 @@ def _pr_percentile_metric(
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
     if raw is None:
-        traces.append(QueryTrace(
-            store="OpenSearch", engine="opensearch", mode="dsl",
-            title=f"{label} percentiles on {origin}",
-            query=body_text, result_summary="no response",
-            error="OpenSearch unreachable or github index empty",
-        ))
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"{label} percentiles on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
         return MetricResult(
-            slug=slug, value="—", label="no data",
-            secondary=None, queries=traces,
+            slug=slug,
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
             unification=unification,
         )
@@ -3599,20 +4093,27 @@ def _pr_percentile_metric(
     p50 = float(p50_raw) if p50_raw is not None else None
     p90 = float(p90_raw) if p90_raw is not None else None
 
-    traces.append(QueryTrace(
-        store="OpenSearch", engine="opensearch", mode="dsl",
-        title=f"P50/P90 {label} on {origin} since {cutoff_iso[:10]}",
-        query=body_text,
-        result_summary=(
-            f"{total} PRs · P50 {p50:.1f} {unit} · P90 {p90:.1f} {unit}"
-            if p50 is not None and p90 is not None
-            else f"{total} PRs · no percentile"
-        ),
-    ))
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"P50/P90 {label} on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=(
+                f"{total} PRs · P50 {p50:.1f} {unit} · P90 {p90:.1f} {unit}"
+                if p50 is not None and p90 is not None
+                else f"{total} PRs · no percentile"
+            ),
+        )
+    )
     if not total or p50 is None:
         return MetricResult(
-            slug=slug, value="—", label="no PRs in window",
-            secondary=None, queries=traces,
+            slug=slug,
+            value="—",
+            label="no PRs in window",
+            secondary=None,
+            queries=traces,
             notes=notes,
             unification=unification,
         )
@@ -3620,22 +4121,26 @@ def _pr_percentile_metric(
     recipes = _build_recipes(
         label=slug,
         traces=traces,
-        extracts=[{
-            "python": f"r1.get('raw', {{}}).get('aggregations', {{}}).get('p50', {{}}).get('values', {{}}).get('50.0')",
-            "bash":   '.raw.aggregations.p50.values."50.0" // 0',
-            "js":     "r1.raw?.aggregations?.p50?.values?.['50.0'] ?? 0",
-        }],
+        extracts=[
+            {
+                "python": "r1.get('raw', {}).get('aggregations', {}).get('p50', {}).get('values', {}).get('50.0')",
+                "bash": '.raw.aggregations.p50.values."50.0" // 0',
+                "js": "r1.raw?.aggregations?.p50?.values?.['50.0'] ?? 0",
+            }
+        ],
         combine={
             "python": f"headline = f'{{v1:.1f}} {unit}' if v1 else '—'",
-            "bash":   f'if [ "$v1" != "null" ] && [ "$v1" != "0" ]; then headline=$(awk -v v="$v1" \'BEGIN {{ printf("%.1f {unit}", v) }}\'); else headline="—"; fi',
-            "js":     f"const headline = v1 ? `${{v1.toFixed(1)}} {unit}` : '—';",
+            "bash": f'if [ "$v1" != "null" ] && [ "$v1" != "0" ]; then headline=$(awk -v v="$v1" \'BEGIN {{ printf("%.1f {unit}", v) }}\'); else headline="—"; fi',
+            "js": f"const headline = v1 ? `${{v1.toFixed(1)}} {unit}` : '—';",
         },
     )
     return MetricResult(
         slug=slug,
         value=f"{p50:.1f} {unit}",
         label=f"median {label.lower()} (last {window_days} d)",
-        secondary=(f"{total} PRs · P90 {p90:.1f} {unit}" if p90 is not None else f"{total} PRs"),
+        secondary=(
+            f"{total} PRs · P90 {p90:.1f} {unit}" if p90 is not None else f"{total} PRs"
+        ),
         queries=traces,
         recipes=recipes,
         notes=notes,
@@ -3645,9 +4150,13 @@ def _pr_percentile_metric(
 
 # ── Metric 27 · Change Request Duration ──────────────────────────────────
 
-def _metric_cr_duration(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_cr_duration(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     return _pr_percentile_metric(
-        full, window_days,
+        full,
+        window_days,
         slug="cr_duration",
         label="Days from PR open to merge",
         extra_must=[
@@ -3670,9 +4179,13 @@ def _metric_cr_duration(full: str, canonical_url: str, window_days: int) -> Metr
 
 # ── Metric 28 · Time to Close (PRs) ──────────────────────────────────────
 
-def _metric_pr_time_to_close(full: str, canonical_url: str, window_days: int) -> MetricResult:
+
+def _metric_pr_time_to_close(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
     return _pr_percentile_metric(
-        full, window_days,
+        full,
+        window_days,
         slug="pr_time_to_close",
         label="Days from PR open to close",
         extra_must=[
@@ -3834,9 +4347,7 @@ REGISTRY: list[MetricSpec] = [
         name="Change Request Closure Ratio",
         category="Lifecycle",
         chaoss_level="Level 0 · Must-have",
-        chaoss_url=(
-            "https://chaoss.community/kb/metric-change-request-closure-ratio/"
-        ),
+        chaoss_url=("https://chaoss.community/kb/metric-change-request-closure-ratio/"),
         question="Are pull requests being acted on?",
         description=(
             "Closed / total pull requests in the window, with merged "
@@ -3882,9 +4393,7 @@ REGISTRY: list[MetricSpec] = [
         name="Issue Resolution Duration",
         category="Lifecycle",
         chaoss_level="Phase 2 · Would-like-to-have",
-        chaoss_url=(
-            "https://chaoss.community/kb/metric-issue-resolution-duration/"
-        ),
+        chaoss_url=("https://chaoss.community/kb/metric-issue-resolution-duration/"),
         question="How long do issues stay open?",
         description=(
             "Median days from issue creation to close (PRs excluded). "
@@ -3931,9 +4440,7 @@ REGISTRY: list[MetricSpec] = [
         name="Contributor Absence Factor",
         category="Contributor",
         chaoss_level="Level 0 · Must-have",
-        chaoss_url=(
-            "https://chaoss.community/kb/metric-contributor-absence-factor/"
-        ),
+        chaoss_url=("https://chaoss.community/kb/metric-contributor-absence-factor/"),
         question="Does the project depend on a few people?",
         description=(
             "The 'bus factor' — smallest N contributors whose combined "
@@ -4013,9 +4520,7 @@ REGISTRY: list[MetricSpec] = [
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url="https://chaoss.community/kb/metric-issues-closed/",
         question="How much backlog is the team clearing?",
-        description=(
-            "Issues whose state flipped to closed inside the window."
-        ),
+        description=("Issues whose state flipped to closed inside the window."),
         is_time_based=True,
         compute=_metric_issues_closed,
     ),
@@ -4024,9 +4529,7 @@ REGISTRY: list[MetricSpec] = [
         name="Change Request Reviews",
         category="Lifecycle",
         chaoss_level="Level 0 · Must-have",
-        chaoss_url=(
-            "https://chaoss.community/kb/metric-change-request-reviews/"
-        ),
+        chaoss_url=("https://chaoss.community/kb/metric-change-request-reviews/"),
         question="Is work being reviewed before it lands?",
         description=(
             "Pull requests that received at least one non-bot review "

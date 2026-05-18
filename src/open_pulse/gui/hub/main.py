@@ -76,6 +76,7 @@ templates.env.globals["dashboards"] = [
 ]
 templates.env.globals["ontology_url"] = _settings.ontology_url
 
+
 # Several route modules ship their own Jinja2Templates instance
 # because they need module-local filters (the CHAOSS surface adds an
 # inline-markdown ``md`` filter; routes/hub.py registered its own

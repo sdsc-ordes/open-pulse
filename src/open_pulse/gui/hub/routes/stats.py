@@ -273,7 +273,7 @@ def history(
         "6h",
         alias="range",
         description="Window size: 1h, 6h, 24h, 7d, 30d, or 'custom' "
-                    "(in which case ``start`` + ``end`` are required).",
+        "(in which case ``start`` + ``end`` are required).",
     ),
     bucket_seconds: int = Query(
         0, description="Down-sample to one row per N seconds (0 = no bucketing)."

@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import replace
 
 from ..agent import narrate
-from ..entity import Entity, Fact, Mention, Neighbour
+from ..entity import Entity, Fact, Neighbour
 from ..normalize import HubRef, parse_ref
 from ..qdrant import lookup_for_ref
 from ..stores import sparql_describe, sparql_select
@@ -357,9 +357,7 @@ def build_entity(
     return entity
 
 
-def attach_qdrant_data(
-    entity: Entity, collections: list[str], ref: HubRef
-) -> Entity:
+def attach_qdrant_data(entity: Entity, collections: list[str], ref: HubRef) -> Entity:
     """Look up matching points and fold the payload into the entity.
 
     Beyond the existing "mentions" panel this also drains every useful

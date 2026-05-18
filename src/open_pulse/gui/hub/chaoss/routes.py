@@ -70,6 +70,7 @@ def _md_inline(text: str | None) -> Markup:
     s = _re.sub(r"`([^`\n]+?)`", r"<code>\1</code>", s)
     return Markup(s)
 
+
 log = logging.getLogger(__name__)
 
 _HERE = Path(__file__).parent
@@ -113,9 +114,7 @@ CATEGORIES: tuple[dict[str, str], ...] = (
         "url": "https://chaoss.community/kbtopic/software/",
         # Stacked package / box.
         "icon": (
-            "M12 3l9 4.5-9 4.5-9-4.5 9-4.5z "
-            "M3 12l9 4.5 9-4.5 "
-            "M3 16.5l9 4.5 9-4.5"
+            "M12 3l9 4.5-9 4.5-9-4.5 9-4.5z M3 12l9 4.5 9-4.5 M3 16.5l9 4.5 9-4.5"
         ),
     },
     {
@@ -124,10 +123,7 @@ CATEGORIES: tuple[dict[str, str], ...] = (
         "blurb": "How does work flow through the project?",
         "url": "https://chaoss.community/kbtopic/lifecycle/",
         # Circular arrow.
-        "icon": (
-            "M21 12a9 9 0 1 1-3-6.7 "
-            "M21 4v5h-5"
-        ),
+        "icon": ("M21 12a9 9 0 1 1-3-6.7 M21 4v5h-5"),
     },
     {
         "name": "Organization",
@@ -138,11 +134,7 @@ CATEGORIES: tuple[dict[str, str], ...] = (
         "blurb": "How are contributors organised across orgs?",
         "url": "https://chaoss.community/kbtopic/organization/",
         # Office building.
-        "icon": (
-            "M3 21V7l9-4 9 4v14 "
-            "M9 21V13h6v8 "
-            "M9 9h.01 M15 9h.01"
-        ),
+        "icon": ("M3 21V7l9-4 9 4v14 M9 21V13h6v8 M9 9h.01 M15 9h.01"),
     },
 )
 
@@ -191,7 +183,9 @@ def _open_in_databases(engine: str, query: str, mode: str | None = None) -> str:
     return "/databases#" + urllib.parse.urlencode(parts)
 
 
-@router.get("/chaoss", response_class=HTMLResponse, dependencies=[Depends(maybe_require_auth)])
+@router.get(
+    "/chaoss", response_class=HTMLResponse, dependencies=[Depends(maybe_require_auth)]
+)
 def chaoss_landing(request: Request) -> HTMLResponse:
     """Catalogue + repo entry point."""
     return templates.TemplateResponse(
@@ -280,16 +274,18 @@ def chaoss_metric_card(
     # Attach a /databases deep-link to every trace.
     traces = []
     for t in result.queries:
-        traces.append({
-            "store": t.store,
-            "engine": t.engine,
-            "mode": t.mode,
-            "title": t.title,
-            "query": t.query,
-            "result_summary": t.result_summary,
-            "error": t.error,
-            "deep_link": _open_in_databases(t.engine, t.query, t.mode),
-        })
+        traces.append(
+            {
+                "store": t.store,
+                "engine": t.engine,
+                "mode": t.mode,
+                "title": t.title,
+                "query": t.query,
+                "result_summary": t.result_summary,
+                "error": t.error,
+                "deep_link": _open_in_databases(t.engine, t.query, t.mode),
+            }
+        )
     return templates.TemplateResponse(
         request,
         "chaoss/_metric_card_body.html",
@@ -391,7 +387,9 @@ def _result_to_dict(
     return payload
 
 
-def _compute_one(slug: str, full: str, window: int) -> tuple[metrics_mod.MetricSpec, metrics_mod.MetricResult]:
+def _compute_one(
+    slug: str, full: str, window: int
+) -> tuple[metrics_mod.MetricSpec, metrics_mod.MetricResult]:
     """Look up the spec, compute the metric. Raises 404 for an unknown
     slug. Per-metric upstream failures are caught inside ``compute()``
     and surface as ``queries[*].error`` rather than as HTTP errors."""
@@ -441,7 +439,8 @@ def chaoss_api_topics() -> dict[str, Any]:
 )
 def chaoss_api_metrics(
     category: str | None = Query(
-        None, description="Filter to one topic — Contributor / Software / Lifecycle / Organization."
+        None,
+        description="Filter to one topic — Contributor / Software / Lifecycle / Organization.",
     ),
 ) -> dict[str, Any]:
     """List every metric spec (catalogue). Pure static data — no
@@ -506,19 +505,21 @@ def chaoss_api_repo_metrics(
         except Exception:  # noqa: BLE001
             # One blown-up metric mustn't take out the others.
             log.exception("metric %s failed for %s", spec.slug, full)
-            metrics_out.append({
-                **_spec_to_dict(spec),
-                "value": "—",
-                "label": "compute failed",
-                "secondary": None,
-                "headline_tone": "danger",
-                "unification": None,
-                "notes": None,
-                "series_unit": "events",
-                "visual": None,
-                "examples": [],
-                "error": "internal compute error",
-            })
+            metrics_out.append(
+                {
+                    **_spec_to_dict(spec),
+                    "value": "—",
+                    "label": "compute failed",
+                    "secondary": None,
+                    "headline_tone": "danger",
+                    "unification": None,
+                    "notes": None,
+                    "series_unit": "events",
+                    "visual": None,
+                    "examples": [],
+                    "error": "internal compute error",
+                }
+            )
             continue
         metrics_out.append(_result_to_dict(spec, result, fields))
 

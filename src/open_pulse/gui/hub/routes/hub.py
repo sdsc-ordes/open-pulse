@@ -48,7 +48,10 @@ _HOME_EXAMPLES: tuple[tuple[str, str], ...] = (
     ("zenodo.org/records/4905618", "Zenodo deposit"),
     ("ror.org/02s6k3f65", "EPFL (ROR)"),
     ("huggingface.co/bigscience/bloom", "HuggingFace model"),
-    ("infoscience.epfl.ch/entities/publication/fced83fa-5977-4b2e-b7b1-dad4ee87a8e1", "EPFL publication"),
+    (
+        "infoscience.epfl.ch/entities/publication/fced83fa-5977-4b2e-b7b1-dad4ee87a8e1",
+        "EPFL publication",
+    ),
 )
 
 # Per-source presentation: homepage link + short description used
@@ -391,7 +394,11 @@ def hub_entity(request: Request, ref: str) -> HTMLResponse:
 
     # The EventSource URL goes through the same path-converter, so each
     # path segment gets quoted but slashes stay intact.
-    encoded_path = "/".join(quote(p, safe="") for p in parsed.path.split("/")) if parsed.path else ""
+    encoded_path = (
+        "/".join(quote(p, safe="") for p in parsed.path.split("/"))
+        if parsed.path
+        else ""
+    )
     encoded = f"{parsed.host}/{encoded_path}" if encoded_path else parsed.host
     ref_payload = {
         "host": parsed.host,
@@ -427,9 +434,7 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
     """
     parsed = normalize.parse_ref(ref)
     if not parsed.is_known_host:
-        raise HTTPException(
-            status_code=400, detail="hub URLs must include a host"
-        )
+        raise HTTPException(status_code=400, detail="hub URLs must include a host")
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
@@ -441,9 +446,7 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
 
     async def run_resolver() -> None:
         try:
-            entity = await asyncio.to_thread(
-                registry.resolve, parsed, on_status
-            )
+            entity = await asyncio.to_thread(registry.resolve, parsed, on_status)
         except Exception as exc:  # noqa: BLE001
             log.exception("resolve stream failed for %s", parsed.canonical_url)
             loop.call_soon_threadsafe(
@@ -492,9 +495,7 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
                     found = False
                     title = parsed.display
                     kind = ""
-                    yield _sse_event(
-                        "status", "No matches — queued in the wanted list"
-                    )
+                    yield _sse_event("status", "No matches — queued in the wanted list")
                 else:
                     html = templates.get_template("hub/_entity_body.html").render(
                         entity=entity, ref=parsed
@@ -667,25 +668,28 @@ def _build_preview(parsed: normalize.HubRef) -> dict[str, str]:
                 payload = points[0].get("payload") or {}
 
     title = (
-        (payload.get("title") or payload.get("name") or payload.get("full_name") or "")
+        payload.get("title") or payload.get("name") or payload.get("full_name") or ""
     ).strip()
     description = (
-        (
-            payload.get("abstract")
-            or payload.get("summary")
-            or payload.get("description")
-            or payload.get("text")
-            or ""
-        )
+        payload.get("abstract")
+        or payload.get("summary")
+        or payload.get("description")
+        or payload.get("text")
+        or ""
     ).strip()
     badge = qdrant._badge_for_repo(payload)
 
     # Slug-style fallback for the repo-shaped hosts.
     if not title and parsed.host in ("github.com", "huggingface.co", "gitlab.com"):
         parts = parsed.path.split("/")
-        if parsed.host == "huggingface.co" and parts and parts[0].lower() in (
-            "datasets",
-            "spaces",
+        if (
+            parsed.host == "huggingface.co"
+            and parts
+            and parts[0].lower()
+            in (
+                "datasets",
+                "spaces",
+            )
         ):
             parts = parts[1:]
         if len(parts) >= 2:
@@ -702,9 +706,7 @@ def _build_preview(parsed: normalize.HubRef) -> dict[str, str]:
     kind = ""
     if parsed.host == "github.com":
         parts = parsed.path.split("/")
-        kind = (
-            "GitHub repository" if len(parts) >= 2 else "GitHub user or organization"
-        )
+        kind = "GitHub repository" if len(parts) >= 2 else "GitHub user or organization"
     elif parsed.host == "gitlab.com":
         kind = "GitLab project"
     elif parsed.host == "zenodo.org":

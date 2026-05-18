@@ -14,7 +14,6 @@ import logging
 import os
 import shutil
 import time
-from pathlib import Path
 from typing import Any
 
 import docker
@@ -154,7 +153,9 @@ def _docker_stats() -> dict[str, Any]:
         },
         "containers": {
             "count": len(containers),
-            "running": sum(1 for c in containers if (c.get("State") or "").lower() == "running"),
+            "running": sum(
+                1 for c in containers if (c.get("State") or "").lower() == "running"
+            ),
             "rw_bytes": sum(int(c.get("SizeRw") or 0) for c in containers),
         },
         "volumes": {
