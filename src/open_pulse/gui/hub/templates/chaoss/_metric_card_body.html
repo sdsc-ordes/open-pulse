@@ -1,0 +1,78 @@
+{#
+  Fragment rendered into the body of a metric card after the lazy
+  fetch lands. Sits inside the article > .chaoss-card-body div on
+  templates/chaoss/repo.html.
+#}
+<div style="display: flex; flex-direction: column; gap: 10px;">
+
+  {# Headline value + secondary breakdown. #}
+  <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;">
+    <div style="font-size: 30px; font-weight: 600; line-height: 1;">{{ result.value }}</div>
+    <div class="card-meta" style="font-size: 12px;">{{ result.label }}</div>
+  </div>
+  {% if result.secondary %}
+    <div class="card-meta" style="font-size: 11px;">{{ result.secondary }}</div>
+  {% endif %}
+
+  {# Optional examples (top-N rows: contributor logins, license names, paper titles…). #}
+  {% if result.examples %}
+    <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 3px;">
+      {% for ex in result.examples[:8] %}
+        <li style="display: flex; gap: 8px; align-items: baseline; font-size: 12px;">
+          <span class="pill" style="font-size: 9px; padding: 1px 5px;">{{ ex.source }}</span>
+          <span class="mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">{{ ex.label }}</span>
+          {% if ex.detail %}<span class="card-meta" style="font-size: 11px;">{{ ex.detail }}</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {# Methodology note. #}
+  {% if result.notes %}
+    <p class="card-meta" style="font-size: 12px; margin: 0; line-height: 1.45;">{{ result.notes }}</p>
+  {% endif %}
+
+  {#
+    Transparency block: collapsible, defaults closed so cards stay
+    compact. Each <details> opens to the actual query text +
+    syntax-highlighted code + a one-click jump to /databases with the
+    query pre-loaded.
+  #}
+  <details style="margin-top: 4px;" x-data="{ open: false }"
+           @toggle="if ($el.open && window.hljs) $el.querySelectorAll('pre code').forEach(c => { c.removeAttribute('data-highlighted'); try { window.hljs.highlightElement(c); } catch(_){} })">
+    <summary class="card-meta" style="cursor: pointer; font-size: 12px; user-select: none;">
+      How we compute this · {{ traces|length }} quer{% if traces|length == 1 %}y{% else %}ies{% endif %}
+    </summary>
+    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
+      {% for t in traces %}
+        <div style="border: 1px solid var(--border); border-radius: 6px; overflow: hidden;">
+          <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 6px 10px; background: var(--surface-sunk); flex-wrap: wrap;">
+            <div style="font-size: 12px;">
+              <span class="pill pill-info" style="font-size: 10px;">{{ t.store }}</span>
+              <span style="margin-left: 6px;">{{ t.title }}</span>
+            </div>
+            <div style="font-size: 11px;" class="card-meta">
+              {% if t.error %}
+                <span style="color: var(--danger, #c43);">error: {{ t.error }}</span>
+              {% else %}
+                {{ t.result_summary }}
+              {% endif %}
+            </div>
+          </div>
+          <pre style="margin: 0; max-height: 240px; overflow: auto; padding: 0;"><code
+              class="hljs language-{% if t.engine == 'cypher' %}cypher{% elif t.engine == 'sparql' %}sparql{% else %}json{% endif %}"
+              style="padding: 10px 12px; display: block; white-space: pre-wrap; font-size: 12px;">{{ t.query }}</code></pre>
+          <div style="display: flex; gap: 6px; padding: 6px 10px; background: var(--surface-sunk);">
+            <a class="btn" style="font-size: 11px; padding: 3px 8px;" href="{{ t.deep_link }}">Open in /databases</a>
+            <button class="btn"
+                    style="font-size: 11px; padding: 3px 8px;"
+                    type="button"
+                    @click="navigator.clipboard.writeText({{ t.query | tojson }}); $event.target.textContent = 'copied'; setTimeout(() => { $event.target.textContent = 'copy query' }, 1200)">
+              copy query
+            </button>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </details>
+</div>
