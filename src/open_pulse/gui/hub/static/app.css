@@ -762,9 +762,9 @@ svg.chaoss-topic-icon {
 
 /* ─── CHAOSS query-trace block (under "How we compute this") ───── */
 
-/* "How we compute this" expander — styled as a card-button with a
- * chevron that rotates open. We hide the browser-default disclosure
- * triangle so the chevron is the single visual indicator. */
+/* "How we compute this" — the in-card button that opens the modal.
+ * Styled as a tinted card-button with an inspect icon so the affordance
+ * is unambiguous (was a <details> expander before). */
 .chaoss-trace-summary {
   display: flex;
   align-items: center;
@@ -778,23 +778,21 @@ svg.chaoss-topic-icon {
   font-weight: 500;
   color: var(--fg);
   user-select: none;
-  list-style: none;
   transition: border-color .15s ease, background .15s ease;
 }
-.chaoss-trace-summary::-webkit-details-marker { display: none; }
-.chaoss-trace-summary::marker { display: none; }
+button.chaoss-trace-summary {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
 .chaoss-trace-summary:hover {
   border-color: var(--accent, var(--chaoss-tone-info));
   background: var(--surface);
 }
-.chaoss-trace-chevron {
-  display: inline-block;
-  font-size: 10px;
+.chaoss-trace-icon {
+  display: inline-flex;
+  align-items: center;
   color: var(--accent, var(--chaoss-tone-info));
-  transition: transform .15s ease;
-}
-details[open] > .chaoss-trace-summary .chaoss-trace-chevron {
-  transform: rotate(90deg);
 }
 .chaoss-trace-summary-label { flex: 1; }
 .chaoss-trace-summary-count {
@@ -805,6 +803,91 @@ details[open] > .chaoss-trace-summary .chaoss-trace-chevron {
   border-radius: 999px;
   background: var(--surface);
   border: 1px solid var(--border);
+}
+
+/* ─── Methodology modal ────────────────────────────────────────── */
+
+/* Body class added when any modal is open — prevents page-behind
+ * scroll-jacking. */
+body.chaoss-modal-lock { overflow: hidden; }
+
+.chaoss-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.chaoss-modal {
+  background: var(--surface);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 10px;
+  max-width: 920px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.chaoss-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-sunk);
+  flex-shrink: 0;
+}
+.chaoss-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.chaoss-modal-title h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chaoss-modal-close {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 10px;
+  border-radius: 4px;
+  transition: color .1s ease, background .1s ease, border-color .1s ease;
+}
+.chaoss-modal-close:hover {
+  color: var(--fg);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.chaoss-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px;
+}
+.chaoss-modal-question {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  line-height: 1.45;
 }
 
 /* Unification footer — the "how values combine" block under the
