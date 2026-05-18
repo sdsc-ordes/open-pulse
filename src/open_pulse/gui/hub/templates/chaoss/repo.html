@@ -72,6 +72,26 @@
       ],
     }));
   }
+
+  // Shared helper called from each trace + recipe expander when it
+  // opens for the first time. Walks every <pre><code> inside the
+  // given container, asks highlight.js to paint it, and runs the
+  // line-numbers plugin afterwards. We defer this to the open
+  // moment because the line-numbers plugin uses table-layout that
+  // depends on the element's rendered dimensions; calling it on a
+  // ``display: none`` element produces an empty / mis-aligned gutter.
+  window.chaossHighlight = function (container) {
+    if (!container || !window.hljs) return;
+    container.querySelectorAll('pre code').forEach(function (c) {
+      c.removeAttribute('data-highlighted');
+      try { window.hljs.highlightElement(c); } catch (_) {}
+      try {
+        if (window.hljs.lineNumbersBlock) {
+          window.hljs.lineNumbersBlock(c, { singleLine: true });
+        }
+      } catch (_) {}
+    });
+  };
 </script>
 
 <div x-data="chaossRepo({{ window }})" style="display: flex; flex-direction: column; gap: 18px;">
