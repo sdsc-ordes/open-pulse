@@ -725,6 +725,15 @@ def _metric_project_popularity(full: str, canonical_url: str, window_days: int) 
     if dependents:
         bits.append(f"↘ {dependents} dependents")
 
+    # Three-tile mini stat row so each component is glanceable.
+    tiles = []
+    if stars is not None:
+        tiles.append({"label": "stars",      "value": stars,      "icon": "★", "tone": "warn"})
+    if forks is not None:
+        tiles.append({"label": "forks",      "value": forks,      "icon": "⑂", "tone": "info"})
+    if dependents:
+        tiles.append({"label": "dependents", "value": dependents, "icon": "↘", "tone": "good"})
+
     return MetricResult(
         slug="project_popularity",
         value=headline,
@@ -735,6 +744,7 @@ def _metric_project_popularity(full: str, canonical_url: str, window_days: int) 
             {"label": name, "detail": "depends on this repo", "source": "Neo4j"}
             for name in dependent_names[:8]
         ],
+        visual={"kind": "stat_tiles", "tiles": tiles},
         notes=(
             "Snapshot. Stars and forks come from the latest metadata "
             "crawl; the dependents count comes from inbound DEPENDS_ON "
@@ -800,9 +810,10 @@ def _metric_languages(full: str, canonical_url: str, window_days: int) -> Metric
         slug="programming_languages",
         value=str(len(languages)),
         label="languages",
-        secondary=", ".join(languages[:6]) + (f", +{len(languages) - 6}" if len(languages) > 6 else ""),
+        secondary=None,
         queries=traces,
         examples=[{"label": l, "detail": "", "source": "SPARQL"} for l in languages],
+        visual={"kind": "pill_cloud", "pills": languages},
         notes=(
             "Snapshot. The current ontology stores languages as a flat "
             "set — no per-language size weighting. The CHAOSS "
@@ -917,9 +928,12 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
     # GrimoireLab's enriched github_issues index stamps every doc with
     # ``pull_request: bool`` (true for PRs) and ``state: keyword``
     # ("open" / "closed"). ``merged: bool`` differentiates accepted
-    # from rejected closes.
+    # from rejected closes. track_total_hits gives an exact total even
+    # past 10 000 PRs (the default trade-off in OpenSearch is to cap
+    # the count there for speed).
     body = {
         "size": 0,
+        "track_total_hits": True,
         "query": {
             "bool": {
                 "must": [
@@ -1329,6 +1343,7 @@ def _metric_issue_resolution(full: str, canonical_url: str, window_days: int) ->
                 ]
             }
         },
+        "track_total_hits": True,
         "aggs": {
             "median_days": {
                 "percentiles": {"field": "time_open_days", "percents": [50]}
@@ -1431,6 +1446,7 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
                 }
             }
         },
+        "track_total_hits": True,
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
@@ -1572,13 +1588,18 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
     else:
         burstiness = (sigma - mu) / (sigma + mu)
 
-    # Friendly label for the score's regime.
+    # Friendly label for the score's regime + a tone the gauge picks
+    # up. Tone is purely cosmetic — no value judgement on bursty vs
+    # periodic, just a different colour per regime.
     if burstiness > 0.3:
         regime = "bursty (irregular bursts)"
+        tone = "warn"
     elif burstiness < -0.3:
         regime = "periodic (steady cadence)"
+        tone = "good"
     else:
         regime = "Poisson-like (random)"
+        tone = "info"
 
     traces.append(QueryTrace(
         store="OpenSearch", engine="opensearch", mode="dsl",
@@ -1590,6 +1611,11 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
         ),
     ))
 
+    # Gauge visual: mark where on the [-1, +1] spectrum we sit. The
+    # marker position (in %) is (B + 1) / 2 — so −1 = 0 % (far left),
+    # 0 = 50 % (middle), +1 = 100 % (far right).
+    marker_pct = round((burstiness + 1) / 2 * 100, 1)
+
     return MetricResult(
         slug="burstiness",
         value=f"{burstiness:+.2f}",
@@ -1598,12 +1624,22 @@ def _metric_burstiness(full: str, canonical_url: str, window_days: int) -> Metri
             f"{active_days} active days · mean gap {mu:.1f} d · σ {sigma:.1f} d"
         ),
         queries=traces,
+        visual={
+            "kind": "gauge",
+            "tone": tone,
+            "marker_pct": marker_pct,
+            "left_label":  "−1 periodic",
+            "right_label": "+1 bursty",
+        },
         notes=(
             "B = (σ − μ) / (σ + μ) on inter-arrival days between "
             "commits, per Goh & Barabási (2008). Range: −1 (strictly "
             "periodic) through 0 (random Poisson) to +1 (heavy bursts "
-            "with long silences). Computed client-side from the daily "
-            "histogram so the query shown above is exactly what ran."
+            "with long silences). Computed client-side from a daily "
+            "histogram — multiple commits in a single calendar day "
+            "collapse to one event, so the score is a day-granularity "
+            "approximation of the per-commit measure CHAOSS defines. "
+            "The query shown above is exactly what ran."
         ),
     )
 
@@ -1912,9 +1948,18 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
     traces: list[QueryTrace] = []
 
     origin = f"https://github.com/{full}"
-    bot_should = [{"wildcard": {"author_name": p}} for p in _BOT_PATTERNS]
+    # Bot signal = GrimoireLab's typed enrichment (author_bot: true)
+    # OR an author_name that matches one of our well-known wildcards.
+    # Using both is belt-and-braces: GrimoireLab catches bots that
+    # don't match our patterns (e.g. a custom CI signing identity),
+    # and the wildcards catch bots GrimoireLab hasn't yet flagged.
+    bot_should = (
+        [{"term": {"author_bot": True}}]
+        + [{"wildcard": {"author_name": p}} for p in _BOT_PATTERNS]
+    )
     body = {
         "size": 0,
+        "track_total_hits": True,
         "query": {
             "bool": {
                 "must": [
@@ -2010,12 +2055,14 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
         ],
         queries=traces,
         notes=(
-            "Patterns matched: "
+            "Primary signal is GrimoireLab's ``author_bot: true`` "
+            "enrichment flag — set by the SortingHat / Perceval "
+            "pipeline based on its own heuristics. We also OR-match "
+            "well-known wildcard patterns ("
             + ", ".join(repr(p) for p in _BOT_PATTERNS)
-            + ". Wildcards are applied case-sensitively to "
-            "``author_name``, so any bot whose committer name "
-            "doesn't match the list above goes uncounted. A high "
-            "share isn't bad — it can mean Dependabot is active or "
+            + ") so a custom CI identity that GrimoireLab hasn't "
+            "seen is still picked up. A high share is not bad in "
+            "itself — it usually means Dependabot is active or "
             "release-please is signing tags."
         ),
     )
@@ -2298,6 +2345,9 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
     removed = int((aggs.get("lines_removed") or {}).get("value") or 0)
     files   = int((aggs.get("files")         or {}).get("value") or 0)
     delta = added + removed
+    # Median lines-per-commit — gives the user a sense of commit size
+    # (a few giant commits vs many small ones produce the same total).
+    avg_per_commit = (delta // commits) if commits else 0
     monthly_churn: list[dict[str, Any]] = []
     for b in (aggs.get("by_month") or {}).get("buckets", []):
         ts_ms = int(b.get("key") or 0)
@@ -2325,7 +2375,8 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
         label=f"lines changed (last {window_days} days)",
         secondary=(
             f"+{added:,} added · −{removed:,} removed · "
-            f"{commits} commits across {files} file-changes"
+            f"{commits} commits · {files} file-changes · "
+            f"~{avg_per_commit:,} lines / commit"
         ),
         series=monthly_churn,
         series_unit="lines",
