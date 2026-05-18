@@ -1,0 +1,601 @@
+{% extends "base.html" %}
+{% block title %}{{ ref.display }} · Hub · Open Pulse{% endblock %}
+{# Initial heading uses the URL slug — the SSE result handler swaps
+   it for the entity title once the resolver returns. #}
+{% block heading %}{{ ref.display }}{% endblock %}
+{% block subheading %}
+  <span style="color: var(--fg-faint);">Looking up</span> ·
+  <a href="{{ ref.canonical_url }}" rel="noopener" target="_blank" style="word-break: break-all;">{{ ref.canonical_url }}</a>
+{% endblock %}
+
+{# Sticky breadcrumb strip directly under the page heading. The
+   placeholder renders a one-segment trail (Hub › current); the JS
+   in hubTrail / hubChain expands it with the user's recent walk
+   (decoded from the ?chain= URL query + localStorage). #}
+{% block breadcrumb %}
+<nav class="hub-breadcrumb"
+     data-hub-trail
+     data-current-url="{{ ref.canonical_url }}"
+     data-current-title="{{ ref.display }}"
+     data-current-kind=""
+     aria-label="breadcrumb">
+  <a href="/hub">Hub</a>
+  <span class="sep">›</span>
+  <span class="current">{{ ref.display }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+{# Skeleton + SSE wiring. The server returns this page synchronously
+   (cheap), and Alpine opens an EventSource that streams progress
+   messages as each store responds. When the `result` event arrives,
+   the rendered body fragment swaps in over the spinner. The lazy
+   backlinks panel below the body fetches independently after the
+   entity has rendered, so a slow Qdrant doesn't pin the main load. #}
+<div x-data='hubStream({{ ref_payload | tojson }})' x-init="connect()" style="position: relative; display: flex; flex-direction: column; gap: 16px;">
+
+  <div x-show="!done" class="card" style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span class="hub-spinner" aria-hidden="true"></span>
+      <div>
+        <div class="card-title" style="margin-bottom: 2px;">Working</div>
+        <div style="font-size: 14px;" x-text="status">starting…</div>
+      </div>
+    </div>
+    <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; border-top: 1px solid var(--border); padding-top: 8px;">
+      <template x-for="(msg, i) in log" :key="i">
+        <li class="card-meta" style="display: flex; gap: 8px; align-items: baseline;">
+          <span style="opacity: .55; min-width: 22px; text-align: right;" x-text="i+1"></span>
+          <span x-text="msg"></span>
+        </li>
+      </template>
+    </ul>
+  </div>
+
+  <div x-show="done" x-html="result"></div>
+
+  {# Three independent lazy panels — each fetches its own endpoint
+     after the entity body lands. They only mount when the entity
+     was actually found (otherwise the page shows the wanted-list
+     placeholder and the panels would have nothing to point at). #}
+  {# Each lazy-panel wrapper hides itself entirely when the fetch
+     returned no data — otherwise the parent flex column adds a 16px
+     gap around an empty <div>, producing the "phantom newlines" the
+     entity page used to grow when Activity / Backlinks came up empty. #}
+  {# Non-github entities — surface the GitHub repos they reference.
+     Each item navigates to the github.com hub page, where Neo4j
+     neighbours + OpenSearch activity show up. #}
+  <template x-if="done && found">
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "connected", "Connected on GitHub")' x-init="load()"
+         x-show="loading || html.length > 0">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
+        <span class="hub-spinner" aria-hidden="true"></span>
+        <div>
+          <div class="card-title" style="margin-bottom: 2px;" x-text="title"></div>
+          <div style="font-size: 14px;" class="card-meta">scanning github links…</div>
+        </div>
+      </div>
+      <div x-show="!loading && html.length > 0" x-html="html"></div>
+    </div>
+  </template>
+
+  {# Community behind the cited code — union of contributors / owners
+     across all connected GitHub repos. Lights up only when at least
+     one of those repos is indexed in Neo4j. #}
+  <template x-if="done && found">
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "community", "Community behind the cited code")' x-init="load()"
+         x-show="loading || html.length > 0">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
+        <span class="hub-spinner" aria-hidden="true"></span>
+        <div>
+          <div class="card-title" style="margin-bottom: 2px;" x-text="title"></div>
+          <div style="font-size: 14px;" class="card-meta">walking the contributor graph…</div>
+        </div>
+      </div>
+      <div x-show="!loading && html.length > 0" x-html="html"></div>
+    </div>
+  </template>
+
+  <template x-if="done && found">
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "activity", "Activity")' x-init="load()"
+         x-show="loading || html.length > 0">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
+        <span class="hub-spinner" aria-hidden="true"></span>
+        <div>
+          <div class="card-title" style="margin-bottom: 2px;" x-text="title"></div>
+          <div style="font-size: 14px;" class="card-meta">checking the git ingest…</div>
+        </div>
+      </div>
+      <div x-show="!loading && html.length > 0" x-html="html"></div>
+    </div>
+  </template>
+
+  <template x-if="done && found">
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "related", "Related")' x-init="load()"
+         x-show="loading || html.length > 0">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
+        <span class="hub-spinner" aria-hidden="true"></span>
+        <div>
+          <div class="card-title" style="margin-bottom: 2px;" x-text="title"></div>
+          <div style="font-size: 14px;" class="card-meta">finding siblings…</div>
+        </div>
+      </div>
+      <div x-show="!loading && html.length > 0" x-html="html"></div>
+    </div>
+  </template>
+
+  <template x-if="done && found">
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "backlinks", "Referenced from")' x-init="load()"
+         x-show="loading || html.length > 0">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
+        <span class="hub-spinner" aria-hidden="true"></span>
+        <div>
+          <div class="card-title" style="margin-bottom: 2px;" x-text="title"></div>
+          <div style="font-size: 14px;" class="card-meta">scanning the network…</div>
+        </div>
+      </div>
+      <div x-show="!loading && html.length > 0" x-html="html"></div>
+    </div>
+  </template>
+
+  <div x-show="error" class="card tone-bad" x-cloak>
+    <div class="card-title">Stream error</div>
+    <p style="margin: 6px 0 0;" x-text="error"></p>
+  </div>
+
+  {# Footer breadcrumb — sits at the very end, AFTER the lazy panels
+     (Activity, Related, Connected, Community, Backlinks). hubTrail
+     (the same JS that drives the top sticky strip) populates this
+     copy via its [data-hub-trail] selector. #}
+  <nav class="hub-breadcrumb is-footer"
+       data-hub-trail
+       data-current-url="{{ ref.canonical_url }}"
+       data-current-title="{{ ref.display }}"
+       data-current-kind=""
+       aria-label="breadcrumb">
+    <a href="/hub">Hub</a>
+    <span class="sep">›</span>
+    <span class="current">{{ ref.display }}</span>
+  </nav>
+
+</div>
+
+<style>
+  .hub-spinner {
+    width: 18px; height: 18px;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    display: inline-block;
+    animation: hub-spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes hub-spin { to { transform: rotate(360deg); } }
+</style>
+
+<script>
+function hubStream(ref) {
+  return {
+    ref: ref,
+    status: 'opening stream…',
+    log: [],
+    result: '',
+    done: false,
+    found: false,
+    error: '',
+    connect() {
+      const url = `/api/hub/resolve-stream/${ref.encoded_path}`;
+      // `withCredentials` so the session cookie travels — otherwise
+      // a non-public hub would 401 the EventSource.
+      const es = new EventSource(url, { withCredentials: true });
+      es.addEventListener('status', (e) => {
+        this.log.push(e.data);
+        this.status = e.data;
+      });
+      es.addEventListener('result', (e) => {
+        let parsed = null;
+        try {
+          parsed = JSON.parse(e.data);
+          this.result = parsed.html || '';
+          this.found = !!parsed.found;
+        } catch (_) {
+          this.result = e.data;
+          this.found = false;
+        }
+        // Swap the URL-slug heading for the entity's human title (and
+        // keep the canonical URL visible as a small link below it).
+        if (parsed && parsed.title) {
+          const h1 = document.querySelector('.page-header h1');
+          if (h1) h1.textContent = parsed.title;
+          const sub = document.querySelector('.page-header p');
+          if (sub && parsed.url) {
+            const kindHtml = parsed.kind
+              ? `<span style="color: var(--fg-faint);">${parsed.kind}</span> · `
+              : '';
+            // Escape the URL for the attribute and text.
+            const u = parsed.url.replace(/"/g, '&quot;');
+            sub.innerHTML = `${kindHtml}<a href="${u}" rel="noopener" target="_blank" style="word-break: break-all;">${u}</a>`;
+          }
+          if (parsed.title && document.title.indexOf(parsed.title) === -1) {
+            document.title = `${parsed.title} · Hub · Open Pulse`;
+          }
+          // Push the freshly-resolved entity onto the navigation
+          // trail so the breadcrumbs include its real title.
+          if (window.hubTrail) {
+            window.hubTrail.refresh({
+              url:   parsed.url,
+              title: parsed.title,
+              kind:  parsed.kind,
+            });
+          }
+        }
+        this.done = true;
+        es.close();
+      });
+      es.addEventListener('error', () => {
+        this.error = 'Connection to the stream was lost. Reload to retry.';
+        es.close();
+      });
+    },
+  };
+}
+
+// Navigation trail — the breadcrumb shows the *path the visitor
+// walked* through the hub network, not the URL path of the current
+// item.
+//
+// Two sources feed the trail:
+//   1. ``?chain=path1,path2,...`` in the URL — the canonical, shareable
+//      record. Each path is ``<host>/<path>`` (no /hub prefix).
+//   2. localStorage — fallback when the user typed the URL directly
+//      and there's no chain query yet.
+//
+// On every hub link click we extend (or truncate, for back-nav)
+// the chain into the link's href so navigation propagates the
+// trail forward through the URL bar.
+(function() {
+  const STORAGE_KEY = 'op:hub:trail:v1';
+  const MAX_TRAIL = 8;
+  const MAX_VISIBLE = 4;
+  const CHAIN_SEP = ',';
+
+  // ── path / url helpers ────────────────────────────────────────
+  function hubUrlFor(canonical) {
+    if (!canonical) return '';
+    return '/hub/' + canonical
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/+$/, '');
+  }
+  function hubPathFor(canonical) {
+    return hubUrlFor(canonical).replace(/^\/hub\//, '');
+  }
+  function pathFromHubUrl(hubUrl) {
+    // e.g. "/hub/github.com/foo/bar?chain=..." → "github.com/foo/bar"
+    const noPrefix = hubUrl.replace(/^\/hub\//, '');
+    return noPrefix.split('?')[0].split('#')[0];
+  }
+  function canonicalFromPath(path) {
+    return 'https://' + path;
+  }
+
+  // ── chain encoding ────────────────────────────────────────────
+  function readChainFromURL() {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('chain') || '';
+    return raw
+      .split(CHAIN_SEP)
+      .map(s => decodeURIComponent(s.trim()))
+      .filter(Boolean);
+  }
+  function encodeChain(paths) {
+    return paths.map(encodeURIComponent).join(CHAIN_SEP);
+  }
+  function withChain(hubUrl, chainPaths) {
+    if (!chainPaths.length) return hubUrl;
+    const sep = hubUrl.includes('?') ? '&' : '?';
+    return `${hubUrl}${sep}chain=${encodeChain(chainPaths)}`;
+  }
+
+  // ── localStorage cache of (path → {title,kind}) ──────────────
+  function loadCache() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {}; }
+    catch (_) { return {}; }
+  }
+  function saveCache(cache) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cache)); }
+    catch (_) {}
+  }
+  function rememberEntry(path, entry) {
+    const cache = loadCache();
+    cache[path] = { title: entry.title || '', kind: entry.kind || '' };
+    // Bound the cache so it doesn't grow forever.
+    const keys = Object.keys(cache);
+    if (keys.length > 60) {
+      // Drop oldest insertion-ordered key.
+      delete cache[keys[0]];
+    }
+    saveCache(cache);
+  }
+
+  // ── presentation helpers ──────────────────────────────────────
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+  }
+  function shortLabel(title) {
+    const t = String(title || '').trim();
+    if (!t) return '';
+    if (t.length <= 56) return t;
+    return t.slice(0, 53).replace(/\s+\S*$/, '') + '…';
+  }
+
+  // ── trail state ──────────────────────────────────────────────
+  // chainPaths: ordered list of <host>/<path> for the *previous*
+  // entities the user walked through. The current entity is rendered
+  // separately and is NOT in chainPaths.
+  let chainPaths = readChainFromURL();
+  // entryByPath: path → {title, kind}. Populated from localStorage
+  // cache, then enriched with /api/hub/preview for unknown ones.
+  const entryByPath = {};
+
+  function prefillFromCache() {
+    const cache = loadCache();
+    for (const p of chainPaths) {
+      if (cache[p]) entryByPath[p] = cache[p];
+    }
+  }
+  prefillFromCache();
+
+  // Current entity is read from the breadcrumb's data attributes,
+  // refreshed on SSE result.
+  function readCurrent() {
+    const strip = document.querySelector('[data-hub-trail]');
+    if (!strip) return null;
+    return {
+      url:   strip.dataset.currentUrl   || '',
+      title: strip.dataset.currentTitle || '',
+      kind:  strip.dataset.currentKind  || '',
+    };
+  }
+
+  async function fetchMissingTitles() {
+    const missing = chainPaths.filter(p => !entryByPath[p] || !entryByPath[p].title);
+    if (!missing.length) return;
+    await Promise.all(missing.map(async (p) => {
+      try {
+        const r = await fetch(`/api/hub/preview/${p}`, { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        entryByPath[p] = { title: j.title || '', kind: j.kind || '' };
+        rememberEntry(p, entryByPath[p]);
+      } catch (_) {}
+    }));
+  }
+
+  function render(current) {
+    const strips = document.querySelectorAll('[data-hub-trail]');
+    if (!strips.length) return;
+
+    const visible = chainPaths.slice(-MAX_VISIBLE);
+    const parts = [`<a href="/hub">Hub</a>`];
+    for (let i = 0; i < visible.length; i++) {
+      const p = visible[i];
+      // Each previous chip's href truncates the chain at that point
+      // — clicking "previous-2" wipes anything after it.
+      const truncated = chainPaths.slice(0, chainPaths.indexOf(p));
+      const href = withChain('/hub/' + p, truncated);
+      const info = entryByPath[p] || {};
+      const label = shortLabel(info.title) || p;
+      parts.push(`<span class="sep">›</span>`);
+      parts.push(`<a href="${escapeHtml(href)}" title="${escapeHtml(info.title || p)}">${escapeHtml(label)}</a>`);
+    }
+    parts.push(`<span class="sep">›</span>`);
+    const title = current && current.title ? current.title : '';
+    parts.push(`<span class="current" title="${escapeHtml(title)}">${escapeHtml(shortLabel(title))}</span>`);
+    const html = parts.join(' ');
+    strips.forEach(el => { el.innerHTML = html; });
+  }
+
+  // ── link click interceptor ────────────────────────────────────
+  // Rewrites href on every hub-internal anchor click so the chain
+  // propagates. If the target is already in the chain we truncate
+  // (going BACK in the trail); otherwise we extend with the current
+  // entity's path.
+  function chainForLink(targetPath) {
+    const cur = readCurrent();
+    const currentPath = cur ? hubPathFor(cur.url) : '';
+    const extended = currentPath
+      ? [...chainPaths, currentPath]
+      : chainPaths.slice();
+    const idx = extended.indexOf(targetPath);
+    if (idx >= 0) return extended.slice(0, idx);
+    return extended;
+  }
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[href^="/hub/"]');
+    if (!a) return;
+    const href = a.getAttribute('href') || '';
+    if (href.includes('chain=')) return;
+    // Skip the "Hub" home link — it's the natural reset point.
+    if (href === '/hub' || href === '/hub/') return;
+    const targetPath = pathFromHubUrl(href);
+    const chain = chainForLink(targetPath);
+    if (!chain.length) return;
+    const sep = href.includes('?') ? '&' : '?';
+    a.setAttribute('href', `${href}${sep}chain=${encodeChain(chain)}`);
+  }, true);
+
+  // ── public surface ───────────────────────────────────────────
+  window.hubTrail = {
+    refresh(current) {
+      // Called from hubStream on SSE result. Cache the resolved
+      // entity (so back-nav and shared URLs find a real title) AND
+      // sync the breadcrumb's data attrs so a later render keeps
+      // the freshly-resolved title.
+      if (current && current.url) {
+        const path = hubPathFor(current.url);
+        rememberEntry(path, current);
+      }
+      document.querySelectorAll('[data-hub-trail]').forEach(el => {
+        if (current && current.url)   el.dataset.currentUrl   = current.url;
+        if (current && current.title) el.dataset.currentTitle = current.title;
+        if (current && current.kind)  el.dataset.currentKind  = current.kind;
+      });
+      render(current);
+    },
+  };
+
+  function init() {
+    const current = readCurrent();
+    render(current);
+    fetchMissingTitles().then(() => render(readCurrent()));
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+
+// Live tooltip enrichment.
+// Each .hub-hover[data-preview-ref] starts a 200ms debounce on hover.
+// If still hovered after the delay, we fetch /api/hub/preview/<ref> and
+// patch the static tooltip with the target's real title, kind, and a
+// short description from Qdrant. Cached per ref so a second hover is
+// instant; event delegation handles lazy-injected panel HTML.
+(function() {
+  const cache = new Map();
+  let pending = null;
+
+  async function fetchPreview(ref) {
+    if (cache.has(ref)) return cache.get(ref);
+    const promise = (async () => {
+      try {
+        const r = await fetch(`/api/hub/preview/${ref}`, { credentials: 'include' });
+        if (!r.ok) return null;
+        return await r.json();
+      } catch { return null; }
+    })();
+    cache.set(ref, promise);
+    return promise;
+  }
+
+  function applyPreview(tooltipEl, data) {
+    if (!data) return;
+    const titleEl = tooltipEl.querySelector('.hub-preview-title');
+    const metaEl  = tooltipEl.querySelector('.hub-preview-meta');
+    const descEl  = tooltipEl.querySelector('.hub-preview-description');
+    const badgeEl = tooltipEl.querySelector('.hub-preview-badge');
+    if (titleEl && data.title) titleEl.textContent = data.title;
+    if (metaEl  && data.kind)  metaEl.textContent  = data.kind;
+    if (descEl  && data.description) {
+      descEl.textContent = data.description;
+      descEl.style.marginTop = '6px';
+      descEl.style.color = 'var(--fg-muted)';
+    }
+    if (badgeEl && data.badge && !badgeEl.textContent.includes(data.badge)) {
+      badgeEl.textContent = data.badge;
+    }
+  }
+
+  document.addEventListener('mouseover', (e) => {
+    const trigger = e.target.closest && e.target.closest('.hub-hover[data-preview-ref]');
+    if (!trigger || trigger === pending) return;
+    pending = trigger;
+    const ref = trigger.dataset.previewRef;
+    if (!ref || trigger.dataset.enriched === '1') return;
+    // 200ms debounce — only fetch if the cursor is still on the chip.
+    setTimeout(async () => {
+      if (pending !== trigger) return;          // cursor moved on
+      if (trigger.dataset.enriched === '1') return;
+      const data = await fetchPreview(ref);
+      // ``data`` may be a Promise that resolved while we were waiting;
+      // unwrap once.
+      const final = (data && data.then) ? await data : data;
+      const tooltipEl = trigger.querySelector('.hub-preview');
+      if (tooltipEl && final) {
+        applyPreview(tooltipEl, final);
+        trigger.dataset.enriched = '1';
+      }
+    }, 200);
+  });
+  document.addEventListener('mouseout', (e) => {
+    if (pending && (!e.relatedTarget || !pending.contains(e.relatedTarget))) {
+      pending = null;
+    }
+  });
+})();
+
+function hubEnrich(canonicalUrl, encodedRef) {
+  return {
+    canonicalUrl: canonicalUrl,
+    encodedRef: encodedRef,
+    busy: false,
+    done: false,
+    crawlerJob: '',
+    gmeJob: '',
+    okLabel: '',
+    error: '',
+    async run() {
+      if (this.busy) return;
+      this.busy = true;
+      this.error = '';
+      try {
+        const r = await fetch(`/api/hub/enrich/${this.encodedRef}`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        this.crawlerJob = j.crawler_job_id || '';
+        this.gmeJob = j.gme_job_id || '';
+        const errs = [];
+        if (j.crawler_error) errs.push(`crawler: ${j.crawler_error}`);
+        if (j.gme_error)     errs.push(`GME: ${j.gme_error}`);
+        if (this.crawlerJob || this.gmeJob) {
+          this.okLabel = (this.crawlerJob && this.gmeJob)
+            ? 'Both pipelines queued'
+            : 'Partially queued';
+        } else {
+          this.okLabel = '';
+        }
+        if (errs.length) this.error = errs.join(' · ');
+        this.done = true;
+      } catch (e) {
+        this.error = `submit failed: ${e.message}`;
+      } finally {
+        this.busy = false;
+      }
+    },
+  };
+}
+
+function hubPanel(ref, endpoint, title) {
+  return {
+    ref: ref,
+    endpoint: endpoint,
+    title: title,
+    loading: true,
+    html: '',
+    async load() {
+      const url = `/api/hub/${this.endpoint}/${ref.encoded_path}`;
+      try {
+        const r = await fetch(url, { credentials: 'include' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const text = await r.text();
+        this.html = text.trim();
+      } catch (e) {
+        // Silently degrade — lazy panels are enrichment, not core.
+        this.html = '';
+        console.warn(`hub ${this.endpoint} fetch failed:`, e);
+      } finally {
+        this.loading = false;
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

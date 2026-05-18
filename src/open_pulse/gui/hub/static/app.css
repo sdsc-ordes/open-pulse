@@ -70,7 +70,12 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html { height: 100%; }
+/* body grows with content (min-height: 100vh comes from Tailwind's
+ * min-h-screen class on <body>). We can't set ``height: 100%`` here
+ * — that caps body at one viewport, which makes ``position: sticky``
+ * children (marquee, sidebar) fall off as soon as the page scrolls
+ * past the first viewport. */
 body {
   margin: 0;
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
@@ -126,6 +131,17 @@ body {
 }
 .marquee-label { text-transform: uppercase; font-weight: 600; }
 .marquee-value { color: var(--fg); font-variant-numeric: tabular-nums; }
+/* Sparkline sits flush to the right of the value. ``currentColor``
+ * picks up whatever colour the parent marquee-item resolves to —
+ * which is the muted body colour, so the line reads as a quiet
+ * trend, not a competing focal point. */
+.marquee-spark {
+  width: 60px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--accent, var(--fg-muted));
+  opacity: 0.72;
+}
 .marquee-dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }
 .marquee-dot.ok      { background: var(--ok);    box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 60%, transparent); }
 .marquee-dot.warn    { background: var(--warn);  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 60%, transparent); }
@@ -267,17 +283,36 @@ body {
 
 /* ── Main / page chrome ──────────────────────────────────────────────── */
 .main { flex: 1; min-width: 0; }
-.page-header {
+.page-chrome {
+  /* Sticky wrapper containing the page header + the optional
+     breadcrumb strip. They scroll as a single block tucked under
+     the 36px marquee. The chrome owns the sticky behaviour; the
+     header/breadcrumb children are static within it. */
   position: sticky;
   top: 36px;
-  z-index: 10;
-  background: color-mix(in srgb, var(--bg) 80%, transparent);
-  backdrop-filter: blur(8px);
+  z-index: 20;
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
+}
+.page-header {
+  background: var(--bg);
   padding: 18px 32px;
   display: flex; align-items: baseline; gap: 16px;
 }
-.page-heading h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.page-heading { min-width: 0; flex: 1; }
+.page-heading h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  /* Long entity titles (full publication titles) used to overflow
+     to 3+ lines. Cap them at 2 lines with an ellipsis so the
+     heading band stays predictable. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .page-heading p  { margin: 2px 0 0; font-size: 13px; color: var(--fg-muted); }
 .page-heading p code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
 .page-actions { margin-left: auto; font-size: 12px; color: var(--fg-faint); }
@@ -299,7 +334,19 @@ body {
 .card.tone-bad  { border-left: 3px solid var(--bad); }
 .card.tone-info { border-left: 3px solid var(--accent); }
 
-.card-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--fg-muted); font-weight: 600; }
+.card-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--fg-muted);
+  font-weight: 600;
+  /* Long collection labels ("ROR organizations (EPFL/ETHZ)") used
+     to wrap mid-tile or push the card width. Truncate cleanly. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .card-meta  { font-size: 12px; color: var(--fg-faint); }
 
 /* Big stat numbers */
@@ -451,6 +498,25 @@ pre.console {
 .pill-bad  { background: var(--bad-soft);  color: var(--bad);  border-color: var(--bad-border); }
 .pill-info { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .pill-neutral { background: var(--surface-sunk); color: var(--fg-muted); border-color: var(--border); }
+/* Used for the Software topic — green-ish so it sits between info
+ * (blue) and warn (amber) in the CHAOSS topic palette. */
+.pill-accent {
+  background: color-mix(in srgb, var(--chaoss-tone-good, #2faa6a) 16%, transparent);
+  color: var(--chaoss-tone-good, #2faa6a);
+  border-color: color-mix(in srgb, var(--chaoss-tone-good, #2faa6a) 30%, transparent);
+}
+
+/* Count badge inside a filter pill (e.g. "Contributor · 4"). Tones
+ * down vs the pill itself so the topic name reads first. */
+.pill-count {
+  display: inline-block;
+  font-weight: 500;
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: inherit;
+}
 
 /* ── Tables ──────────────────────────────────────────────────────────── */
 table.data { width: 100%; border-collapse: collapse; }
@@ -504,3 +570,788 @@ table.data tr:hover td { background: var(--surface-sunk); }
 .grid-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
 
 [x-cloak] { display: none !important; }
+
+/* ── Heatmap tile bar (hub home collection grid) ─────────────────────────
+ * Each tile gets a sliver at the bottom whose width = log(count)/log(max)
+ * and whose colour ladders from "cold" to "hot" by tier. Gives the grid
+ * a quick visual sense of which sources dominate.
+ */
+.hub-tile {
+  position: relative;
+  padding-bottom: 18px !important;
+  overflow: hidden;
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  transition: transform .15s ease, border-color .15s ease, box-shadow .2s ease;
+}
+.hub-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 20%, transparent);
+  cursor: pointer;
+}
+.hub-tile:hover .stat-value { color: var(--accent); }
+.hub-tile-heat {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  border-radius: 0 2px 2px 0;
+  opacity: .9;
+}
+.hub-tile-heat.t0 { background: var(--border); opacity: .35; }
+.hub-tile-heat.t1 { background: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.hub-tile-heat.t2 { background: var(--accent); }
+.hub-tile-heat.t3 { background: color-mix(in srgb, var(--warn) 60%, var(--accent)); }
+.hub-tile-heat.t4 { background: var(--warn); }
+.hub-tile.t4 { border-left: 3px solid var(--warn); }
+.hub-tile.t3 { border-left: 3px solid color-mix(in srgb, var(--warn) 60%, var(--accent)); }
+.hub-tile.t0 { opacity: .65; }
+
+/* Small ↗ overlay link that sits on top of the main tile anchor.
+ * Keeps both clicks working — the tile navigates to /hub/c/<name>
+ * while the corner link opens the upstream source homepage. */
+.hub-tile-ext {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 5;
+  font-size: 12px;
+  color: var(--fg-faint);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.hub-tile-ext:hover {
+  color: var(--accent);
+  background: var(--surface);
+}
+
+/* Autocomplete suggestion row hover/active state — matches the
+ * keyboard-navigation highlight. */
+.hub-suggest-row:hover,
+.hub-suggest-row.is-active {
+  background: var(--surface-sunk);
+}
+.hub-suggest-row:last-child { border-bottom: 0 !important; }
+
+/* ── Breadcrumb ──────────────────────────────────────────────────────────
+ * Tiny path strip rendered both under the page heading and at the
+ * bottom of an entity page as a thin footer. Each segment is a link
+ * (where it makes sense) so visitors can walk up the path without
+ * editing the URL bar.
+ */
+.hub-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--fg-faint);
+  padding: 8px 32px;
+  /* No border-bottom here — the .page-chrome wrapper draws one for
+     the whole sticky strip. */
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+.hub-breadcrumb.is-footer {
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  margin-top: 24px;
+}
+.hub-breadcrumb a {
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+.hub-breadcrumb a:hover { color: var(--accent); text-decoration: underline; }
+.hub-breadcrumb .sep { color: var(--fg-faint); }
+.hub-breadcrumb .current { color: var(--fg); font-weight: 600; max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Hub link preview tooltips ───────────────────────────────────────────
+ * Hover over a related / connected / backlink chip to get a small floating
+ * preview with the entity's metadata. Pure CSS so it works everywhere
+ * without needing per-page Alpine state.
+ *
+ * Usage: wrap the link area in `.hub-hover` and put `.hub-preview` as a
+ * sibling/child. CSS reveals it on hover.
+ */
+.hub-hover {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.hub-preview {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  min-width: 260px;
+  max-width: 380px;
+  padding: 10px 12px;
+  /* Solid background — no transparency. Use the surface token AND a
+     strong shadow so the preview reads as a card floating above the
+     page no matter what's behind it (gradients, scrolling content). */
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity .15s ease, visibility 0s linear .15s, transform .15s ease;
+  pointer-events: none;
+  white-space: normal;
+}
+.hub-hover:hover > .hub-preview,
+.hub-hover:focus-within > .hub-preview {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: .15s, 0s, .15s;  /* small hover delay before showing */
+}
+.hub-preview::after {
+  /* tiny pointer arrow tying the tooltip to the chip below */
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 16px;
+  width: 0; height: 0;
+  border: 5px solid transparent;
+  border-top-color: var(--border-strong);
+}
+.hub-preview-title  { font-weight: 600; word-break: break-all; margin: 0; }
+.hub-preview-meta   { color: var(--fg-muted); font-size: 11px; margin-top: 4px; }
+.hub-preview-badge  { color: var(--fg-muted); font-size: 11px; margin-top: 6px; }
+.hub-preview-hint   { color: var(--fg-faint); font-size: 11px; margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+
+/* ─── CHAOSS dashboard styles ────────────────────────────────────
+ * Earlier edits in this branch were dropped — consolidating
+ * everything the chaoss surface needs in one block here so it
+ * actually ships.
+ * ──────────────────────────────────────────────────────────────── */
+
+/* Filter chips on /chaoss go dim + strike-through when their
+ * section is toggled off — visual feedback for the Alpine
+ * chaossFilter() component. */
+.pill.is-inactive {
+  opacity: 0.32;
+  text-decoration: line-through;
+}
+
+/* Semantic tones used by metric-card visuals (donuts, stacked bars,
+ * rank bars, severity-coloured headlines). Defined as CSS variables
+ * so light and dark themes stay coordinated. */
+:root {
+  --chaoss-tone-good:   #2faa6a;
+  --chaoss-tone-info:   #4f8cff;
+  --chaoss-tone-warn:   #d8a13a;
+  --chaoss-tone-danger: #d35454;
+}
+[data-theme="light"] {
+  --chaoss-tone-good:   #1d8a55;
+  --chaoss-tone-info:   #2966d8;
+  --chaoss-tone-warn:   #b8801a;
+  --chaoss-tone-danger: #b53b3b;
+}
+
+/* Topic icons next to section headers. The width/height are also
+ * inlined as SVG attributes on the templates as a belt-and-braces
+ * guard against this rule being stripped by a future build. */
+svg.chaoss-topic-icon {
+  width: 18px !important;
+  height: 18px !important;
+  flex: 0 0 18px !important;
+  color: var(--fg-muted);
+}
+
+/* ─── CHAOSS query-trace block (under "How we compute this") ───── */
+
+/* "How we compute this" — the in-card button that opens the modal.
+ * Styled as a tinted card-button with an inspect icon so the affordance
+ * is unambiguous (was a <details> expander before). */
+.chaoss-trace-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  user-select: none;
+  transition: border-color .15s ease, background .15s ease;
+}
+button.chaoss-trace-summary {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+.chaoss-trace-summary:hover {
+  border-color: var(--accent, var(--chaoss-tone-info));
+  background: var(--surface);
+}
+.chaoss-trace-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent, var(--chaoss-tone-info));
+}
+.chaoss-trace-summary-label { flex: 1; }
+.chaoss-trace-summary-count {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--fg-muted);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* ─── Methodology modal ────────────────────────────────────────── */
+
+/* Body class added when any modal is open — prevents page-behind
+ * scroll-jacking. */
+body.chaoss-modal-lock { overflow: hidden; }
+
+.chaoss-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.chaoss-modal {
+  background: var(--surface);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 10px;
+  max-width: 920px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.chaoss-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-sunk);
+  flex-shrink: 0;
+}
+.chaoss-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.chaoss-modal-title h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chaoss-modal-close {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 10px;
+  border-radius: 4px;
+  transition: color .1s ease, background .1s ease, border-color .1s ease;
+}
+.chaoss-modal-close:hover {
+  color: var(--fg);
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.chaoss-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.chaoss-modal-question {
+  margin: 0;
+  font-size: 14px;
+  color: var(--fg);
+  line-height: 1.5;
+  font-style: italic;
+  border-left: 3px solid var(--chaoss-tone-info, var(--accent));
+  padding-left: 12px;
+}
+
+/* ── Modal sections ────────────────────────────────────────────── */
+.chaoss-modal-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chaoss-modal-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chaoss-modal-section-count {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.chaoss-modal-prose {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg);
+}
+.chaoss-modal-prose-muted { color: var(--fg-muted); }
+.chaoss-modal-prose code {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+  color: var(--fg);
+}
+
+/* ── Methodology card (the always-visible "how" block) ─────────── */
+.chaoss-modal-method {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  gap: 8px;
+}
+.chaoss-modal-method .chaoss-modal-section-title {
+  margin-bottom: 2px;
+}
+.chaoss-modal-combine {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--chaoss-tone-info, var(--accent));
+  border-radius: 6px;
+}
+.chaoss-modal-combine-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+.chaoss-modal-combine-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.chaoss-modal-combine-text strong { color: var(--chaoss-tone-info, var(--accent)); }
+.chaoss-modal-combine-text code {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+}
+
+/* Unification footer — the "how values combine" block under the
+ * raw queries. Visually distinct from a regular trace card: tinted
+ * background, accent-coloured left border. */
+.chaoss-unification {
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--chaoss-tone-info, var(--accent));
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.chaoss-unification-label {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+.chaoss-unification-text code {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+}
+.chaoss-unification-text strong { color: var(--chaoss-tone-info, var(--accent)); }
+
+/* "Reproduce end-to-end" — a <details> expander wrapping a tabbed
+ * code block. The summary matches the trace-row chevron pattern so
+ * the visitor recognises it as another open-on-click row. */
+.chaoss-recipe-details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.chaoss-recipe-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface-sunk);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  list-style: none;
+  transition: background .12s ease;
+}
+.chaoss-recipe-summary::-webkit-details-marker { display: none; }
+.chaoss-recipe-summary::marker { display: none; }
+.chaoss-recipe-summary:hover { background: var(--surface); }
+.chaoss-recipe-summary > span:nth-child(2) { flex: 1; min-width: 0; }
+.chaoss-recipe-details[open] > .chaoss-recipe-summary .chaoss-trace-chevron {
+  transform: rotate(90deg);
+}
+.chaoss-recipe-details[open] > .chaoss-recipe-summary {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.chaoss-recipe-details > p { padding: 0 12px; }
+
+.chaoss-recipe {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+.chaoss-recipe-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface-sunk);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.chaoss-recipe-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+}
+.chaoss-recipe-tabs button {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background .1s ease, color .1s ease;
+}
+.chaoss-recipe-tabs button:hover {
+  color: var(--fg);
+  background: var(--surface);
+}
+.chaoss-recipe-tabs button.is-active {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--fg);
+}
+/* Recipe codeblock now uses the SAME ``.chaoss-trace-pre`` chrome as
+ * the trace expanders above — single <pre> reactively swapping its
+ * <code> content per language, with the line-numbers gutter, so the
+ * modal's three codeblocks share margins and gutter colour. The
+ * only recipe-specific tweak is a taller max-height (the scripts
+ * are longer than a single SPARQL query).
+ *
+ * NB: we deliberately don't override .chaoss-recipe pre directly;
+ * the inner <pre> already carries ``chaoss-trace-pre`` from the
+ * template so it inherits the trace styling. The selectors below
+ * only override behaviours that *should* differ between trace +
+ * recipe blocks. */
+.chaoss-recipe .chaoss-trace-pre {
+  max-height: 420px;
+  border-top: 0;          /* recipe head already provides the divider */
+}
+
+/* ── Trace list inside the modal ───────────────────────────────── */
+.chaoss-trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chaoss-trace {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* Closed-state head IS the expander button. */
+button.chaoss-trace-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--surface-sunk);
+  border: 0;
+  border-bottom: 1px solid transparent;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  transition: background .12s ease;
+}
+button.chaoss-trace-head:hover { background: var(--surface); }
+button.chaoss-trace-head.is-open {
+  background: var(--surface);
+  border-bottom-color: var(--border);
+}
+.chaoss-trace-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px; height: 14px;
+  color: var(--accent, var(--chaoss-tone-info));
+  font-size: 11px;
+  transition: transform .15s ease;
+  flex-shrink: 0;
+}
+.chaoss-trace-chevron.is-open { transform: rotate(90deg); }
+.chaoss-trace-store {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+.chaoss-trace-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chaoss-trace-summary-line {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  flex-shrink: 0;
+}
+.chaoss-trace-summary-line.is-error { color: var(--chaoss-tone-danger, #c43); }
+
+.chaoss-trace-body { /* x-show toggles display */ }
+.chaoss-trace-body-enter            { transition: opacity .14s ease; }
+.chaoss-trace-body-enter-start      { opacity: 0; }
+.chaoss-trace-body-enter-end        { opacity: 1; }
+
+/* ── Theme-aware codeblock palette ─────────────────────────────────
+ *
+ * highlight.js's CDN themes are hardcoded for one theme. We drive
+ * our own palette via CSS variables so the same <pre><code> renders
+ * with sensible colours regardless of light/dark mode. The token
+ * classes covered below match the output of highlight.js's built-in
+ * languages (bash, python, javascript, json) plus the inline cypher
+ * and sparql definitions in chaoss/repo.html.
+ */
+:root, [data-theme="dark"] {
+  --chaoss-code-bg:        #1a1d21;
+  --chaoss-code-fg:        #c5ccdb;
+  --chaoss-code-keyword:   #c678dd;  /* MATCH SELECT PREFIX */
+  --chaoss-code-string:    #98c379;
+  --chaoss-code-number:    #d19a66;
+  --chaoss-code-comment:   #5c6370;
+  --chaoss-code-symbol:    #61afef;  /* cypher :Label / :REL */
+  --chaoss-code-variable:  #e5c07b;  /* sparql ?var / $var */
+  --chaoss-code-attribute: #56b6c2;  /* json key, sparql prefixed-name */
+  --chaoss-code-meta:      #56b6c2;
+  --chaoss-code-literal:   #d19a66;
+  --chaoss-code-title:     #e06c75;  /* function names */
+  --chaoss-code-ln-bg:     rgba(0, 0, 0, 0.18);
+  --chaoss-code-ln-fg:     rgba(160, 168, 180, 0.42);
+  --chaoss-code-ln-border: rgba(255, 255, 255, 0.06);
+}
+[data-theme="light"] {
+  --chaoss-code-bg:        #fafafa;
+  --chaoss-code-fg:        #383a42;
+  --chaoss-code-keyword:   #a626a4;
+  --chaoss-code-string:    #50a14f;
+  --chaoss-code-number:    #986801;
+  --chaoss-code-comment:   #a0a1a7;
+  --chaoss-code-symbol:    #4078f2;
+  --chaoss-code-variable:  #c18401;
+  --chaoss-code-attribute: #0184bc;
+  --chaoss-code-meta:      #4078f2;
+  --chaoss-code-literal:   #986801;
+  --chaoss-code-title:     #e45649;
+  --chaoss-code-ln-bg:     rgba(0, 0, 0, 0.035);
+  --chaoss-code-ln-fg:     rgba(70, 80, 95, 0.55);
+  --chaoss-code-ln-border: rgba(0, 0, 0, 0.08);
+}
+
+.chaoss-trace-pre {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  background: var(--chaoss-code-bg);
+  border-top: 1px solid var(--border);
+}
+.chaoss-trace-pre code {
+  display: block;
+  padding: 12px 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: transparent !important;
+  color: var(--chaoss-code-fg);
+}
+
+/* highlight.js line-numbers plugin uses a table layout. We re-skin
+ * the gutter so it reads as a thin numbered column rather than the
+ * loose, large-padding default. */
+.chaoss-trace-pre table.hljs-ln {
+  border-spacing: 0;
+  width: 100%;
+}
+.chaoss-trace-pre td.hljs-ln-numbers {
+  user-select: none;
+  -webkit-user-select: none;
+  text-align: right;
+  vertical-align: top;
+  color: var(--chaoss-code-ln-fg);
+  padding: 0 14px 0 16px;
+  border-right: 1px solid var(--chaoss-code-ln-border);
+  background: var(--chaoss-code-ln-bg);
+  width: 1%;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.chaoss-trace-pre td.hljs-ln-code {
+  padding-left: 14px;
+  padding-right: 14px;
+  white-space: pre;
+}
+@media (max-width: 720px) {
+  /* Allow wrap on narrow screens so visitors don't have to
+     scroll horizontally over long SPARQL filters. */
+  .chaoss-trace-pre td.hljs-ln-code { white-space: pre-wrap; word-break: break-word; }
+}
+
+.chaoss-trace-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--surface-sunk);
+  border-top: 1px solid var(--border);
+}
+
+/* ── Token colours driven by the chaoss-code-* variables above so
+ *    light and dark themes both render correctly. Selector covers
+ *    both the trace expander and the recipe expander. */
+.chaoss-trace-pre .hljs-keyword,
+.chaoss-recipe pre .hljs-keyword,
+.chaoss-trace-pre .hljs-built_in,
+.chaoss-recipe pre .hljs-built_in,
+.chaoss-trace-pre .hljs-section,
+.chaoss-recipe pre .hljs-section     { color: var(--chaoss-code-keyword); }
+
+.chaoss-trace-pre .hljs-string,
+.chaoss-recipe pre .hljs-string,
+.chaoss-trace-pre .hljs-regexp,
+.chaoss-recipe pre .hljs-regexp      { color: var(--chaoss-code-string); }
+
+.chaoss-trace-pre .hljs-number,
+.chaoss-recipe pre .hljs-number      { color: var(--chaoss-code-number); }
+
+.chaoss-trace-pre .hljs-comment,
+.chaoss-recipe pre .hljs-comment     { color: var(--chaoss-code-comment); font-style: italic; }
+
+.chaoss-trace-pre .hljs-symbol,
+.chaoss-recipe pre .hljs-symbol      { color: var(--chaoss-code-symbol); }
+
+.chaoss-trace-pre .hljs-variable,
+.chaoss-recipe pre .hljs-variable    { color: var(--chaoss-code-variable); }
+
+.chaoss-trace-pre .hljs-attribute,
+.chaoss-recipe pre .hljs-attribute,
+.chaoss-trace-pre .hljs-attr,
+.chaoss-recipe pre .hljs-attr        { color: var(--chaoss-code-attribute); }
+
+.chaoss-trace-pre .hljs-meta,
+.chaoss-recipe pre .hljs-meta        { color: var(--chaoss-code-meta); }
+
+.chaoss-trace-pre .hljs-literal,
+.chaoss-recipe pre .hljs-literal,
+.chaoss-trace-pre .hljs-deletion,
+.chaoss-recipe pre .hljs-deletion    { color: var(--chaoss-code-literal); }
+
+.chaoss-trace-pre .hljs-title,
+.chaoss-recipe pre .hljs-title,
+.chaoss-trace-pre .hljs-name,
+.chaoss-recipe pre .hljs-name,
+.chaoss-trace-pre .hljs-type,
+.chaoss-recipe pre .hljs-type        { color: var(--chaoss-code-title); }
+
+/* A small button variant for the actions row. Smaller padding, same
+ * shape as the standard .btn so it slots into the chrome cleanly. */
+.btn.btn-tiny {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+
+/* Inline code inside metric notes (rendered by the md filter).
+ * Keeps backticked field names readable against the muted note text
+ * and bumps line-height so wrapping looks airy. */
+.chaoss-notes code {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+  color: var(--fg);
+}
+.chaoss-notes strong { color: var(--fg); }
+.chaoss-notes em     { color: var(--fg); font-style: italic; }

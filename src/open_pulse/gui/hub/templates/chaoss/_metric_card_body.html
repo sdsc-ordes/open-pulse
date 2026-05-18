@@ -1,0 +1,432 @@
+{#
+  Fragment rendered into the body of a metric card after the lazy
+  fetch lands. Sits inside the article > .chaoss-card-body div on
+  templates/chaoss/repo.html.
+
+  ``category_pill`` maps the four CHAOSS topic names to the existing
+  pill-color classes in app.css so the modal header reuses the same
+  palette as the topic section headers.
+#}
+{% set category_pill = {
+  'Contributor':    'pill-info',
+  'Software':       'pill-accent',
+  'Lifecycle':      'pill-warn',
+  'Organization':   'pill-neutral',
+}[spec.category] | default('pill-neutral') %}
+<div style="display: flex; flex-direction: column; gap: 10px;">
+
+  {# Headline value + secondary breakdown. The headline number can
+     carry an optional tone (good / warn / info / danger) that maps
+     to a CSS variable in app.css so light & dark themes stay
+     consistent. #}
+  <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+    {# Inline donut for ratio metrics. Sits next to the headline so
+       the visitor reads value + visual together at a glance. #}
+    {% if result.visual and result.visual.kind == 'donut' %}
+      {% set frac = result.visual.fraction or 0 %}
+      {% set tone = result.visual.tone or 'info' %}
+      {% set circ = 100.53 %}  {# 2*pi*16 #}
+      {% set stroke = (frac * circ) | round(2) %}
+      <svg width="56" height="56" viewBox="0 0 40 40" aria-hidden="true"
+           style="flex-shrink: 0;">
+        <circle cx="20" cy="20" r="16" fill="none"
+                stroke="var(--border, #2a2f3a)" stroke-width="4"></circle>
+        <circle cx="20" cy="20" r="16" fill="none"
+                stroke="var(--chaoss-tone-{{ tone }}, var(--accent, #5a8))"
+                stroke-width="4" stroke-linecap="round"
+                stroke-dasharray="{{ stroke }} {{ circ - stroke }}"
+                transform="rotate(-90 20 20)"></circle>
+      </svg>
+    {% endif %}
+    <div>
+      <div style="font-size: 30px; font-weight: 600; line-height: 1;
+                  {% if result.headline_tone %}color: var(--chaoss-tone-{{ result.headline_tone }}, var(--fg));{% endif %}">
+        {{ result.value }}
+      </div>
+      <div class="card-meta" style="font-size: 12px; margin-top: 4px;">{{ result.label }}</div>
+    </div>
+  </div>
+  {% if result.secondary %}
+    <div class="card-meta" style="font-size: 11px;">{{ result.secondary }}</div>
+  {% endif %}
+
+  {# Stacked horizontal bar — used for the demographics breakdown. #}
+  {% if result.visual and result.visual.kind == 'stacked_bar' %}
+    {% set seg_total = result.visual.segments | sum(attribute='value') %}
+    {% if seg_total > 0 %}
+      <div style="display: flex; width: 100%; height: 14px; border-radius: 4px; overflow: hidden; background: var(--surface-sunk);">
+        {% for seg in result.visual.segments %}
+          {% if seg.value > 0 %}
+            <div style="flex: {{ seg.value }};
+                        background: var(--chaoss-tone-{{ seg.tone }}, var(--accent, #5a8));"
+                 title="{{ seg.label }}: {{ seg.value }}"></div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      <div style="display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px;">
+        {% for seg in result.visual.segments %}
+          <span style="display: inline-flex; align-items: center; gap: 4px;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+                         background: var(--chaoss-tone-{{ seg.tone }}, var(--accent, #5a8));"></span>
+            <span class="card-meta">{{ seg.label }}</span>
+            <span style="font-weight: 600;">{{ seg.value }}</span>
+          </span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {# Horizontal gauge — used by burstiness, which has a fixed
+     [-1, +1] range. A vertical marker sits at the value's position.
+     marker_pct comes from the metric as 0..100 already. #}
+  {% if result.visual and result.visual.kind == 'gauge' %}
+    {% set tone = result.visual.tone or 'info' %}
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="position: relative; height: 8px; border-radius: 4px;
+                  background: linear-gradient(to right,
+                      var(--chaoss-tone-good, var(--accent)) 0%,
+                      var(--chaoss-tone-info, var(--accent)) 50%,
+                      var(--chaoss-tone-warn, var(--accent)) 100%);
+                  opacity: 0.35;"></div>
+      <div style="position: relative; height: 0; margin-top: -8px;">
+        <div style="position: absolute; top: -2px;
+                    left: {{ result.visual.marker_pct }}%;
+                    transform: translateX(-50%);
+                    width: 3px; height: 12px; border-radius: 1px;
+                    background: var(--chaoss-tone-{{ tone }}, var(--fg));"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 10px;" class="card-meta">
+        <span>{{ result.visual.left_label }}</span>
+        <span>0 random</span>
+        <span>{{ result.visual.right_label }}</span>
+      </div>
+    </div>
+  {% endif %}
+
+  {# Pill cloud — used by programming_languages so each language
+     reads as a discrete badge instead of a comma-string. #}
+  {% if result.visual and result.visual.kind == 'pill_cloud' %}
+    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+      {% for p in result.visual.pills %}
+        <span class="pill pill-info" style="font-size: 11px;">{{ p }}</span>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {# Stat tiles — used by project_popularity to surface stars / forks
+     / dependents as three glanceable cells with icons and tone. #}
+  {% if result.visual and result.visual.kind == 'stat_tiles' %}
+    <div style="display: grid; grid-template-columns: repeat({{ result.visual.tiles | length }}, minmax(0, 1fr)); gap: 6px;">
+      {% for t in result.visual.tiles %}
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 2px;
+                    padding: 6px 4px; background: var(--surface-sunk); border-radius: 6px;">
+          <div style="font-size: 18px;
+                      color: var(--chaoss-tone-{{ t.tone }}, var(--fg));">
+            {{ t.icon }}
+          </div>
+          <div style="font-size: 18px; font-weight: 600; line-height: 1;">{{ t.value }}</div>
+          <div class="card-meta" style="font-size: 10px;">{{ t.label }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {# Ranked horizontal bars — used by the bus-factor card to show
+     the top contributors and their relative share of commits.
+     Note: the data lives under ``bars`` not ``items`` because Jinja
+     resolves ``visual.items`` as ``dict.items()`` and tries to
+     iterate the bound method. #}
+  {% if result.visual and result.visual.kind == 'rank_bars' %}
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      {% set tone = result.visual.tone or 'info' %}
+      {% for it in result.visual.bars %}
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
+          <span class="mono" style="flex: 0 0 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                title="{{ it.label }}">{{ it.label }}</span>
+          <div style="flex: 1; height: 8px; background: var(--surface-sunk); border-radius: 2px; overflow: hidden;">
+            <div style="height: 100%; width: {{ (it.bar * 100) | round(1) }}%;
+                        background: var(--chaoss-tone-{{ tone }}, var(--accent, #5a8));"></div>
+          </div>
+          <span class="card-meta" style="flex: 0 0 70px; text-align: right; font-size: 11px;">
+            {{ it.value }} · {{ (it.share * 100) | round(0) | int }}%
+          </span>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {# Inline SVG sparkline for time-series metrics. We compute the
+     scale here in Jinja — saves shipping a charting library for what
+     is essentially a 60×24 px decoration. Hovering a bar shows the
+     month + value both via a native SVG <title> (free accessibility +
+     fallback for non-JS reading) and via a styled overlay anchored
+     above the chart, managed by a tiny Alpine block. #}
+  {% if result.series %}
+    {% set values = result.series | map(attribute='value') | list %}
+    {% set dates  = result.series | map(attribute='date')  | list %}
+    {% set vmax = (values | max) or 1 %}
+    {% set n = values | length %}
+    {% if n > 1 %}
+      <div x-data='{
+             hover: null,
+             dates:  {{ dates  | tojson }},
+             values: {{ values | tojson }},
+             unit:   {{ result.series_unit | tojson }}
+           }'
+           style="position: relative;">
+        {# The floating chip — only visible while a bar is hovered.
+           Anchored top-left so it never gets clipped by the card. #}
+        <div x-show="hover !== null" x-cloak
+             x-text="hover !== null ? (dates[hover] + ' · ' + values[hover] + ' ' + unit) : ''"
+             style="position: absolute; top: -22px; left: 0; padding: 2px 6px;
+                    background: var(--surface); border: 1px solid var(--border-strong);
+                    border-radius: 4px; font-size: 11px; white-space: nowrap;
+                    pointer-events: none; box-shadow: var(--shadow);"></div>
+        <svg viewBox="0 0 {{ n * 6 }} 28" preserveAspectRatio="none"
+             style="width: 100%; height: 32px; display: block;"
+             @mouseleave="hover = null"
+             aria-label="monthly activity sparkline">
+          {% for v in values %}
+            {% set h = (24 * v / vmax) | round(0, 'floor') | int %}
+            <rect x="{{ loop.index0 * 6 }}" y="{{ 26 - h }}"
+                  width="5" height="{{ h if h > 0 else 1 }}"
+                  fill="var(--accent, #5a8)"
+                  style="opacity: {{ 0.5 + (0.5 * v / vmax) }}; cursor: crosshair;"
+                  @mouseenter="hover = {{ loop.index0 }}">
+              <title>{{ dates[loop.index0] }}: {{ v }} {{ result.series_unit }}</title>
+            </rect>
+          {% endfor %}
+        </svg>
+        <div class="card-meta" style="font-size: 10px; display: flex; justify-content: space-between;">
+          <span>{{ result.series[0].date }}</span>
+          <span>{{ result.series[-1].date }}</span>
+        </div>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {# Optional examples (top-N rows: contributor logins, license names, paper titles…). #}
+  {% if result.examples %}
+    <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 3px;">
+      {% for ex in result.examples[:8] %}
+        <li style="display: flex; gap: 8px; align-items: baseline; font-size: 12px;">
+          <span class="pill" style="font-size: 9px; padding: 1px 5px;">{{ ex.source }}</span>
+          <span class="mono" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">{{ ex.label }}</span>
+          {% if ex.detail %}<span class="card-meta" style="font-size: 11px;">{{ ex.detail }}</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {# Methodology note — backticks → <code> via the ``md`` filter. #}
+  {% if result.notes %}
+    <p class="card-meta chaoss-notes" style="font-size: 12px; margin: 0; line-height: 1.5;">{{ result.notes | md }}</p>
+  {% endif %}
+
+  {#
+    Transparency block — opens as a modal so it doesn't push other
+    cards around and gets a proper viewport for tall query bodies.
+    The trigger is a card-style button; the modal teleports to <body>
+    so its z-index sits above everything. Esc / backdrop / × close.
+
+    Highlight.js + the line-numbers plugin run when the modal opens
+    (deferred via $nextTick because the panel needs to be in the DOM
+    before we ask hljs to paint it). The same scope holds the open
+    state so each card has its own modal lifecycle.
+  #}
+  {# Methodology modal scope. ``show()`` only flips the visibility +
+     locks the page scroll. Highlight.js + the line-numbers plugin
+     are invoked from each trace / recipe expander on its own toggle
+     (see ``chaossHighlight`` below) so the <code> element is
+     visible (non-zero clientHeight) by the time the line-numbers
+     plugin measures it — without that, the plugin builds an empty
+     gutter and the syntax colours never paint cleanly. #}
+  <div class="chaoss-methodology" x-data="{
+         open: false,
+         show() {
+           this.open = true;
+           document.body.classList.add('chaoss-modal-lock');
+         },
+         hide() {
+           this.open = false;
+           document.body.classList.remove('chaoss-modal-lock');
+         },
+       }">
+    <button type="button" class="chaoss-trace-summary chaoss-trace-trigger" @click="show()">
+      <span class="chaoss-trace-icon" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/>
+          <path d="m20 20-3-3"/>
+        </svg>
+      </span>
+      <span class="chaoss-trace-summary-label">How we compute this</span>
+      <span class="chaoss-trace-summary-count">{{ traces|length }} quer{% if traces|length == 1 %}y{% else %}ies{% endif %}</span>
+    </button>
+
+    <template x-teleport="body">
+      <div class="chaoss-modal-backdrop"
+           x-show="open"
+           x-cloak
+           x-transition.opacity.duration.150ms
+           data-metric="{{ spec.slug }}"
+           @click.self="hide()"
+           @keydown.escape.window="hide()">
+        <div class="chaoss-modal" data-metric="{{ spec.slug }}" @click.stop>
+          <header class="chaoss-modal-header">
+            <div class="chaoss-modal-title">
+              <span class="pill {{ category_pill }}" style="font-size: 10px;">{{ spec.category }}</span>
+              <h3>{{ spec.name }} — how we compute this</h3>
+            </div>
+            <button type="button" class="chaoss-modal-close" @click="hide()" aria-label="close">×</button>
+          </header>
+
+          <div class="chaoss-modal-body">
+            {# ── 1. Lede: the CHAOSS question this metric answers ─── #}
+            <p class="chaoss-modal-question">{{ spec.question }}</p>
+
+            {# ── 2. Methodology card — the always-visible explanation
+                  of what the metric *is* and how the values stitch
+                  together. This is the most important block for a
+                  visitor who lands cold. #}
+            {% if spec.description or result.notes or result.unification %}
+              <section class="chaoss-modal-section chaoss-modal-method">
+                <h4 class="chaoss-modal-section-title">Methodology</h4>
+                {% if spec.description %}
+                  <p class="chaoss-modal-prose">{{ spec.description | md }}</p>
+                {% endif %}
+                {% if result.notes %}
+                  <p class="chaoss-modal-prose">{{ result.notes | md }}</p>
+                {% endif %}
+                {% if result.unification %}
+                  <div class="chaoss-modal-combine">
+                    <div class="chaoss-modal-combine-label">How values combine</div>
+                    <div class="chaoss-modal-combine-text">{{ result.unification | md }}</div>
+                  </div>
+                {% endif %}
+              </section>
+            {% endif %}
+
+            {# ── 3. Queries section — one expander per trace.
+                  Closed by default so the modal stays scannable. The
+                  intro paragraph + summary line on the closed
+                  expander give the reader enough to know whether to
+                  open each one. #}
+            <section class="chaoss-modal-section">
+              <h4 class="chaoss-modal-section-title">
+                Queries
+                <span class="chaoss-modal-section-count">{{ traces|length }}</span>
+              </h4>
+              <p class="chaoss-modal-prose chaoss-modal-prose-muted">
+                We ran these against the open-pulse data plane to get the
+                numbers shown above. Click any row to see its query and
+                copy or re-run it in <a href="/databases">the /databases console</a>.
+              </p>
+
+              <div class="chaoss-trace-list">
+                {% for t in traces %}
+                  {# Each trace gets its own Alpine scope. ``open``
+                     drives the expander's x-show; on the very first
+                     ``open = true`` we paint the code via
+                     ``chaossHighlight`` (highlight.js + line-numbers
+                     plugin). Doing it here, not in the parent's
+                     show(), means the <pre><code> is visible and
+                     measurable when the plugin runs — that's what the
+                     line-numbers gutter needs. #}
+                  <div class="chaoss-trace"
+                       x-data='{ q: {{ t.query | tojson }}, open: false, copied: false, painted: false }'
+                       x-id="['trace-body']">
+                    <button type="button" class="chaoss-trace-head"
+                            @click="open = !open; if (open && !painted) { painted = true; $nextTick(() => chaossHighlight($refs.body)); }"
+                            :class="open ? 'is-open' : ''">
+                      <span class="chaoss-trace-chevron" :class="open ? 'is-open' : ''" aria-hidden="true">▸</span>
+                      <span class="pill pill-info chaoss-trace-store">{{ t.store }}</span>
+                      <span class="chaoss-trace-title">{{ t.title | md }}</span>
+                      <span class="chaoss-trace-summary-line {% if t.error %}is-error{% endif %}">
+                        {% if t.error %}error: {{ t.error }}{% else %}{{ t.result_summary | md }}{% endif %}
+                      </span>
+                    </button>
+                    <div x-ref="body" x-show="open" x-cloak class="chaoss-trace-body"
+                         x-transition:enter="chaoss-trace-body-enter"
+                         x-transition:enter-start="chaoss-trace-body-enter-start"
+                         x-transition:enter-end="chaoss-trace-body-enter-end">
+                      <pre class="chaoss-trace-pre"><code
+                          class="hljs language-{% if t.engine == 'cypher' %}cypher{% elif t.engine == 'sparql' %}sparql{% else %}json{% endif %}">{{ t.query }}</code></pre>
+                      <div class="chaoss-trace-actions">
+                        <a class="btn btn-tiny" href="{{ t.deep_link }}"
+                           title="Open this query in the /databases console and run it">Run query</a>
+                        <button class="btn btn-tiny"
+                                type="button"
+                                @click="navigator.clipboard.writeText(q); copied = true; setTimeout(() => copied = false, 1200)"
+                                x-text="copied ? 'copied!' : 'copy query'"></button>
+                      </div>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            </section>
+
+            {# ── 4. Reproduce end-to-end. Closed by default — heavy
+                  block (full script per language) the visitor opens
+                  only if they want to run it locally. #}
+            {% if result.recipes %}
+              <section class="chaoss-modal-section">
+                {# Single reactive <pre> for the recipe block. The same
+                   ``chaoss-trace-pre`` chrome the trace expanders use
+                   above keeps the modal visually consistent (matching
+                   padding, line-number gutter, syntax-token palette).
+                   Tab switch swaps the <code>'s text + class via
+                   x-text, and ``repaint()`` re-runs highlight.js +
+                   the line-numbers plugin on the now-visible element. #}
+                <details class="chaoss-recipe-details"
+                         x-data='{
+                           lang: "python",
+                           copied: false,
+                           painted: false,
+                           scripts: {{ {"python": result.recipes.python, "bash": result.recipes.bash, "js": result.recipes.js} | tojson }},
+                           langClass() { return "language-" + (this.lang === "js" ? "javascript" : this.lang); },
+                           repaint() {
+                             if (!window.hljs || !this.$refs.code) return;
+                             this.$refs.code.removeAttribute("data-highlighted");
+                             try { window.hljs.highlightElement(this.$refs.code); } catch (_) {}
+                             try { if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(this.$refs.code); } catch (_) {}
+                           },
+                         }'
+                         @toggle="if ($el.open && !painted) { painted = true; $nextTick(() => repaint()); }">
+                  <summary class="chaoss-recipe-summary">
+                    <span class="chaoss-trace-chevron" aria-hidden="true">▸</span>
+                    <span>Reproduce end-to-end</span>
+                    <span class="chaoss-trace-summary-line">runnable script · python / bash / node.js</span>
+                  </summary>
+                  <p class="chaoss-modal-prose chaoss-modal-prose-muted" style="margin-top: 10px;">
+                    Set <code>OPENPULSE_TOKEN</code> before running. The script fires every
+                    query above, extracts the relevant value from each response, and applies
+                    the same combine logic the dashboard does — so it lands on the same
+                    headline.
+                  </p>
+                  <div class="chaoss-recipe">
+                    <div class="chaoss-recipe-head">
+                      <div class="chaoss-recipe-tabs">
+                        {% for L, pretty in [('python', 'python'), ('bash', 'bash'), ('js', 'node.js')] %}
+                          <button type="button"
+                                  @click="lang = '{{ L }}'; $nextTick(() => repaint())"
+                                  :class="lang === '{{ L }}' ? 'is-active' : ''">{{ pretty }}</button>
+                        {% endfor %}
+                      </div>
+                      <button type="button" class="btn btn-tiny chaoss-recipe-copy"
+                              @click="navigator.clipboard.writeText(scripts[lang]); copied = true; setTimeout(() => copied = false, 1200)"
+                              x-text="copied ? 'copied!' : 'copy'"></button>
+                    </div>
+                    <pre class="chaoss-trace-pre"><code x-ref="code"
+                         :class="'hljs ' + langClass()"
+                         x-text="scripts[lang]"></code></pre>
+                  </div>
+                </details>
+              </section>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>

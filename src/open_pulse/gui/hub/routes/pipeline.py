@@ -738,15 +738,15 @@ def frontier_preview(
     try:
         graph = yaml.safe_load(text)  # JSON is a subset of YAML; reuse loader
     except Exception:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500, detail=f"could not parse graph at {path}"
-        )
+        raise HTTPException(status_code=500, detail=f"could not parse graph at {path}")
     if not isinstance(graph, dict):
         raise HTTPException(status_code=500, detail="graph payload is not an object")
 
     repos = graph.get("repos") or {}
     known = set(repos.keys())
-    explored = {k for k, v in repos.items() if isinstance(v, dict) and v.get("is_explored")}
+    explored = {
+        k for k, v in repos.items() if isinstance(v, dict) and v.get("is_explored")
+    }
     mentioned: set[str] = set()
     for r in repos.values():
         if isinstance(r, dict):
