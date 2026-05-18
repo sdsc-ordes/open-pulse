@@ -10,13 +10,12 @@
 
 {% block content %}
 
-{# highlight.js for the query trace blocks. Same theme as /databases.
-   We also load the line-numbers plugin and register two inline
-   language definitions for Cypher and SPARQL — neither ships with
-   highlight.js out of the box but both are small enough to define
-   in-page. #}
-<link rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+{# highlight.js for the query trace blocks. We deliberately do NOT
+   pull a third-party CSS theme — token colours are owned in app.css
+   via the ``--chaoss-code-*`` variable palette, which has light and
+   dark variants flipped by the same ``[data-theme]`` attribute the
+   rest of the hub uses. The line-numbers plugin + the inline cypher
+   / sparql language definitions still come from cdnjs. #}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
 <script>

@@ -1093,7 +1093,7 @@ body.chaoss-modal-lock { overflow: hidden; }
   margin: 0;
   max-height: 420px;
   overflow: auto;
-  background: #1a1d21;
+  background: var(--chaoss-code-bg);
 }
 .chaoss-recipe pre code {
   display: block;
@@ -1101,8 +1101,16 @@ body.chaoss-modal-lock { overflow: hidden; }
   font-size: 12.5px;
   line-height: 1.55;
   background: transparent !important;
+  color: var(--chaoss-code-fg);
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* Line-numbers gutter for recipe blocks (when the plugin paints
+ * them, which we don't trigger today but keep symmetrical). */
+.chaoss-recipe pre table.hljs-ln td.hljs-ln-numbers {
+  color: var(--chaoss-code-ln-fg);
+  background: var(--chaoss-code-ln-bg);
+  border-right: 1px solid var(--chaoss-code-ln-border);
 }
 
 /* ── Trace list inside the modal ───────────────────────────────── */
@@ -1177,11 +1185,55 @@ button.chaoss-trace-head.is-open {
 .chaoss-trace-body-enter-start      { opacity: 0; }
 .chaoss-trace-body-enter-end        { opacity: 1; }
 
+/* ── Theme-aware codeblock palette ─────────────────────────────────
+ *
+ * highlight.js's CDN themes are hardcoded for one theme. We drive
+ * our own palette via CSS variables so the same <pre><code> renders
+ * with sensible colours regardless of light/dark mode. The token
+ * classes covered below match the output of highlight.js's built-in
+ * languages (bash, python, javascript, json) plus the inline cypher
+ * and sparql definitions in chaoss/repo.html.
+ */
+:root, [data-theme="dark"] {
+  --chaoss-code-bg:        #1a1d21;
+  --chaoss-code-fg:        #c5ccdb;
+  --chaoss-code-keyword:   #c678dd;  /* MATCH SELECT PREFIX */
+  --chaoss-code-string:    #98c379;
+  --chaoss-code-number:    #d19a66;
+  --chaoss-code-comment:   #5c6370;
+  --chaoss-code-symbol:    #61afef;  /* cypher :Label / :REL */
+  --chaoss-code-variable:  #e5c07b;  /* sparql ?var / $var */
+  --chaoss-code-attribute: #56b6c2;  /* json key, sparql prefixed-name */
+  --chaoss-code-meta:      #56b6c2;
+  --chaoss-code-literal:   #d19a66;
+  --chaoss-code-title:     #e06c75;  /* function names */
+  --chaoss-code-ln-bg:     rgba(0, 0, 0, 0.18);
+  --chaoss-code-ln-fg:     rgba(160, 168, 180, 0.42);
+  --chaoss-code-ln-border: rgba(255, 255, 255, 0.06);
+}
+[data-theme="light"] {
+  --chaoss-code-bg:        #fafafa;
+  --chaoss-code-fg:        #383a42;
+  --chaoss-code-keyword:   #a626a4;
+  --chaoss-code-string:    #50a14f;
+  --chaoss-code-number:    #986801;
+  --chaoss-code-comment:   #a0a1a7;
+  --chaoss-code-symbol:    #4078f2;
+  --chaoss-code-variable:  #c18401;
+  --chaoss-code-attribute: #0184bc;
+  --chaoss-code-meta:      #4078f2;
+  --chaoss-code-literal:   #986801;
+  --chaoss-code-title:     #e45649;
+  --chaoss-code-ln-bg:     rgba(0, 0, 0, 0.035);
+  --chaoss-code-ln-fg:     rgba(70, 80, 95, 0.55);
+  --chaoss-code-ln-border: rgba(0, 0, 0, 0.08);
+}
+
 .chaoss-trace-pre {
   margin: 0;
   max-height: 360px;
   overflow: auto;
-  background: #1a1d21;
+  background: var(--chaoss-code-bg);
   border-top: 1px solid var(--border);
 }
 .chaoss-trace-pre code {
@@ -1190,6 +1242,7 @@ button.chaoss-trace-head.is-open {
   font-size: 12.5px;
   line-height: 1.55;
   background: transparent !important;
+  color: var(--chaoss-code-fg);
 }
 
 /* highlight.js line-numbers plugin uses a table layout. We re-skin
@@ -1204,10 +1257,10 @@ button.chaoss-trace-head.is-open {
   -webkit-user-select: none;
   text-align: right;
   vertical-align: top;
-  color: rgba(160, 168, 180, 0.42);
+  color: var(--chaoss-code-ln-fg);
   padding: 0 14px 0 16px;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(0, 0, 0, 0.18);
+  border-right: 1px solid var(--chaoss-code-ln-border);
+  background: var(--chaoss-code-ln-bg);
   width: 1%;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -1231,21 +1284,52 @@ button.chaoss-trace-head.is-open {
   border-top: 1px solid var(--border);
 }
 
-/* ── Custom token colours for Cypher + SPARQL on top of
- *    atom-one-dark. The default theme handles common keywords
- *    fairly well; these tweaks pull our domain-specific tokens
- *    (``:Label`` symbols, ``?var`` bindings, prefixed names) into
- *    palette colours that read clearly against the dark background. */
+/* ── Token colours driven by the chaoss-code-* variables above so
+ *    light and dark themes both render correctly. Selector covers
+ *    both the trace expander and the recipe expander. */
 .chaoss-trace-pre .hljs-keyword,
-.chaoss-trace-pre .hljs-built_in     { color: #c678dd; }     /* purple */
-.chaoss-trace-pre .hljs-string       { color: #98c379; }     /* green  */
-.chaoss-trace-pre .hljs-number       { color: #d19a66; }     /* orange */
-.chaoss-trace-pre .hljs-comment      { color: #5c6370; font-style: italic; }
-.chaoss-trace-pre .hljs-symbol       { color: #61afef; }     /* blue  ─ :Label, :REL */
-.chaoss-trace-pre .hljs-variable     { color: #e5c07b; }     /* yellow ─ ?var, $var */
-.chaoss-trace-pre .hljs-attribute    { color: #56b6c2; }     /* cyan  ─ pulse:hasContribution */
-.chaoss-trace-pre .hljs-meta         { color: #56b6c2; }
-.chaoss-trace-pre .hljs-literal      { color: #d19a66; font-weight: 500; }
+.chaoss-recipe pre .hljs-keyword,
+.chaoss-trace-pre .hljs-built_in,
+.chaoss-recipe pre .hljs-built_in,
+.chaoss-trace-pre .hljs-section,
+.chaoss-recipe pre .hljs-section     { color: var(--chaoss-code-keyword); }
+
+.chaoss-trace-pre .hljs-string,
+.chaoss-recipe pre .hljs-string,
+.chaoss-trace-pre .hljs-regexp,
+.chaoss-recipe pre .hljs-regexp      { color: var(--chaoss-code-string); }
+
+.chaoss-trace-pre .hljs-number,
+.chaoss-recipe pre .hljs-number      { color: var(--chaoss-code-number); }
+
+.chaoss-trace-pre .hljs-comment,
+.chaoss-recipe pre .hljs-comment     { color: var(--chaoss-code-comment); font-style: italic; }
+
+.chaoss-trace-pre .hljs-symbol,
+.chaoss-recipe pre .hljs-symbol      { color: var(--chaoss-code-symbol); }
+
+.chaoss-trace-pre .hljs-variable,
+.chaoss-recipe pre .hljs-variable    { color: var(--chaoss-code-variable); }
+
+.chaoss-trace-pre .hljs-attribute,
+.chaoss-recipe pre .hljs-attribute,
+.chaoss-trace-pre .hljs-attr,
+.chaoss-recipe pre .hljs-attr        { color: var(--chaoss-code-attribute); }
+
+.chaoss-trace-pre .hljs-meta,
+.chaoss-recipe pre .hljs-meta        { color: var(--chaoss-code-meta); }
+
+.chaoss-trace-pre .hljs-literal,
+.chaoss-recipe pre .hljs-literal,
+.chaoss-trace-pre .hljs-deletion,
+.chaoss-recipe pre .hljs-deletion    { color: var(--chaoss-code-literal); }
+
+.chaoss-trace-pre .hljs-title,
+.chaoss-recipe pre .hljs-title,
+.chaoss-trace-pre .hljs-name,
+.chaoss-recipe pre .hljs-name,
+.chaoss-trace-pre .hljs-type,
+.chaoss-recipe pre .hljs-type        { color: var(--chaoss-code-title); }
 
 /* A small button variant for the actions row. Smaller padding, same
  * shape as the standard .btn so it slots into the chrome cleanly. */
