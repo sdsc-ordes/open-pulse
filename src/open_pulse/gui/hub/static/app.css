@@ -1089,28 +1089,21 @@ body.chaoss-modal-lock { overflow: hidden; }
   border-color: var(--border);
   color: var(--fg);
 }
-.chaoss-recipe pre {
-  margin: 0;
+/* Recipe codeblock now uses the SAME ``.chaoss-trace-pre`` chrome as
+ * the trace expanders above — single <pre> reactively swapping its
+ * <code> content per language, with the line-numbers gutter, so the
+ * modal's three codeblocks share margins and gutter colour. The
+ * only recipe-specific tweak is a taller max-height (the scripts
+ * are longer than a single SPARQL query).
+ *
+ * NB: we deliberately don't override .chaoss-recipe pre directly;
+ * the inner <pre> already carries ``chaoss-trace-pre`` from the
+ * template so it inherits the trace styling. The selectors below
+ * only override behaviours that *should* differ between trace +
+ * recipe blocks. */
+.chaoss-recipe .chaoss-trace-pre {
   max-height: 420px;
-  overflow: auto;
-  background: var(--chaoss-code-bg);
-}
-.chaoss-recipe pre code {
-  display: block;
-  padding: 12px 16px;
-  font-size: 12.5px;
-  line-height: 1.55;
-  background: transparent !important;
-  color: var(--chaoss-code-fg);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-/* Line-numbers gutter for recipe blocks (when the plugin paints
- * them, which we don't trigger today but keep symmetrical). */
-.chaoss-recipe pre table.hljs-ln td.hljs-ln-numbers {
-  color: var(--chaoss-code-ln-fg);
-  background: var(--chaoss-code-ln-bg);
-  border-right: 1px solid var(--chaoss-code-ln-border);
+  border-top: 0;          /* recipe head already provides the divider */
 }
 
 /* ── Trace list inside the modal ───────────────────────────────── */

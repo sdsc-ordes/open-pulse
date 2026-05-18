@@ -371,9 +371,28 @@
                   only if they want to run it locally. #}
             {% if result.recipes %}
               <section class="chaoss-modal-section">
+                {# Single reactive <pre> for the recipe block. The same
+                   ``chaoss-trace-pre`` chrome the trace expanders use
+                   above keeps the modal visually consistent (matching
+                   padding, line-number gutter, syntax-token palette).
+                   Tab switch swaps the <code>'s text + class via
+                   x-text, and ``repaint()`` re-runs highlight.js +
+                   the line-numbers plugin on the now-visible element. #}
                 <details class="chaoss-recipe-details"
-                         x-data="{ lang: 'python', copied: false, painted: false }"
-                         @toggle="if ($el.open && !painted) { painted = true; $nextTick(() => chaossHighlight($el)); }">
+                         x-data='{
+                           lang: "python",
+                           copied: false,
+                           painted: false,
+                           scripts: {{ {"python": result.recipes.python, "bash": result.recipes.bash, "js": result.recipes.js} | tojson }},
+                           langClass() { return "language-" + (this.lang === "js" ? "javascript" : this.lang); },
+                           repaint() {
+                             if (!window.hljs || !this.$refs.code) return;
+                             this.$refs.code.removeAttribute("data-highlighted");
+                             try { window.hljs.highlightElement(this.$refs.code); } catch (_) {}
+                             try { if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(this.$refs.code); } catch (_) {}
+                           },
+                         }'
+                         @toggle="if ($el.open && !painted) { painted = true; $nextTick(() => repaint()); }">
                   <summary class="chaoss-recipe-summary">
                     <span class="chaoss-trace-chevron" aria-hidden="true">▸</span>
                     <span>Reproduce end-to-end</span>
@@ -390,7 +409,7 @@
                       <div class="chaoss-recipe-tabs">
                         {% for L, pretty in [('python', 'python'), ('bash', 'bash'), ('js', 'node.js')] %}
                           <button type="button"
-                                  @click="lang = '{{ L }}'"
+                                  @click="lang = '{{ L }}'; $nextTick(() => repaint())"
                                   :class="lang === '{{ L }}' ? 'is-active' : ''">{{ pretty }}</button>
                         {% endfor %}
                       </div>
@@ -398,20 +417,9 @@
                               @click="navigator.clipboard.writeText(scripts[lang]); copied = true; setTimeout(() => copied = false, 1200)"
                               x-text="copied ? 'copied!' : 'copy'"></button>
                     </div>
-          </div>
-          {# Each language has its own <pre> so highlight.js can run
-             once on each at expander-open time without re-painting.
-             ``scripts`` is exposed via x-init so the copy button can
-             read the active text directly. #}
-                    <div x-init="$data.scripts = {
-                           python: $refs.recPy.textContent,
-                           bash:   $refs.recBash.textContent,
-                           js:     $refs.recJs.textContent,
-                         }">
-                      <pre x-show="lang === 'python'"><code x-ref="recPy"  class="language-python">{{ result.recipes.python }}</code></pre>
-                      <pre x-show="lang === 'bash'"  ><code x-ref="recBash" class="language-bash">{{ result.recipes.bash }}</code></pre>
-                      <pre x-show="lang === 'js'"    ><code x-ref="recJs"   class="language-javascript">{{ result.recipes.js }}</code></pre>
-                    </div>
+                    <pre class="chaoss-trace-pre"><code x-ref="code"
+                         :class="'hljs ' + langClass()"
+                         x-text="scripts[lang]"></code></pre>
                   </div>
                 </details>
               </section>
