@@ -121,17 +121,26 @@
           <div class="sidebar-group">
             <div class="sidebar-group-label">Dashboards</div>
             {% for d in dashboards %}
-              <a href="{{ d.url }}" target="_blank" rel="noopener" class="sidebar-link sidebar-link-ext sidebar-link-dash">
+              <a href="{{ d.url }}" target="_blank" rel="noopener" class="sidebar-link sidebar-link-ext sidebar-link-dash" title="{{ d.summary }}">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h7v7H3z M14 4h7v4h-7z M14 10h7v10h-7z M3 14h7v6H3z" />
                 </svg>
-                <div class="dash-meta">
-                  <div class="dash-head">
-                    <span x-cloak class="dash-name">{{ d.name }}</span>
-                    <span class="dash-tech">{{ d.tech }}</span>
-                  </div>
-                  <div class="dash-summary">{{ d.summary }}</div>
-                </div>
+                <span class="dash-name">{{ d.name }}</span>
+                <span class="dash-tech">{{ d.tech }}</span>
+                <span class="ext-arrow">↗</span>
+              </a>
+            {% endfor %}
+          </div>
+
+          <div class="sidebar-group">
+            <div class="sidebar-group-label">API docs</div>
+            {% for a in api_docs %}
+              <a href="{{ a.url }}" target="_blank" rel="noopener" class="sidebar-link sidebar-link-ext sidebar-link-dash" title="{{ a.name }} — OpenAPI / Swagger UI">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 6l-5 6 5 6 M16 6l5 6-5 6 M14 4l-4 16" />
+                </svg>
+                <span class="dash-name">{{ a.name }}</span>
+                <span class="dash-tech">{{ a.tech }}</span>
                 <span class="ext-arrow">↗</span>
               </a>
             {% endfor %}

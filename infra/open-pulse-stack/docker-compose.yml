@@ -329,7 +329,10 @@ services:
       HUB_APPLIER_URL: "${HUB_APPLIER_URL:-http://projects-applier:8000}"
       HUB_SPARQL_URL: "${HUB_SPARQL_URL:-http://sparql-proxy:7878}"
       HUB_NEO4J_URL: "${HUB_NEO4J_URL:-bolt://neo4j:7687}"
-      HUB_KIBITER_URL: "${HUB_KIBITER_URL:-http://localhost:7508}"
+      HUB_KIBITER_URL: "${HUB_KIBITER_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7508}"
+      # Single host knob the URL defaults below derive from. Override individual
+      # HUB_*_BROWSER_URL / HUB_*_DOCS_URL values to bypass this.
+      HUB_PUBLIC_HOST: "${HUB_PUBLIC_HOST:-localhost}"
       # OpenSearch (used by /api/databases/opensearch/* and the marquee stats)
       HUB_OPENSEARCH_URL: "${HUB_OPENSEARCH_URL:-https://opensearch-node1:9200}"
       HUB_OPENSEARCH_USERNAME: "${HUB_OPENSEARCH_USERNAME:-${OPENSEARCH_USERNAME:-admin}}"
@@ -346,11 +349,24 @@ services:
       SPARQL_AUTH: "${SPARQL_AUTH:-}"
       # Used by /api/projects/build-by-owner to query Neo4j directly.
       NEO4J_AUTH: "${NEO4J_AUTH:-}"
-      # User-facing dashboard URLs (host-published ports / external links)
-      HUB_NEO4J_BROWSER_URL: "${HUB_NEO4J_BROWSER_URL:-http://localhost:7474}"
-      HUB_SPARQL_BROWSER_URL: "${HUB_SPARQL_BROWSER_URL:-http://localhost:7878}"
-      HUB_OPENSEARCH_DASHBOARDS_URL: "${HUB_OPENSEARCH_DASHBOARDS_URL:-http://localhost:5601}"
+      # User-facing dashboard URLs (host-published ports / external links).
+      # Default to HUB_PUBLIC_HOST so an operator only has to set one var;
+      # set an explicit URL here to override on a per-service basis.
+      HUB_NEO4J_BROWSER_URL: "${HUB_NEO4J_BROWSER_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7503}"
+      HUB_SPARQL_BROWSER_URL: "${HUB_SPARQL_BROWSER_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7502}"
+      HUB_OPENSEARCH_DASHBOARDS_URL: "${HUB_OPENSEARCH_DASHBOARDS_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7508}"
       HUB_ONTOLOGY_URL: "${HUB_ONTOLOGY_URL:-https://github.com/sdsc-ordes/open-pulse-ontology}"
+      # Swagger UIs are proxied through the hub (auth-gated) by default, so
+      # the upstream pages don't need to be reachable anonymously. Set a full
+      # URL to bypass the hub proxy.
+      HUB_CRAWLER_DOCS_URL: "${HUB_CRAWLER_DOCS_URL:-/api/crawler/docs}"
+      HUB_EXTRACTOR_DOCS_URL: "${HUB_EXTRACTOR_DOCS_URL:-/api/extractor/docs}"
+      # Public URL Swagger UI's "Try it out" hits — used in the rewritten
+      # `servers` field. Defaults to ${HUB_PUBLIC_HOST}:${PORT}.
+      HUB_CRAWLER_PUBLIC_URL: "${HUB_CRAWLER_PUBLIC_URL:-}"
+      HUB_EXTRACTOR_PUBLIC_URL: "${HUB_EXTRACTOR_PUBLIC_URL:-}"
+      # Used by the openapi proxy to fetch the spec in-network.
+      HUB_EXTRACTOR_URL: "${HUB_EXTRACTOR_URL:-http://git-metadata-extractor:1234}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${OPEN_PULSE_DATA_DIR:-./data}/hub:/data/hub

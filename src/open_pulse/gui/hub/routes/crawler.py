@@ -8,11 +8,14 @@ the crawler's bearer token, which lives in HUB env / Settings).
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse
 
 from ..auth import require_auth
 
@@ -66,6 +69,52 @@ def _passthrough(method: str, path: str, **kw: Any) -> dict[str, Any]:
             detail = resp.text[:300]
         raise HTTPException(status_code=resp.status_code, detail=detail)
     return resp.json() if resp.content else {}
+
+
+def _crawler_public_url() -> str:
+    """External base URL Swagger UI's "Try it out" hits.
+
+    Defaults to ``http://${HUB_PUBLIC_HOST}:${CRAWLER_PORT}`` so a single
+    knob keeps everything pointing at the right host. Override with
+    ``HUB_CRAWLER_PUBLIC_URL`` if the crawler sits behind a different
+    proxy (e.g. https + path-prefix).
+    """
+    explicit = os.environ.get("HUB_CRAWLER_PUBLIC_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    host = os.environ.get("HUB_PUBLIC_HOST", "localhost").strip() or "localhost"
+    port = os.environ.get("CRAWLER_PORT", "8000").strip() or "8000"
+    return f"http://{host}:{port}"
+
+
+@router.get("/docs", include_in_schema=False, dependencies=[Depends(require_auth)])
+def crawler_docs() -> HTMLResponse:
+    """Hub-gated Swagger UI for the crawler API. Reads the spec from
+    ``/api/crawler/openapi.json`` (also hub-gated). Authentication is the
+    user's hub session — no upstream token needed to *view* the surface.
+    """
+    return get_swagger_ui_html(
+        openapi_url="/api/crawler/openapi.json",
+        title="Crawler API — via Open Pulse Hub",
+    )
+
+
+@router.get(
+    "/openapi.json", include_in_schema=False, dependencies=[Depends(require_auth)]
+)
+def crawler_openapi() -> Response:
+    """Proxy the upstream spec and rewrite ``servers`` to the crawler's
+    public URL so Swagger UI's "Try it out" hits the upstream directly
+    (the user pastes ``CRAWLER_API_TOKEN`` into the Authorize dialog).
+    """
+    try:
+        upstream = httpx.get(f"{_crawler_base()}/api/v1/openapi.json", timeout=5.0)
+        upstream.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    spec = upstream.json()
+    spec["servers"] = [{"url": _crawler_public_url()}]
+    return Response(content=json.dumps(spec), media_type="application/json")
 
 
 @router.get("/jobs", dependencies=[Depends(require_auth)])
