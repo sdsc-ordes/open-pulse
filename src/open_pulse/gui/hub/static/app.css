@@ -838,6 +838,71 @@ details[open] > .chaoss-trace-summary .chaoss-trace-chevron {
 }
 .chaoss-unification-text strong { color: var(--chaoss-tone-info, var(--accent)); }
 
+/* Reproducibility-recipe block — sits just under the unification
+ * footer with a small language switcher. */
+.chaoss-recipe {
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.chaoss-recipe-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--surface-sunk);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.chaoss-recipe-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.chaoss-recipe-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+}
+.chaoss-recipe-tabs button {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background .1s ease, color .1s ease;
+}
+.chaoss-recipe-tabs button:hover {
+  color: var(--fg);
+  background: var(--surface);
+}
+.chaoss-recipe-tabs button.is-active {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--fg);
+}
+.chaoss-recipe pre {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  background: #1d1f23;
+}
+.chaoss-recipe pre code {
+  display: block;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: transparent !important;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .chaoss-trace {
   border: 1px solid var(--border);
   border-radius: 6px;

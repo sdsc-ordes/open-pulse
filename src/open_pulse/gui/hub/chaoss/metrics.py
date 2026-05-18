@@ -94,6 +94,11 @@ class MetricResult:
     # Severity hint for the headline value (good / warn / info / danger).
     # When set, the template colours the big number accordingly.
     headline_tone: str | None = None
+    # Optional language-keyed reproducibility scripts (``python`` /
+    # ``bash`` / ``js``). When present, the unification footer
+    # renders them as tabs so a visitor can copy a runnable script
+    # that fetches every trace and applies the unification end-to-end.
+    recipes: dict[str, str] | None = None
 
 
 @dataclass
@@ -112,6 +117,202 @@ class MetricSpec:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
+
+_API_PATH_BY_ENGINE = {
+    "cypher":     "/api/databases/cypher/query",
+    "sparql":     "/api/databases/sparql/query",
+    "opensearch": "/api/databases/opensearch/query",
+}
+
+
+def _py_pretty_dict(obj: Any, indent: int = 4) -> str:
+    """Format a Python dict / list as a clean multi-line literal.
+
+    ``json.dumps`` already produces valid Python (JSON is a strict
+    subset of Python's literal syntax for these types), so we use it
+    with indent + ensure_ascii=False, then post-process to swap
+    JSON's ``true``/``false``/``null`` for Python's ``True``/
+    ``False``/``None`` so the script is paste-runnable.
+    """
+    s = json.dumps(obj, indent=indent, ensure_ascii=False)
+    # Word-boundary swaps so we don't touch strings that happen to
+    # *contain* ``true`` etc.
+    return (
+        s.replace(": true,", ": True,")
+        .replace(": false,", ": False,")
+        .replace(": null,", ": None,")
+        .replace(": true\n", ": True\n")
+        .replace(": false\n", ": False\n")
+        .replace(": null\n", ": None\n")
+        .replace(": true}", ": True}")
+        .replace(": false}", ": False}")
+        .replace(": null}", ": None}")
+    )
+
+
+def _js_pretty_object(obj: Any, indent: int = 2) -> str:
+    """Format a Python dict / list as a JSON literal suitable for
+    pasting into a JS file. JSON is valid ES6, so ``json.dumps`` with
+    indenting is enough.
+    """
+    return json.dumps(obj, indent=indent, ensure_ascii=False)
+
+
+def _build_recipes(
+    *,
+    label: str,
+    traces: list[QueryTrace],
+    extracts: list[dict[str, str]],
+    combine: dict[str, str],
+) -> dict[str, str]:
+    """Generate ``python``, ``bash``, and ``js`` scripts that reproduce
+    the metric end-to-end.
+
+    Parameters
+    ----------
+    label
+        Human-readable name for the printed result (e.g. ``"contributors"``).
+    traces
+        The same list rendered above; each carries its engine + query.
+    extracts
+        ``len(extracts) == len(traces)``. Each entry is a dict with
+        ``python`` / ``bash`` / ``js`` keys giving the per-language
+        expression that pulls a value out of that trace's response
+        (referencing ``r1``, ``r2``, … for response objects).
+    combine
+        Dict with ``python`` / ``bash`` / ``js`` keys giving the final
+        unification logic. Each language's expression must end up
+        assigning to a local variable named ``headline``.
+    """
+    # ── Python ────────────────────────────────────────────────────────
+    py: list[str] = [
+        f'"""Reproduce the CHAOSS \'{label}\' metric. Set OPENPULSE_TOKEN before running."""',
+        "import os",
+        "import requests",
+        "from requests.auth import HTTPBasicAuth",
+        "",
+        'BASE = "http://openpulse.epfl.ch:7507"',
+        'AUTH = HTTPBasicAuth("openpulse", os.environ["OPENPULSE_TOKEN"])',
+        "",
+        "def post(path, body):",
+        "    r = requests.post(BASE + path, json=body, auth=AUTH, timeout=30)",
+        "    r.raise_for_status()",
+        "    return r.json()",
+        "",
+    ]
+    for i, (t, ex) in enumerate(zip(traces, extracts), start=1):
+        path = _API_PATH_BY_ENGINE.get(t.engine, "/api/databases/cypher/query")
+        py.append(f"# ── trace {i}: {t.title} ──")
+        if t.engine == "opensearch":
+            try:
+                qobj = json.loads(t.query)
+                body = {"mode": t.mode or "dsl", "query": qobj}
+            except Exception:  # noqa: BLE001
+                body = {"mode": t.mode or "dsl", "query": t.query}
+            py.append(f"body{i} = {_py_pretty_dict(body)}")
+            py.append(f"r{i} = post({path!r}, body{i})")
+        else:
+            # Triple-quoted string literal keeps the query readable.
+            triple_q = '"""' + t.query.replace("\\", "\\\\").replace('"""', '\\"\\"\\"') + '"""'
+            py.append(f"query{i} = {triple_q}")
+            py.append(f"r{i} = post({path!r}, {{\"query\": query{i}}})")
+        py.append(f"v{i} = {ex['python']}")
+        py.append("")
+    py.append("# ── unification ──")
+    py.append(combine["python"])
+    py.append(f'print(f"{label} = {{headline}}")')
+    python_script = "\n".join(py)
+
+    # ── Bash ──────────────────────────────────────────────────────────
+    bash: list[str] = [
+        "#!/usr/bin/env bash",
+        f"# Reproduce the CHAOSS '{label}' metric (requires curl + jq).",
+        "set -euo pipefail",
+        "",
+        'BASE="http://openpulse.epfl.ch:7507"',
+        'AUTH="openpulse:${OPENPULSE_TOKEN:?set OPENPULSE_TOKEN before running}"',
+        "",
+    ]
+    for i, (t, ex) in enumerate(zip(traces, extracts), start=1):
+        path = _API_PATH_BY_ENGINE.get(t.engine, "/api/databases/cypher/query")
+        if t.engine == "opensearch":
+            try:
+                qobj = json.loads(t.query)
+                body_json = json.dumps({"mode": t.mode or "dsl", "query": qobj}, indent=2)
+            except Exception:  # noqa: BLE001
+                body_json = json.dumps({"mode": t.mode or "dsl", "query": t.query})
+        else:
+            body_json = json.dumps({"query": t.query}, indent=2)
+        # Single-quoted heredoc ``<<'__BODY__'`` prevents shell from
+        # touching ``$`` / ``"`` etc inside the JSON.
+        bash.append(f"# ── trace {i}: {t.title} ──")
+        bash.append(f"body{i}=$(cat <<'__BODY__'")
+        bash.append(body_json)
+        bash.append("__BODY__")
+        bash.append(")")
+        bash.append(
+            f'r{i}=$(curl -sf -u "$AUTH" -H "content-type: application/json" \\\n'
+            f'        -X POST "$BASE{path}" --data "$body{i}")'
+        )
+        bash.append(f"v{i}=$(echo \"$r{i}\" | jq -r '{ex['bash']}')")
+        bash.append("")
+    bash.append("# ── unification ──")
+    bash.append(combine["bash"])
+    bash.append(f'echo "{label} = $headline"')
+    bash_script = "\n".join(bash)
+
+    # ── JavaScript (Node 18+ with built-in fetch) ─────────────────────
+    js: list[str] = [
+        f"// Reproduce the CHAOSS '{label}' metric. Set OPENPULSE_TOKEN.",
+        "// Requires Node 18+ (built-in fetch + Buffer).",
+        "",
+        'const BASE = "http://openpulse.epfl.ch:7507";',
+        "const TOKEN = process.env.OPENPULSE_TOKEN;",
+        'if (!TOKEN) { console.error("set OPENPULSE_TOKEN"); process.exit(1); }',
+        'const AUTH = "Basic " + Buffer.from(`openpulse:${TOKEN}`).toString("base64");',
+        "",
+        "async function post(path, body) {",
+        "  const r = await fetch(BASE + path, {",
+        '    method: "POST",',
+        '    headers: { "Authorization": AUTH, "Content-Type": "application/json" },',
+        "    body: JSON.stringify(body),",
+        "  });",
+        '  if (!r.ok) throw new Error("HTTP " + r.status);',
+        "  return r.json();",
+        "}",
+        "",
+        "(async () => {",
+    ]
+    for i, (t, ex) in enumerate(zip(traces, extracts), start=1):
+        path = _API_PATH_BY_ENGINE.get(t.engine, "/api/databases/cypher/query")
+        js.append(f"  // ── trace {i}: {t.title} ──")
+        if t.engine == "opensearch":
+            try:
+                qobj = json.loads(t.query)
+                body_str = _js_pretty_object({"mode": t.mode or "dsl", "query": qobj}, indent=2)
+            except Exception:  # noqa: BLE001
+                body_str = _js_pretty_object({"mode": t.mode or "dsl", "query": t.query})
+            # Re-indent so the literal sits inside the IIFE.
+            body_str = "\n".join("  " + ln for ln in body_str.splitlines())
+            js.append(f"  const r{i} = await post({json.dumps(path)},\n{body_str});")
+        else:
+            # Backtick template literal handles multi-line + embedded
+            # quotes naturally; escape backticks if any appear.
+            escaped = t.query.replace("\\", "\\\\").replace("`", "\\`")
+            js.append(f"  const r{i} = await post({json.dumps(path)}, {{")
+            js.append(f"    query: `{escaped}`,")
+            js.append("  });")
+        js.append(f"  const v{i} = {ex['js']};")
+        js.append("")
+    js.append("  // ── unification ──")
+    for line in combine["js"].splitlines():
+        js.append(f"  {line}")
+    js.append(f'  console.log(`{label} = ${{headline}}`);')
+    js.append("})();")
+    js_script = "\n".join(js)
+
+    return {"python": python_script, "bash": bash_script, "js": js_script}
+
 
 def _now_minus_days(days: int) -> datetime:
     """The cutoff that bounds windowed metrics. ``days`` is the
@@ -293,10 +494,38 @@ def _metric_contributors(full: str, canonical_url: str, window_days: int) -> Met
     if values["opensearch"] is not None:
         bits.append(f"OpenSearch (windowed): {values['opensearch']}")
 
+    # Recipe: three extracts (Neo4j count, SPARQL count, OS cardinality)
+    # combined by "largest non-zero" with a fallback to Neo4j's all-time.
+    contributors_recipes = _build_recipes(
+        label="contributors",
+        traces=traces,
+        extracts=[
+            # trace 1 — Neo4j ``count(DISTINCT u)``
+            {"python": "r1['rows'][0][0] if r1.get('rows') else 0",
+             "bash":   ".rows[0][0] // 0",
+             "js":     "(r1.rows && r1.rows[0]) ? r1.rows[0][0] : 0"},
+            # trace 2 — SPARQL ``COUNT(DISTINCT ?person)``
+            {"python": "int(r2['rows'][0][0]) if r2.get('rows') else 0",
+             "bash":   ".rows[0][0] | tonumber? // 0",
+             "js":     "(r2.rows && r2.rows[0]) ? Number(r2.rows[0][0]) : 0"},
+            # trace 3 — OpenSearch ``cardinality(author_name)``
+            {"python": "r3.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('value', 0)",
+             "bash":   ".raw.aggregations.by_author.value // 0",
+             "js":     "r3.raw?.aggregations?.by_author?.value ?? 0"},
+        ],
+        combine={
+            "python": "headline = next((v for v in (v3, v2, v1) if v), 0)",
+            "bash":   ('if [ "$v3" != "0" ]; then headline=$v3;'
+                       ' elif [ "$v2" != "0" ]; then headline=$v2;'
+                       ' else headline=$v1; fi'),
+            "js":     "const headline = [v3, v2, v1].find(v => v) ?? 0;",
+        },
+    )
     return MetricResult(
         slug="contributors",
         value=str(headline),
         label=label,
+        recipes=contributors_recipes,
         series=contrib_series,
         series_unit="contributors",
         secondary=" · ".join(bits),
@@ -754,10 +983,46 @@ def _metric_project_popularity(full: str, canonical_url: str, window_days: int) 
     if dependents:
         tiles.append({"label": "dependents", "value": dependents, "icon": "↘", "tone": "good"})
 
+    popularity_recipes = _build_recipes(
+        label="project_popularity",
+        traces=traces,
+        extracts=[
+            # trace 1 — SPARQL stars + forks (two columns, ?stars + ?forks)
+            {"python": "(int(r1['rows'][0][0]) if r1.get('rows') and r1['rows'][0][0] is not None else None,"
+                       " int(r1['rows'][0][1]) if r1.get('rows') and r1['rows'][0][1] is not None else None)",
+             "bash":   "[(.rows[0][0] // 0), (.rows[0][1] // 0)]",
+             "js":     "[r1.rows?.[0]?.[0] != null ? Number(r1.rows[0][0]) : null,"
+                       "  r1.rows?.[0]?.[1] != null ? Number(r1.rows[0][1]) : null]"},
+            # trace 2 — Neo4j list of dependents (top 20)
+            {"python": "[row[0] for row in r2.get('rows', [])]",
+             "bash":   "[.rows[][0]]",
+             "js":     "(r2.rows ?? []).map(row => row[0])"},
+        ],
+        combine={
+            "python": (
+                "stars, forks = v1\n"
+                "dependents = len(v2)\n"
+                "headline = stars if stars is not None else (dependents or forks or 0)"
+            ),
+            "bash": (
+                "stars=$(echo \"$v1\" | jq '.[0]'); forks=$(echo \"$v1\" | jq '.[1]')\n"
+                "dependents=$(echo \"$v2\" | jq 'length')\n"
+                'if [ "$stars" != "0" ] && [ "$stars" != "null" ]; then headline=$stars;\n'
+                'elif [ "$dependents" != "0" ];                  then headline=$dependents;\n'
+                'else                                                  headline=$forks; fi'
+            ),
+            "js": (
+                "const [stars, forks] = v1;\n"
+                "const dependents = v2.length;\n"
+                "const headline = stars ?? dependents ?? forks ?? 0;"
+            ),
+        },
+    )
     return MetricResult(
         slug="project_popularity",
         value=headline,
         label=label,
+        recipes=popularity_recipes,
         secondary=" · ".join(bits) if bits else None,
         queries=traces,
         examples=[
@@ -1018,10 +1283,45 @@ def _metric_closure_ratio(full: str, canonical_url: str, window_days: int) -> Me
     )
 
     ratio = closed / total
+    closure_recipes = _build_recipes(
+        label="closure_ratio",
+        traces=traces,
+        extracts=[
+            # trace 1 — OpenSearch PR aggregation (one trace, multiple values)
+            # We pull the whole response and let combine() destructure it.
+            {"python": "r1",
+             "bash":   ".",
+             "js":     "r1"},
+        ],
+        combine={
+            "python": (
+                "total = v1.get('raw', {}).get('hits', {}).get('total', {}).get('value', 0)\n"
+                "closed = 0\n"
+                "for b in v1.get('raw', {}).get('aggregations', {}).get('by_state', {}).get('buckets', []):\n"
+                "    if (b.get('key') or '').lower() == 'closed':\n"
+                "        closed = b.get('doc_count', 0)\n"
+                "headline = f'{(closed/total):.0%}' if total else '—'"
+            ),
+            "bash": (
+                "total=$(echo \"$v1\" | jq '.raw.hits.total.value // 0')\n"
+                "closed=$(echo \"$v1\" | jq '[.raw.aggregations.by_state.buckets[] | select(.key == \"closed\") | .doc_count][0] // 0')\n"
+                'if [ "$total" -gt 0 ]; then\n'
+                '  headline=$(awk -v c="$closed" -v t="$total" \'BEGIN { printf("%.0f%%", c/t*100) }\')\n'
+                'else headline="—"; fi'
+            ),
+            "js": (
+                "const total = v1.raw?.hits?.total?.value ?? 0;\n"
+                "const closed = (v1.raw?.aggregations?.by_state?.buckets ?? [])\n"
+                "  .find(b => (b.key || '').toLowerCase() === 'closed')?.doc_count ?? 0;\n"
+                "const headline = total ? `${Math.round(closed/total*100)}%` : '—';"
+            ),
+        },
+    )
     return MetricResult(
         slug="closure_ratio",
         value=f"{ratio:.0%}",
         label=f"closed (last {window_days} days)",
+        recipes=closure_recipes,
         secondary=(
             f"{closed} closed of {total} PRs · {merged} merged · {open_} still open"
         ),
