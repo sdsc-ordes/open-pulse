@@ -52,7 +52,11 @@
          so the seam between copies has the same spacing as any inter-item
          gap. Translating the track by -50% (= one copy width) makes the wrap
          visually continuous instead of snapping. -->
-    <div class="marquee" x-data="marqueeBar()" x-init="refresh(); setInterval(refresh, 10000)">
+    <div class="marquee"
+         x-data="marqueeBar()"
+         x-init="refresh(); refreshHistory();
+                 setInterval(refresh, 10000);
+                 setInterval(refreshHistory, 60000)">
       <div class="marquee-track">
         <template x-for="copy in 6" :key="copy">
           <div class="marquee-list" :aria-hidden="copy === 1 ? 'false' : 'true'">
@@ -61,6 +65,19 @@
                 <span class="marquee-dot" :class="item.tone"></span>
                 <span class="marquee-label" x-text="item.label"></span>
                 <span class="marquee-value" x-text="item.value"></span>
+                {# Sparkline — rendered only when the item carries a
+                   ``spark`` series. The SVG path is built reactively
+                   from the series so it tracks the latest history
+                   without needing a redraw library. #}
+                <template x-if="item.spark && item.spark.points">
+                  <svg class="marquee-spark" viewBox="0 0 60 14"
+                       preserveAspectRatio="none" aria-hidden="true">
+                    <polyline :points="item.spark.points"
+                              fill="none" stroke="currentColor"
+                              stroke-width="1.2" stroke-linecap="round"
+                              stroke-linejoin="round" />
+                  </svg>
+                </template>
               </span>
             </template>
           </div>
@@ -196,22 +213,73 @@
         items: [
           {label:'loading…', value:'', tone:'neutral'},
         ],
+        // History-derived series per label — populated by refreshHistory(),
+        // consumed by refresh() when it rebuilds ``items``. Each entry is
+        // a string of ``x,y`` polyline points already scaled to the SVG's
+        // 60×14 viewBox, so the template only has to set ``:points``.
+        sparks: {},
+
         async refresh() {
           try {
             const r = await fetch('/api/stats/');
             if (!r.ok) return;
             const j = await r.json();
             const items = [
-              { label: 'services',       value: `${j.services.healthy}/${j.services.total} healthy`, tone: j.services.healthy === j.services.total ? 'ok' : 'warn' },
-              { label: 'running',        value: String(j.services.running), tone: 'ok' },
+              { label: 'services',       value: `${j.services.healthy}/${j.services.total} healthy`, tone: j.services.healthy === j.services.total ? 'ok' : 'warn',
+                spark: this.sparks.services_healthy },
+              { label: 'running',        value: String(j.services.running), tone: 'ok',
+                spark: this.sparks.services_running },
               { label: 'longest uptime', value: j.services.uptime_max_human || '—', tone: 'neutral' },
-              { label: 'sparql repos',   value: j.sparql.repos === null ? '—' : String(j.sparql.repos), tone: j.sparql.repos === null ? 'warn' : 'ok' },
-              { label: 'neo4j nodes',    value: j.neo4j.nodes === null ? '—' : String(j.neo4j.nodes), tone: j.neo4j.nodes === null ? 'warn' : 'ok' },
-              { label: 'neo4j rels',     value: j.neo4j.rels  === null ? '—' : String(j.neo4j.rels),  tone: j.neo4j.rels  === null ? 'warn' : 'ok' },
+              { label: 'sparql repos',   value: j.sparql.repos === null ? '—' : String(j.sparql.repos), tone: j.sparql.repos === null ? 'warn' : 'ok',
+                spark: this.sparks.sparql_repos },
+              { label: 'neo4j nodes',    value: j.neo4j.nodes === null ? '—' : String(j.neo4j.nodes), tone: j.neo4j.nodes === null ? 'warn' : 'ok',
+                spark: this.sparks.neo4j_nodes },
+              { label: 'neo4j rels',     value: j.neo4j.rels  === null ? '—' : String(j.neo4j.rels),  tone: j.neo4j.rels  === null ? 'warn' : 'ok',
+                spark: this.sparks.neo4j_rels },
               { label: 'updated',        value: new Date(j.generated_at).toLocaleTimeString(), tone: 'neutral' },
             ];
             this.items = items;
           } catch (e) { /* keep last */ }
+        },
+
+        // Pulls the last 6h of history (10-min buckets ≈ 36 points)
+        // and turns each numeric series into a polyline-points string
+        // mapped into the 60×14 SVG viewBox. Cheap to do once a minute;
+        // the marquee's 10s refresh just re-uses the cached strings.
+        async refreshHistory() {
+          try {
+            const r = await fetch('/api/stats/history?range=6h&bucket_seconds=600');
+            if (!r.ok) return;
+            const j = await r.json();
+            const samples = j.samples || [];
+            const keys = [
+              'services_healthy', 'services_running',
+              'sparql_repos', 'neo4j_nodes', 'neo4j_rels',
+            ];
+            const out = {};
+            for (const key of keys) {
+              const vals = samples
+                .map(s => (s[key] === null || s[key] === undefined) ? null : Number(s[key]))
+                .filter(v => v !== null);
+              if (vals.length < 2) continue;
+              const min = Math.min(...vals);
+              const max = Math.max(...vals);
+              const span = (max - min) || 1;
+              // Build "x,y x,y …" — x spans 0..60 across all samples,
+              // y inverted into 1..13 so the line clears the top + bottom.
+              const n = vals.length;
+              const pts = vals.map((v, i) => {
+                const x = (i / (n - 1)) * 60;
+                const y = 13 - ((v - min) / span) * 12;
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+              }).join(' ');
+              out[key] = { points: pts };
+            }
+            this.sparks = out;
+            // Re-render so the next 10s tick picks the new series up
+            // without waiting a full minute.
+            this.refresh();
+          } catch (e) { /* keep last cache */ }
         },
       };
     }
