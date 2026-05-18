@@ -266,6 +266,35 @@
           </label>
         </div>
 
+        <!-- Crawler graph-expansion knobs. Mirror the fields the
+             open-pulse-crawler API accepts on POST /api/v1/crawl: turning
+             on dependents/dependencies makes the BFS follow the GitHub
+             dependency-graph edges, max_dependents caps how many are
+             fetched per repo, min_stars filters out tiny forks. -->
+        <fieldset class="crawler-knobs">
+          <legend class="crawler-knobs-title">Crawler graph expansion</legend>
+          <div class="crawler-knobs-row">
+            <label class="crawler-knobs-check">
+              <input type="checkbox" x-model="newQuest.crawlDependents">
+              <span>crawl_dependents <span class="card-meta">(repos that depend on each seed)</span></span>
+            </label>
+            <label class="crawler-knobs-check">
+              <input type="checkbox" x-model="newQuest.crawlDependencies">
+              <span>crawl_dependencies <span class="card-meta">(repos each seed depends on)</span></span>
+            </label>
+          </div>
+          <div class="crawler-knobs-row" style="margin-top: 8px;">
+            <label>
+              <span class="card-meta">max_dependents (0 = no cap)</span>
+              <input type="number" min="0" style="width: 100%;" x-model.number="newQuest.maxDependents" />
+            </label>
+            <label>
+              <span class="card-meta">min_stars</span>
+              <input type="number" min="0" style="width: 100%;" x-model.number="newQuest.minStars" />
+            </label>
+          </div>
+        </fieldset>
+
         <div style="margin-top: 10px;">
           <span class="card-meta">Enabled steps</span>
           <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
@@ -276,6 +305,51 @@
             </template>
           </div>
         </div>
+
+        <!-- frontier_extend panel: only meaningful when the step is enabled.
+             Lets the user preview how many seeds would be sent against the
+             canonical crawler-graph.json before launching. -->
+        <fieldset class="crawler-knobs" x-show="newQuest.steps.frontier_extend" x-cloak>
+          <legend class="crawler-knobs-title">frontier_extend</legend>
+          <p class="card-meta" style="font-size: 11px; margin: 0 0 6px 4px;">
+            Re-seeds the crawler with repos already in
+            <code>.quest-artifacts/crawler-json/crawler-graph.json</code> that
+            were mentioned as dependents but never explored, then merges the
+            result back. Cheaper than re-running with <code>max_rounds++</code>.
+          </p>
+          <div class="crawler-knobs-row">
+            <label>
+              <span class="card-meta">frontier_max_rounds</span>
+              <input type="number" min="1" max="10" style="width: 100%;" x-model.number="newQuest.frontierMaxRounds" />
+            </label>
+            <label>
+              <span class="card-meta">frontier_max_seeds (0 = no cap)</span>
+              <input type="number" min="0" style="width: 100%;" x-model.number="newQuest.frontierMaxSeeds" />
+            </label>
+          </div>
+          <div class="flex items-baseline gap-2" style="margin-top: 8px;">
+            <button class="btn btn-ghost" type="button" @click="loadFrontierPreview()"
+                    :disabled="frontierPreviewBusy">
+              <span x-text="frontierPreviewBusy ? 'Reading…' : '↻ Preview frontier'"></span>
+            </button>
+            <span class="card-meta"
+                  x-show="frontierPreview && !frontierPreview.exists"
+                  x-text="frontierPreview && ('graph not found at ' + frontierPreview.path)"></span>
+            <span class="card-meta"
+                  x-show="frontierPreview && frontierPreview.exists"
+                  x-text="frontierPreview && ('graph: ' + frontierPreview.graph_repo_count + ' repos, ' + frontierPreview.dependent_edges_total + ' dependent edges → frontier ' + frontierPreview.frontier_size)"></span>
+          </div>
+          <div class="seeds-preview"
+               x-show="frontierPreview && frontierPreview.exists && frontierPreview.frontier_sample && frontierPreview.frontier_sample.length"
+               style="margin-top: 4px;">
+            <template x-for="s in (frontierPreview && frontierPreview.frontier_sample) || []" :key="s">
+              <span class="pill pill-info" x-text="s"></span>
+            </template>
+            <span class="card-meta"
+                  x-show="frontierPreview && frontierPreview.frontier_size > (frontierPreview.frontier_sample || []).length"
+                  x-text="' + ' + (frontierPreview.frontier_size - frontierPreview.frontier_sample.length) + ' more'"></span>
+          </div>
+        </fieldset>
 
         <label style="display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--fg-muted);">
           <input type="checkbox" x-model="newQuest.forceRefresh"> bypass extractor cache (force_refresh)
@@ -534,6 +608,32 @@
     font-size: 11px;
     line-height: 1;
   }
+
+  /* Crawler graph-expansion knobs (dependents/dependencies/star floor). */
+  .crawler-knobs {
+    margin-top: 10px;
+    padding: 8px 10px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-soft);
+  }
+  .crawler-knobs-title {
+    padding: 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-muted);
+  }
+  .crawler-knobs-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    align-items: center;
+  }
+  .crawler-knobs-check {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px;
+  }
+  .crawler-knobs-check .card-meta { font-weight: 400; }
 </style>
 
 <script>
@@ -564,7 +664,7 @@ function pipelineRunner() {
     copyStatus: '',
 
     // Detached-run state. activeRun is the most recent run-status payload.
-    pipelineSteps: ['crawler', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects'],
+    pipelineSteps: ['crawler', 'frontier_extend', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects'],
     activeRun: null,
     autoRefresh: true,
     stopping: false,
@@ -574,7 +674,7 @@ function pipelineRunner() {
     showCreate: false,
     creating: false,
     createStatus: '',
-    stepIds: ['crawler', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects'],
+    stepIds: ['crawler', 'frontier_extend', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects'],
     newQuest: {
       name: '',
       description: '',
@@ -583,8 +683,20 @@ function pipelineRunner() {
       maxRepos: 8,
       forceRefresh: false,
       overwrite: false,
-      steps: { crawler: true, neo4j_upload: true, metadata_extractor: true, sparql_upload: true, apply_grimoire_projects: false },
+      // Crawler graph-expansion knobs (mirror the open-pulse-crawler API).
+      crawlDependents: false,
+      crawlDependencies: false,
+      maxDependents: 0,        // 0 → omitted from YAML → no cap
+      minStars: 0,
+      // frontier_extend knobs. The step reads the canonical crawler-graph
+      // on disk; the preview below tells the user how many seeds it would
+      // send so they're not flying blind.
+      frontierMaxRounds: 1,
+      frontierMaxSeeds: 0,     // 0 = no cap
+      steps: { crawler: true, frontier_extend: false, neo4j_upload: true, metadata_extractor: true, sparql_upload: true, apply_grimoire_projects: false },
     },
+    frontierPreview: null,
+    frontierPreviewBusy: false,
 
     // Tokenise seeds on commas, newlines, or whitespace, dedupe in order.
     get parsedSeeds() {
@@ -611,6 +723,12 @@ function pipelineRunner() {
             max_rounds: this.newQuest.maxRounds,
             max_repos: this.newQuest.maxRepos,
             force_refresh: this.newQuest.forceRefresh,
+            crawl_dependents: this.newQuest.crawlDependents,
+            crawl_dependencies: this.newQuest.crawlDependencies,
+            max_dependents: this.newQuest.maxDependents,
+            min_stars: this.newQuest.minStars,
+            frontier_max_rounds: this.newQuest.frontierMaxRounds,
+            frontier_max_seeds: this.newQuest.frontierMaxSeeds,
             steps: this.newQuest.steps,
             overwrite: this.newQuest.overwrite,
           }),
@@ -628,6 +746,23 @@ function pipelineRunner() {
         this.createStatus = '⚠ ' + e.message;
       } finally {
         this.creating = false;
+      }
+    },
+
+    async loadFrontierPreview() {
+      this.frontierPreviewBusy = true;
+      try {
+        const r = await fetch('/api/pipeline/frontier-preview?sample=20');
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          this.frontierPreview = { exists: false, path: '?', error: j.detail || 'HTTP ' + r.status };
+          return;
+        }
+        this.frontierPreview = await r.json();
+      } catch (e) {
+        this.frontierPreview = { exists: false, path: '?', error: e.message };
+      } finally {
+        this.frontierPreviewBusy = false;
       }
     },
 
