@@ -48,26 +48,36 @@ DEFAULT_WINDOW_DAYS = 365
 # before the standard "last year" window.
 ALLOWED_WINDOWS = (30, 90, 180, 365, 730, 1825, 3650)
 
-# Topic axis: the three buckets the SDSC CHAOSS-shortlist slides
-# pivot on. Each metric carries one of these as its ``category``.
-# We keep them in this fixed order on the page so muscle memory holds
-# across visits. The ``css`` field maps to the existing pill classes
-# in app.css.
+# Topic axis: the official CHAOSS taxonomy used to browse the
+# catalogue at https://chaoss.community/kbtopic/. We surface the four
+# topics that have at least one open-pulse metric implemented. The
+# ``css`` field maps to the existing pill classes in app.css; the
+# ``url`` jumps the visitor straight to the CHAOSS catalogue's
+# corresponding topic page.
 CATEGORIES: tuple[dict[str, str], ...] = (
     {
-        "name": "Popularity",
-        "css": "pill-accent",
-        "blurb": "Who sees or uses the software?",
-    },
-    {
-        "name": "Community",
+        "name": "Contributor",
         "css": "pill-info",
-        "blurb": "Who builds, maintains, and collaborates on it?",
+        "blurb": "Who builds and maintains the project?",
+        "url": "https://chaoss.community/kbtopic/contributor/",
     },
     {
-        "name": "FAIR / quality",
+        "name": "Software",
+        "css": "pill-accent",
+        "blurb": "What can users do with the code itself?",
+        "url": "https://chaoss.community/kbtopic/software/",
+    },
+    {
+        "name": "Lifecycle",
         "css": "pill-warn",
-        "blurb": "Can others understand and use it?",
+        "blurb": "How does work flow through the project?",
+        "url": "https://chaoss.community/kbtopic/lifecycle/",
+    },
+    {
+        "name": "Organization",
+        "css": "pill",
+        "blurb": "How are contributors organised across orgs?",
+        "url": "https://chaoss.community/kbtopic/organization/",
     },
 )
 

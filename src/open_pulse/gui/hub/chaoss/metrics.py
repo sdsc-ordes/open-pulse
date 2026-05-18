@@ -2179,7 +2179,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="contributors",
         name="Contributors",
-        category="Community",
+        category="Contributor",
         chaoss_level="Level 0 · Must-have",
         chaoss_url="https://chaoss.community/kb/metric-contributors/",
         question="Is there a community at all?",
@@ -2195,7 +2195,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="new_contributors",
         name="New Contributors",
-        category="Community",
+        category="Contributor",
         chaoss_level="Level 0 · Must-have",
         chaoss_url="https://chaoss.community/kb/metric-new-contributors/",
         question="Is the community growing?",
@@ -2211,7 +2211,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="technical_fork",
         name="Technical Fork",
-        category="Popularity",
+        category="Software",
         chaoss_level="Level 0 · Must-have",
         chaoss_url="https://chaoss.community/kb/metric-technical-fork/",
         question="How often is the project being reused / developed from?",
@@ -2227,7 +2227,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="licenses_declared",
         name="Licenses Declared",
-        category="FAIR / quality",
+        category="Software",
         chaoss_level="Level 0 · Must-have",
         chaoss_url="https://chaoss.community/kb/metric-licenses-declared/",
         question="Is the software legally usable and reusable?",
@@ -2243,7 +2243,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="academic_impact",
         name="Academic OS Project Impact",
-        category="Popularity",
+        category="Software",
         chaoss_level="Level 0 · Must-have",
         chaoss_url=(
             "https://chaoss.community/kb/metric-academic-open-source-project-impact/"
@@ -2262,7 +2262,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="project_popularity",
         name="Project Popularity",
-        category="Popularity",
+        category="Software",
         chaoss_level="Level 0 · Implemented",
         chaoss_url="https://chaoss.community/kb/metric-project-popularity/",
         question="How visible is the project?",
@@ -2278,7 +2278,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="programming_languages",
         name="Programming Language Distribution",
-        category="FAIR / quality",
+        category="Software",
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url=(
             "https://chaoss.community/kb/metric-programming-language-distribution/"
@@ -2295,7 +2295,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="activity_dates",
         name="Activity Dates and Times",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Level 0 · Must-have",
         chaoss_url="https://chaoss.community/kb/metric-activity-dates-and-times/",
         question="What is the engagement pattern?",
@@ -2310,7 +2310,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="closure_ratio",
         name="Change Request Closure Ratio",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Level 0 · Must-have",
         chaoss_url=(
             "https://chaoss.community/kb/metric-change-request-closure-ratio/"
@@ -2327,7 +2327,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="org_diversity",
         name="Organizational Diversity",
-        category="Community",
+        category="Organization",
         chaoss_level="Level 0 · Must-have",
         chaoss_url="https://chaoss.community/kb/metric-organizational-diversity/",
         question="Is the contributor base single-vendor or distributed?",
@@ -2343,7 +2343,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="first_response",
         name="Time to First Response",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url="https://chaoss.community/kb/metric-time-to-first-response/",
         question="How quickly does the project respond?",
@@ -2358,7 +2358,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="issue_resolution",
         name="Issue Resolution Duration",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url=(
             "https://chaoss.community/kb/metric-issue-resolution-duration/"
@@ -2375,7 +2375,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="self_merge",
         name="Self Merge Rate",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url="https://chaoss.community/kb/metric-self-merge-rate/",
         question="How strong is the code-review culture?",
@@ -2390,7 +2390,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="burstiness",
         name="Burstiness",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url="https://chaoss.community/kb/metric-burstiness/",
         question="Is contribution steady or in bursts?",
@@ -2407,7 +2407,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="absence_factor",
         name="Contributor Absence Factor",
-        category="Community",
+        category="Contributor",
         chaoss_level="Level 0 · Must-have",
         chaoss_url=(
             "https://chaoss.community/kb/metric-contributor-absence-factor/"
@@ -2424,7 +2424,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="project_demographics",
         name="Project Demographics",
-        category="Community",
+        category="Contributor",
         chaoss_level="Level 0 · Implemented",
         chaoss_url="https://chaoss.community/kb/metric-project-demographics/",
         question="Who are the contributors and how active are they?",
@@ -2440,7 +2440,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="bot_activity",
         name="Bot Activity",
-        category="Community",
+        category="Software",
         chaoss_level="Level 0 · Implemented",
         chaoss_url="https://chaoss.community/kb/metric-bot-activity/",
         question="How much of the activity is automated?",
@@ -2457,7 +2457,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="issues_new",
         name="Issues New",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url="https://chaoss.community/kb/metric-issues-new/",
         question="How fast is the backlog growing?",
@@ -2472,7 +2472,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="issues_active",
         name="Issues Active",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url="https://chaoss.community/kb/metric-issues-active/",
         question="How alive is the issue tracker?",
@@ -2487,7 +2487,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="issues_closed",
         name="Issues Closed",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url="https://chaoss.community/kb/metric-issues-closed/",
         question="How much backlog is the team clearing?",
@@ -2500,7 +2500,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="cr_reviews",
         name="Change Request Reviews",
-        category="Community",
+        category="Lifecycle",
         chaoss_level="Level 0 · Must-have",
         chaoss_url=(
             "https://chaoss.community/kb/metric-change-request-reviews/"
@@ -2517,7 +2517,7 @@ REGISTRY: list[MetricSpec] = [
     MetricSpec(
         slug="code_lines",
         name="Code Changes Lines",
-        category="Community",
+        category="Software",
         chaoss_level="Phase 2 · Would-like-to-have",
         chaoss_url="https://chaoss.community/kb/metric-code-changes-lines/",
         question="How much code is being touched?",
