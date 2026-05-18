@@ -66,6 +66,26 @@ templates.env.globals["dashboards"] = [
 ]
 templates.env.globals["ontology_url"] = _settings.ontology_url
 
+# Several route modules ship their own Jinja2Templates instance
+# because they need module-local filters (the CHAOSS surface adds an
+# inline-markdown ``md`` filter; routes/hub.py registered its own
+# directory historically). Without propagating the shared globals,
+# ``base.html``'s sidebar renders blank Dashboards + an empty
+# ontology link on those pages.
+#
+# Pushing globals via setdefault means each instance keeps its own
+# overrides; if a route registered a same-named global before this
+# line ran, it wins.
+def _propagate_globals(target: Jinja2Templates) -> None:
+    """Mirror every key on the shared template env onto another
+    Jinja2Templates instance, without clobbering existing keys."""
+    for _k, _v in templates.env.globals.items():
+        target.env.globals.setdefault(_k, _v)
+
+
+_propagate_globals(chaoss_routes.templates)
+_propagate_globals(hub.templates)
+
 app.include_router(services.router)
 app.include_router(projects.router)
 app.include_router(databases.router)
