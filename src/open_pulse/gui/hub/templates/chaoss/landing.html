@@ -32,10 +32,26 @@
     </form>
     <p class="card-meta" style="margin: 10px 0 0;">
       Time-based metrics use the selected window. Snapshot metrics
-      (forks, licenses) ignore it. CHAOSS supports many more — the five
-      below are the first "Level 0" must-haves from the
+      (forks, licenses) ignore it. CHAOSS supports many more — the
+      ones below are the first "Level 0" must-haves from the
       <a href="https://chaoss.community/" target="_blank" rel="noopener">CHAOSS catalogue</a>.
     </p>
+  </div>
+
+  {# ── Try it (sits right below the selector so visitors get a
+       1-click way in before having to read the catalogue) ───────── #}
+  <div>
+    <div class="card-title" style="margin-bottom: 8px;">Try one</div>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+      {% for slug in [
+        'sdsc-ordes/gimie',
+        'sdsc-ordes/open-pulse',
+        'chaoss/grimoirelab',
+        'EPFL-ENAC/enackubespray',
+      ] %}
+        <a class="btn" href="/chaoss/github.com/{{ slug }}?window={{ default_window }}">{{ slug }}</a>
+      {% endfor %}
+    </div>
   </div>
 
   {# ── Metric catalogue ─────────────────────────────────────────── #}
@@ -60,21 +76,6 @@
             <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener" class="card-meta">{{ m.chaoss_level }} ↗</a>
           </div>
         </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  {# ── Try it ───────────────────────────────────────────────────── #}
-  <div>
-    <div class="card-title" style="margin-bottom: 8px;">Try one</div>
-    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-      {% for slug in [
-        'sdsc-ordes/gimie',
-        'sdsc-ordes/open-pulse',
-        'chaoss/grimoirelab',
-        'EPFL-ENAC/enackubespray',
-      ] %}
-        <a class="btn" href="/chaoss/github.com/{{ slug }}?window={{ default_window }}">{{ slug }}</a>
       {% endfor %}
     </div>
   </div>
