@@ -28,6 +28,7 @@ const sidebars = {
         "operations/migration-from-static-docs"
       ]
     },
+    "contributing/index",
     "community/index"
   ]
 };
