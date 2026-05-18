@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block heading %}Resources{% endblock %}
+{% block subheading %}Disk, RAM, CPU and Docker usage. Auto-refreshes every 15 min.{% endblock %}
+
+{% block content %}
+<div x-data="resourcesPanel()" x-init="load(); startPolling()" class="space-y-4">
+
+  <!-- Toolbar: when did we last sample, manual refresh -->
+  <div class="flex items-baseline gap-2">
+    <span class="card-meta" x-show="lastUpdatedAt">
+      Last sampled <span x-text="lastUpdatedHuman"></span>
+    </span>
+    <span class="card-meta" x-show="!lastUpdatedAt">Loading…</span>
+    <label class="card-meta ml-auto" style="display:flex; align-items:center; gap:6px;">
+      <input type="checkbox" x-model="autoRefresh" @change="autoRefresh ? startPolling() : stopPolling()">
+      auto-refresh 15 min
+    </label>
+    <button class="btn btn-ghost" @click="load()" :disabled="loading">
+      <span x-text="loading ? 'Refreshing…' : '↻ Refresh now'"></span>
+    </button>
+  </div>
+
+  <!-- ── DISK ──────────────────────────────────────────────────────── -->
+  <section class="card">
+    <h2 class="card-title">Disk</h2>
+    <p class="card-meta">Mounts visible to the hub container. The data
+      disk is the one the stack writes to (clones, qdrant, opensearch).</p>
+
+    <table class="data" style="margin-top: 10px; width: 100%;">
+      <thead><tr>
+        <th>Mount</th><th>Used</th><th>Free</th><th>Total</th><th style="min-width:200px;">Usage</th>
+      </tr></thead>
+      <tbody>
+        <template x-for="(d, key) in (snapshot && snapshot.disks) || {}" :key="key">
+          <tr>
+            <td class="mono" x-text="d.mount + ' (' + key + ')'"></td>
+            <td x-text="fmtBytes(d.used_bytes)"></td>
+            <td x-text="fmtBytes(d.free_bytes)"></td>
+            <td x-text="fmtBytes(d.total_bytes)"></td>
+            <td>
+              <div class="bar" :class="pctClass(d.pct_used, 'disk')">
+                <div class="bar-fill" :style="'width:' + d.pct_used + '%'"></div>
+                <span class="bar-label" x-text="d.pct_used + '%'"></span>
+              </div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── MEMORY ────────────────────────────────────────────────────── -->
+  <section class="card">
+    <h2 class="card-title">Memory</h2>
+    <template x-if="snapshot && snapshot.memory">
+      <div>
+        <div class="bar" :class="pctClass(snapshot.memory.pct_used, 'mem')" style="margin-top: 10px;">
+          <div class="bar-fill" :style="'width:' + snapshot.memory.pct_used + '%'"></div>
+          <span class="bar-label" x-text="snapshot.memory.pct_used + '%  ·  ' + fmtBytes(snapshot.memory.used_bytes) + ' / ' + fmtBytes(snapshot.memory.total_bytes)"></span>
+        </div>
+        <div class="card-meta" style="margin-top:8px;"
+             x-text="'Swap: ' + fmtBytes(snapshot.memory.swap_used_bytes) + ' / ' + fmtBytes(snapshot.memory.swap_total_bytes)"></div>
+      </div>
+    </template>
+  </section>
+
+  <!-- ── CPU ───────────────────────────────────────────────────────── -->
+  <section class="card">
+    <h2 class="card-title">CPU load</h2>
+    <template x-if="snapshot && snapshot.cpu">
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-top:8px;">
+        <div>
+          <div class="card-meta">cores</div>
+          <div class="stat-value" x-text="snapshot.cpu.cores"></div>
+        </div>
+        <div>
+          <div class="card-meta">load 1m</div>
+          <div class="stat-value" :class="loadClass(snapshot.cpu.load_1m_per_core)"
+               x-text="snapshot.cpu.load_1m.toFixed(2) + '  (' + snapshot.cpu.load_1m_per_core.toFixed(2) + '/core)'"></div>
+        </div>
+        <div>
+          <div class="card-meta">load 5m</div>
+          <div class="stat-value" x-text="snapshot.cpu.load_5m.toFixed(2)"></div>
+        </div>
+        <div>
+          <div class="card-meta">load 15m</div>
+          <div class="stat-value" x-text="snapshot.cpu.load_15m.toFixed(2)"></div>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <!-- ── DOCKER ────────────────────────────────────────────────────── -->
+  <section class="card" x-show="snapshot && snapshot.docker">
+    <h2 class="card-title">Docker</h2>
+    <p class="card-meta">Mirrors <code>docker system df</code> — reclaimable
+      bytes is what <code>docker system prune</code> would free.</p>
+    <table class="data" style="margin-top: 10px; width: 100%;">
+      <thead><tr><th>Resource</th><th>Count</th><th>Size</th><th>Reclaimable</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Images</td>
+          <td x-text="snapshot && snapshot.docker.images.count"></td>
+          <td x-text="snapshot && fmtBytes(snapshot.docker.images.size_bytes)"></td>
+          <td x-text="snapshot && fmtBytes(snapshot.docker.images.reclaimable_bytes)"></td>
+        </tr>
+        <tr>
+          <td>Containers</td>
+          <td x-text="snapshot && (snapshot.docker.containers.running + '/' + snapshot.docker.containers.count + ' running')"></td>
+          <td x-text="snapshot && fmtBytes(snapshot.docker.containers.rw_bytes)"></td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td>Volumes</td>
+          <td x-text="snapshot && snapshot.docker.volumes.count"></td>
+          <td x-text="snapshot && fmtBytes(snapshot.docker.volumes.size_bytes)"></td>
+          <td x-text="snapshot && fmtBytes(snapshot.docker.volumes.dangling_bytes)"></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<style>
+  .bar { position: relative; height: 22px; border-radius: 6px;
+         background: var(--surface-sunk); overflow: hidden;
+         border: 1px solid var(--border); }
+  .bar-fill { height: 100%; background: var(--accent); transition: width .3s ease; }
+  .bar-label { position: absolute; inset: 0; display: flex;
+               align-items: center; justify-content: center;
+               font-size: 12px; font-weight: 600; color: var(--fg); }
+  .bar.is-warn .bar-fill   { background: var(--warn, #d97706); }
+  .bar.is-crit .bar-fill   { background: var(--bad,  #dc2626); }
+  .stat-value { font-size: 18px; font-weight: 600; }
+  .stat-value.is-warn { color: var(--warn, #d97706); }
+  .stat-value.is-crit { color: var(--bad,  #dc2626); }
+</style>
+
+<script>
+function resourcesPanel() {
+  return {
+    snapshot: null,
+    loading: false,
+    lastUpdatedAt: null,
+    autoRefresh: true,
+    _handle: null,
+
+    fmtBytes(n) {
+      if (n == null) return '—';
+      if (n < 1024) return n + 'B';
+      const u = ['KB','MB','GB','TB'];
+      let v = n / 1024, i = 0;
+      while (v >= 1024 && i < u.length-1) { v /= 1024; i++; }
+      return v.toFixed(v < 10 ? 2 : 1) + ' ' + u[i];
+    },
+
+    pctClass(pct, kind) {
+      const t = (this.snapshot && this.snapshot.thresholds) || {};
+      const warn = kind === 'disk' ? t.disk_warn_pct : t.mem_warn_pct;
+      const crit = kind === 'disk' ? t.disk_crit_pct : t.mem_crit_pct;
+      if (pct >= (crit || 90)) return 'is-crit';
+      if (pct >= (warn || 75)) return 'is-warn';
+      return '';
+    },
+
+    loadClass(perCore) {
+      const t = (this.snapshot && this.snapshot.thresholds) || {};
+      if (perCore >= (t.load_crit_per_core || 2)) return 'is-crit';
+      if (perCore >= (t.load_warn_per_core || 1)) return 'is-warn';
+      return '';
+    },
+
+    get lastUpdatedHuman() {
+      if (!this.lastUpdatedAt) return '';
+      const ago = Math.max(0, Math.floor((Date.now() - this.lastUpdatedAt) / 1000));
+      if (ago < 60) return ago + 's ago';
+      if (ago < 3600) return Math.floor(ago/60) + 'm ago';
+      return Math.floor(ago/3600) + 'h ago';
+    },
+
+    async load() {
+      this.loading = true;
+      try {
+        const r = await fetch('/api/admin/resources');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        this.snapshot = await r.json();
+        this.lastUpdatedAt = Date.now();
+      } catch (e) {
+        console.error(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    startPolling() {
+      this.stopPolling();
+      // 15 minutes — the cadence the user requested. Server caches the
+      // payload for ~30s, so a manual refresh in between is cheap.
+      this._handle = setInterval(() => this.load(), 15 * 60 * 1000);
+    },
+    stopPolling() {
+      if (this._handle) clearInterval(this._handle);
+      this._handle = null;
+    },
+  };
+}
+</script>
+{% endblock %}
