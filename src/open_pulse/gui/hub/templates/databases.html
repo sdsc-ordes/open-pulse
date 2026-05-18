@@ -759,6 +759,16 @@ function dbConsole() {
 
       // Strip the fragment so a reload doesn't re-open the link.
       history.replaceState(null, '', window.location.pathname + window.location.search);
+
+      // Auto-run: "Run query" on the CHAOSS dashboard implies the
+      // visitor wants to see results, not just have the editor
+      // pre-loaded. Fire ``run()`` on the next tick so Alpine has
+      // finished swapping the active tab + its content. We defer
+      // via setTimeout(0) rather than awaiting because init() should
+      // return cheaply.
+      if (q) {
+        setTimeout(() => { this.run().catch(() => {}); }, 0);
+      }
     },
 
     // ── library (server-side SQLite) ─────────────────────────────

@@ -743,12 +743,81 @@ svg.chaoss-topic-icon {
 
 /* ─── CHAOSS query-trace block (under "How we compute this") ───── */
 
+/* "How we compute this" expander — styled as a card-button with a
+ * chevron that rotates open. We hide the browser-default disclosure
+ * triangle so the chevron is the single visual indicator. */
 .chaoss-trace-summary {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  user-select: none;
+  list-style: none;
+  transition: border-color .15s ease, background .15s ease;
 }
-.chaoss-trace-summary::-webkit-details-marker { color: var(--fg-muted); }
+.chaoss-trace-summary::-webkit-details-marker { display: none; }
+.chaoss-trace-summary::marker { display: none; }
+.chaoss-trace-summary:hover {
+  border-color: var(--accent, var(--chaoss-tone-info));
+  background: var(--surface);
+}
+.chaoss-trace-chevron {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--accent, var(--chaoss-tone-info));
+  transition: transform .15s ease;
+}
+details[open] > .chaoss-trace-summary .chaoss-trace-chevron {
+  transform: rotate(90deg);
+}
+.chaoss-trace-summary-label { flex: 1; }
+.chaoss-trace-summary-count {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--fg-muted);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* Unification footer — the "how values combine" block under the
+ * raw queries. Visually distinct from a regular trace card: tinted
+ * background, accent-coloured left border. */
+.chaoss-unification {
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--chaoss-tone-info, var(--accent));
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.chaoss-unification-label {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+.chaoss-unification-text code {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+}
+.chaoss-unification-text strong { color: var(--chaoss-tone-info, var(--accent)); }
 
 .chaoss-trace {
   border: 1px solid var(--border);
