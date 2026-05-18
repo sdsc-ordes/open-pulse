@@ -54,32 +54,84 @@
     </div>
   </div>
 
-  {# ── Metric catalogue ─────────────────────────────────────────── #}
-  <div>
-    <div class="card-title" style="margin-bottom: 10px;">What we measure</div>
-    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
-      {% for m in metrics %}
-        <div class="card" style="display: flex; flex-direction: column; gap: 8px;">
-          <div style="display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;">
-            <span class="pill {% if m.category == 'Community' %}pill-info{% elif m.category == 'Popularity' %}pill-accent{% else %}pill-warn{% endif %}"
-                  style="font-size: 10px;">{{ m.category }}</span>
-            {% if m.is_time_based %}
-              <span class="pill" style="font-size: 10px;">⏱ time-based</span>
-            {% else %}
-              <span class="pill" style="font-size: 10px;">snapshot</span>
-            {% endif %}
-          </div>
-          <div style="font-weight: 600;">{{ m.name }}</div>
-          <div class="card-meta" style="font-size: 12px;">{{ m.question }}</div>
-          <p style="margin: 0; font-size: 13px; color: var(--fg-muted);">{{ m.description }}</p>
-          <div style="margin-top: auto; padding-top: 6px; display: flex; gap: 10px; font-size: 11px;">
-            <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener" class="card-meta">{{ m.chaoss_level }} ↗</a>
-          </div>
-        </div>
-      {% endfor %}
+  {# ── Metric catalogue (grouped + filterable) ──────────────────── #}
+  <div x-data='chaossFilter({{ categories | map(attribute="name") | list | tojson }})'>
+    <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
+      <div class="card-title">What we measure</div>
+      {# Filter pill row: click to toggle visibility of each topic. #}
+      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+        {% for cat in categories %}
+          <button type="button"
+                  class="pill {{ cat.css }}"
+                  @click="toggle({{ cat.name | tojson }})"
+                  :class="active.includes({{ cat.name | tojson }}) ? '' : 'is-inactive'"
+                  style="font-size: 11px; cursor: pointer; user-select: none; padding: 3px 10px;">
+            {{ cat.name }}
+          </button>
+        {% endfor %}
+        <button type="button" class="pill"
+                @click="reset()"
+                style="font-size: 11px; cursor: pointer; padding: 3px 10px;">
+          all
+        </button>
+      </div>
     </div>
+
+    {% for g in groups %}
+      <section x-show="active.includes({{ g.name | tojson }})"
+               style="margin-top: 18px;">
+        <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;">
+          <span class="pill {{ g.css }}" style="font-size: 10px;">{{ g.name }}</span>
+          <span class="card-meta" style="font-size: 12px;">{{ g.blurb }}</span>
+          <span class="card-meta" style="font-size: 11px; margin-left: auto;">{{ g.metrics | length }} metric{% if g.metrics|length != 1 %}s{% endif %}</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
+          {% for m in g.metrics %}
+            <div class="card" style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;">
+                {% if m.is_time_based %}
+                  <span class="pill" style="font-size: 10px;">⏱ time-based</span>
+                {% else %}
+                  <span class="pill" style="font-size: 10px;">snapshot</span>
+                {% endif %}
+              </div>
+              <div style="font-weight: 600;">{{ m.name }}</div>
+              <div class="card-meta" style="font-size: 12px;">{{ m.question }}</div>
+              <p style="margin: 0; font-size: 13px; color: var(--fg-muted);">{{ m.description }}</p>
+              <div style="margin-top: auto; padding-top: 6px; display: flex; gap: 10px; font-size: 11px;">
+                <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener" class="card-meta">{{ m.chaoss_level }} ↗</a>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endfor %}
   </div>
 </div>
+
+<script>
+// Shared filter component used by both /chaoss landing and the
+// per-repo dashboard. `active` is the list of currently-visible
+// category names; clicking a pill toggles it, and `reset()` puts
+// everything back.
+function chaossFilter(initialCategories) {
+  return {
+    all: initialCategories,
+    active: initialCategories.slice(),
+    toggle(name) {
+      const i = this.active.indexOf(name);
+      if (i >= 0) this.active.splice(i, 1);
+      else this.active.push(name);
+      // If the user toggled the last category off, restore them all
+      // — empty state isn't useful.
+      if (this.active.length === 0) this.active = this.all.slice();
+    },
+    reset() {
+      this.active = this.all.slice();
+    },
+  };
+}
+</script>
 
 <script>
 function chaossRepoForm() {

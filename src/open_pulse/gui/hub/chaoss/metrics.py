@@ -1901,6 +1901,278 @@ def _metric_bot_activity(full: str, canonical_url: str, window_days: int) -> Met
     )
 
 
+# ── Metric 18-20 · Issues lifecycle (New / Active / Closed) ─────────────
+
+def _issues_count(
+    full: str,
+    window_days: int,
+    *,
+    slug: str,
+    title: str,
+    extra_must: list[dict[str, Any]],
+    date_field: str,
+    label: str,
+    notes: str,
+) -> MetricResult:
+    """Shared helper for the three issues-lifecycle metrics. They all
+    look the same shape — a filtered count of github documents in the
+    window — so we keep one implementation and parameterise the bits
+    that differ (which date field to range on, what extra clauses to
+    add, what to tell the user).
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "track_total_hits": True,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"term": {"pull_request": False}},
+                    {"range": {date_field: {"gte": cutoff_iso}}},
+                    *extra_must,
+                ]
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"{title} on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or github index empty",
+        ))
+        return MetricResult(
+            slug=slug, value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="github_*_enriched has no documents for this repo yet.",
+        )
+    total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"{title} on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=f"{total} issues",
+    ))
+    if not total:
+        return MetricResult(
+            slug=slug, value="0", label=label,
+            secondary=None, queries=traces,
+            notes=notes,
+        )
+    return MetricResult(
+        slug=slug, value=str(total), label=label,
+        secondary=None, queries=traces, notes=notes,
+    )
+
+
+def _metric_issues_new(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    return _issues_count(
+        full, window_days,
+        slug="issues_new",
+        title="Issues newly opened",
+        extra_must=[],
+        date_field="created_at",
+        label=f"opened (last {window_days} days)",
+        notes=(
+            "All issues created on this repo in the window, excluding "
+            "pull requests. A spike here without a matching spike in "
+            "issues_closed indicates growing backlog."
+        ),
+    )
+
+
+def _metric_issues_active(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    return _issues_count(
+        full, window_days,
+        slug="issues_active",
+        title="Issues with any activity",
+        extra_must=[],
+        date_field="updated_at",
+        label=f"touched (last {window_days} days)",
+        notes=(
+            "Issues that received any update (new comment, label, "
+            "state change) in the window. Excludes PRs."
+        ),
+    )
+
+
+def _metric_issues_closed(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    return _issues_count(
+        full, window_days,
+        slug="issues_closed",
+        title="Issues closed",
+        extra_must=[{"term": {"state": "closed"}}],
+        date_field="closed_at",
+        label=f"closed (last {window_days} days)",
+        notes=(
+            "Issues whose ``state`` flipped to closed inside the "
+            "window. Pair with issues_new for an inflow vs outflow "
+            "view of the backlog."
+        ),
+    )
+
+
+# ── Metric 21 · Change Request Reviews ──────────────────────────────────
+
+def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """How many pull requests received any review in the window?
+    GrimoireLab enriches every PR doc with ``num_review_comments``
+    and ``num_review_comments_without_bot``; we ask how many PRs
+    have at least one review comment from a non-bot.
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "track_total_hits": True,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"term": {"pull_request": True}},
+                    {"range": {"created_at": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "reviewed": {
+                "filter": {
+                    "range": {
+                        "num_review_comments_without_bot": {"gt": 0}
+                    }
+                }
+            }
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Reviewed PR count on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or github index empty",
+        ))
+        return MetricResult(
+            slug="cr_reviews", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="github_*_enriched has no documents for this repo yet.",
+        )
+    total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+    reviewed = int(((raw.get("aggregations") or {}).get("reviewed") or {}).get("doc_count") or 0)
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"PRs with at least one non-bot review on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=f"{reviewed} reviewed of {total} PRs",
+    ))
+    if not total:
+        return MetricResult(
+            slug="cr_reviews", value="—", label="no PRs in window",
+            secondary=None, queries=traces,
+            notes="No pull requests opened on this repo in the window.",
+        )
+    ratio = reviewed / total
+    return MetricResult(
+        slug="cr_reviews",
+        value=str(reviewed),
+        label=f"reviewed PRs (last {window_days} days)",
+        secondary=f"{reviewed} of {total} PRs ({ratio:.0%}) had a non-bot review",
+        queries=traces,
+        notes=(
+            "Counts PRs whose ``num_review_comments_without_bot`` is "
+            "positive — i.e. at least one review comment from a human. "
+            "Pair with self_merge to read code-review culture."
+        ),
+    )
+
+
+# ── Metric 22 · Code Changes Lines ──────────────────────────────────────
+
+def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> MetricResult:
+    """Sum of lines added + removed across commits in the window."""
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "track_total_hits": True,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"range": {"grimoire_creation_date": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "lines_added":   {"sum": {"field": "lines_added"}},
+            "lines_removed": {"sum": {"field": "lines_removed"}},
+            "files":         {"sum": {"field": "files"}},
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    if raw is None:
+        traces.append(QueryTrace(
+            store="OpenSearch", engine="opensearch", mode="dsl",
+            title=f"Lines added + removed on {origin}",
+            query=body_text, result_summary="no response",
+            error="OpenSearch unreachable or git index empty",
+        ))
+        return MetricResult(
+            slug="code_lines", value="—", label="no data",
+            secondary=None, queries=traces,
+            notes="No git activity indexed for this repo.",
+        )
+    commits = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
+    aggs = raw.get("aggregations") or {}
+    added   = int((aggs.get("lines_added")   or {}).get("value") or 0)
+    removed = int((aggs.get("lines_removed") or {}).get("value") or 0)
+    files   = int((aggs.get("files")         or {}).get("value") or 0)
+    delta = added + removed
+    traces.append(QueryTrace(
+        store="OpenSearch", engine="opensearch", mode="dsl",
+        title=f"Lines changed on {origin} since {cutoff_iso[:10]}",
+        query=body_text,
+        result_summary=f"+{added} −{removed} across {commits} commits / {files} files",
+    ))
+    if not commits:
+        return MetricResult(
+            slug="code_lines", value="—", label="no commits in window",
+            secondary=None, queries=traces,
+            notes="Widen the window to compute line churn.",
+        )
+    return MetricResult(
+        slug="code_lines",
+        value=f"{delta:,}",
+        label=f"lines changed (last {window_days} days)",
+        secondary=(
+            f"+{added:,} added · −{removed:,} removed · "
+            f"{commits} commits across {files} file-changes"
+        ),
+        queries=traces,
+        notes=(
+            "Sums GrimoireLab's per-commit ``lines_added`` and "
+            "``lines_removed``. Vendored or generated files inflate "
+            "this — a one-line refactor can still touch thousands of "
+            "lines if a lockfile lives in the repo."
+        ),
+    )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────
 
 REGISTRY: list[MetricSpec] = [
@@ -2180,6 +2452,81 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=True,
         compute=_metric_bot_activity,
+    ),
+    # ── Phase 5 additions ────────────────────────────────────────────
+    MetricSpec(
+        slug="issues_new",
+        name="Issues New",
+        category="Community",
+        chaoss_level="Phase 2 · Would-like-to-have",
+        chaoss_url="https://chaoss.community/kb/metric-issues-new/",
+        question="How fast is the backlog growing?",
+        description=(
+            "Issues opened on the repo in the window (excludes PRs). "
+            "Compare with Issues Closed to see whether inflow is "
+            "outpacing the team's outflow."
+        ),
+        is_time_based=True,
+        compute=_metric_issues_new,
+    ),
+    MetricSpec(
+        slug="issues_active",
+        name="Issues Active",
+        category="Community",
+        chaoss_level="Phase 2 · Would-like-to-have",
+        chaoss_url="https://chaoss.community/kb/metric-issues-active/",
+        question="How alive is the issue tracker?",
+        description=(
+            "Issues with any kind of update (comment, label, state "
+            "change) inside the window — a liveness signal stronger "
+            "than just 'were issues opened'."
+        ),
+        is_time_based=True,
+        compute=_metric_issues_active,
+    ),
+    MetricSpec(
+        slug="issues_closed",
+        name="Issues Closed",
+        category="Community",
+        chaoss_level="Phase 2 · Would-like-to-have",
+        chaoss_url="https://chaoss.community/kb/metric-issues-closed/",
+        question="How much backlog is the team clearing?",
+        description=(
+            "Issues whose state flipped to closed inside the window."
+        ),
+        is_time_based=True,
+        compute=_metric_issues_closed,
+    ),
+    MetricSpec(
+        slug="cr_reviews",
+        name="Change Request Reviews",
+        category="Community",
+        chaoss_level="Level 0 · Must-have",
+        chaoss_url=(
+            "https://chaoss.community/kb/metric-change-request-reviews/"
+        ),
+        question="Is work being reviewed before it lands?",
+        description=(
+            "Pull requests that received at least one non-bot review "
+            "comment in the window. Pair with self_merge to read "
+            "the code-review culture."
+        ),
+        is_time_based=True,
+        compute=_metric_cr_reviews,
+    ),
+    MetricSpec(
+        slug="code_lines",
+        name="Code Changes Lines",
+        category="Community",
+        chaoss_level="Phase 2 · Would-like-to-have",
+        chaoss_url="https://chaoss.community/kb/metric-code-changes-lines/",
+        question="How much code is being touched?",
+        description=(
+            "Sum of lines added and removed across commits in the "
+            "window, with the file-change count surfaced as secondary."
+        ),
+        is_time_based=True,
+        compute=_metric_code_lines,
     ),
 ]
 

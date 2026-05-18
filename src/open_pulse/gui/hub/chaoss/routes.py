@@ -25,6 +25,8 @@ import urllib.parse
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from typing import Any
+
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -45,6 +47,41 @@ DEFAULT_WINDOW_DAYS = 365
 # longer choices matter for older repos whose only contributors were
 # before the standard "last year" window.
 ALLOWED_WINDOWS = (30, 90, 180, 365, 730, 1825, 3650)
+
+# Topic axis: the three buckets the SDSC CHAOSS-shortlist slides
+# pivot on. Each metric carries one of these as its ``category``.
+# We keep them in this fixed order on the page so muscle memory holds
+# across visits. The ``css`` field maps to the existing pill classes
+# in app.css.
+CATEGORIES: tuple[dict[str, str], ...] = (
+    {
+        "name": "Popularity",
+        "css": "pill-accent",
+        "blurb": "Who sees or uses the software?",
+    },
+    {
+        "name": "Community",
+        "css": "pill-info",
+        "blurb": "Who builds, maintains, and collaborates on it?",
+    },
+    {
+        "name": "FAIR / quality",
+        "css": "pill-warn",
+        "blurb": "Can others understand and use it?",
+    },
+)
+
+
+def _grouped(specs: list) -> list[dict[str, Any]]:
+    """Re-shape the flat metrics registry into the order CATEGORIES
+    declares so templates can render one section per topic.
+    """
+    out = []
+    for cat in CATEGORIES:
+        bucket = [m for m in specs if m.category == cat["name"]]
+        if bucket:
+            out.append({**cat, "metrics": bucket})
+    return out
 
 
 def _clamp_window(value: int) -> int:
@@ -88,6 +125,8 @@ def chaoss_landing(request: Request) -> HTMLResponse:
         {
             "page": "chaoss",
             "metrics": metrics_mod.REGISTRY,
+            "groups": _grouped(metrics_mod.REGISTRY),
+            "categories": CATEGORIES,
             "window_choices": ALLOWED_WINDOWS,
             "default_window": DEFAULT_WINDOW_DAYS,
         },
@@ -121,6 +160,8 @@ def chaoss_repo(
             "full": full,
             "canonical_url": f"https://github.com/{full}",
             "metrics": metrics_mod.REGISTRY,
+            "groups": _grouped(metrics_mod.REGISTRY),
+            "categories": CATEGORIES,
             "window": window,
             "window_choices": ALLOWED_WINDOWS,
         },
