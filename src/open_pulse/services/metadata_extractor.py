@@ -31,6 +31,11 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _HTTP_TIMEOUT = 120.0  # rule-based extraction can take 30s+ on fresh fetches
+# When the extractor is in the middle of a long LLM call, idle status polls
+# get dropped with `Server disconnected` / `Connection reset`. The job
+# itself is still alive on the extractor side — same pattern we fixed in
+# services/crawler.py. Tolerate a small burst before giving up.
+_MAX_TRANSIENT_POLL_FAILURES = 5
 _GIMIE_PATH = "/v1/repository/gimie/json-ld"
 _V2_EXTRACT_PATH = "/v2/extract"
 _V2_JOB_PATH = "/v2/jobs"
@@ -207,8 +212,37 @@ class MetadataExtractorService:
         :class:`ExtractJobTimeoutError` on deadline.
         """
         deadline = time.monotonic() + timeout
+        consecutive_failures = 0
         while True:
-            job = self.get_extract_job(job_id)
+            try:
+                job = self.get_extract_job(job_id)
+            except RuntimeError as exc:
+                # ``get_extract_job`` wraps httpx errors in RuntimeError. We
+                # match the substring so we don't swallow legitimate API
+                # errors (e.g. malformed responses) which use a different
+                # message prefix.
+                msg = str(exc)
+                if "HTTP error polling" not in msg:
+                    raise
+                consecutive_failures += 1
+                logger.warning(
+                    "metadata_extractor: poll for job %s failed (%d/%d): %s",
+                    job_id,
+                    consecutive_failures,
+                    _MAX_TRANSIENT_POLL_FAILURES,
+                    msg,
+                )
+                if consecutive_failures >= _MAX_TRANSIENT_POLL_FAILURES:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise ExtractJobTimeoutError(
+                        f"v2 extract job {job_id} did not complete within {timeout:.0f}s "
+                        f"(last poll error: {exc})"
+                    ) from exc
+                time.sleep(poll_interval)
+                continue
+
+            consecutive_failures = 0
             state = str(job.get("status", "")).lower()
             if state == "completed":
                 return job

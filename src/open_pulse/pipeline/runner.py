@@ -23,6 +23,7 @@ from open_pulse.tasks import FunctionTask
 from .apply_grimoire_projects import run_apply_grimoire_projects
 from .config import QuestFileConfig, RetryConfig, StepConfig
 from .crawler import run_crawler
+from .frontier_extend import run_frontier_extend
 from .metadata_extractor import run_metadata_extractor
 from .neo4j_upload import run_neo4j_upload
 from .sparql_upload import run_sparql_upload
@@ -33,6 +34,7 @@ StepFunc = Callable[[dict[str, object]], None]
 
 STEP_REGISTRY: dict[str, StepFunc] = {
     "crawler": run_crawler,
+    "frontier_extend": run_frontier_extend,
     "neo4j_upload": run_neo4j_upload,
     "metadata_extractor": run_metadata_extractor,
     "sparql_upload": run_sparql_upload,
@@ -124,6 +126,7 @@ def build_tasks(config: QuestFileConfig) -> tuple[FunctionTask, ...]:
     quest = config.quest
     step_configs: dict[str, StepConfig] = {
         "crawler": quest.steps.crawler,
+        "frontier_extend": quest.steps.frontier_extend,
         "neo4j_upload": quest.steps.neo4j_upload,
         "metadata_extractor": quest.steps.metadata_extractor,
         "sparql_upload": quest.steps.sparql_upload,
@@ -233,6 +236,7 @@ def run_single_step(
     quest = config.quest
     step_configs: dict[str, StepConfig] = {
         "crawler": quest.steps.crawler,
+        "frontier_extend": quest.steps.frontier_extend,
         "neo4j_upload": quest.steps.neo4j_upload,
         "metadata_extractor": quest.steps.metadata_extractor,
         "sparql_upload": quest.steps.sparql_upload,
