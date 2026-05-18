@@ -131,6 +131,17 @@ body {
 }
 .marquee-label { text-transform: uppercase; font-weight: 600; }
 .marquee-value { color: var(--fg); font-variant-numeric: tabular-nums; }
+/* Sparkline sits flush to the right of the value. ``currentColor``
+ * picks up whatever colour the parent marquee-item resolves to —
+ * which is the muted body colour, so the line reads as a quiet
+ * trend, not a competing focal point. */
+.marquee-spark {
+  width: 60px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--accent, var(--fg-muted));
+  opacity: 0.72;
+}
 .marquee-dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }
 .marquee-dot.ok      { background: var(--ok);    box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 60%, transparent); }
 .marquee-dot.warn    { background: var(--warn);  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 60%, transparent); }
