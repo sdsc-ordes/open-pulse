@@ -12,10 +12,11 @@
 
 {# highlight.js for the query trace blocks. We deliberately do NOT
    pull a third-party CSS theme — token colours are owned in app.css
-   via the ``--chaoss-code-*`` variable palette, which has light and
-   dark variants flipped by the same ``[data-theme]`` attribute the
-   rest of the hub uses. The line-numbers plugin + the inline cypher
-   / sparql language definitions still come from cdnjs. #}
+   via the unified ``--code-*`` variable palette (also used by the
+   /databases snippet and the unified recipe block). Light + dark
+   variants flipped by the same ``[data-theme]`` attribute. The
+   line-numbers plugin + the inline cypher / sparql language
+   definitions still come from cdnjs. #}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
 <script>
