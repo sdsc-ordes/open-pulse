@@ -385,23 +385,8 @@
                            painted: false,
                            scripts: {{ {"python": result.recipes.python, "bash": result.recipes.bash, "js": result.recipes.js} | tojson }},
                            langClass() { return "language-" + (this.lang === "js" ? "javascript" : this.lang); },
-                           repaint() {
-                             if (!window.hljs || !this.$refs.code) return;
-                             // The line-numbers plugin wraps <code> in a table — on tab
-                             // switch the old table can leak past the x-text update.
-                             // Reset to the raw script before re-painting so the plugin
-                             // sees a clean code element.
-                             this.$refs.code.textContent = this.scripts[this.lang];
-                             this.$refs.code.removeAttribute("data-highlighted");
-                             try { window.hljs.highlightElement(this.$refs.code); } catch (_) {}
-                             // {singleLine:true} matches the option chaossHighlight() passes
-                             // for the per-store trace blocks — without it the plugin
-                             // skips short single-line snippets and the gutter never
-                             // appears, leaving the code flush-left in the recipe.
-                             try { if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(this.$refs.code, { singleLine: true }); } catch (_) {}
-                           },
                          }'
-                         @toggle="if ($el.open && !painted) { painted = true; $nextTick(() => repaint()); }">
+                         @toggle="if ($el.open && !painted) { painted = true; setTimeout(() => chaossHighlight($el), 80); }">
                   <summary class="chaoss-recipe-summary">
                     <span class="chaoss-trace-chevron" aria-hidden="true">▸</span>
                     <span>Reproduce end-to-end</span>
@@ -418,7 +403,7 @@
                       <div class="chaoss-recipe-tabs">
                         {% for L, pretty in [('python', 'python'), ('bash', 'bash'), ('js', 'node.js')] %}
                           <button type="button"
-                                  @click="lang = '{{ L }}'; $nextTick(() => repaint())"
+                                  @click="lang = '{{ L }}'; $nextTick(() => chaossHighlight($root))"
                                   :class="lang === '{{ L }}' ? 'is-active' : ''">{{ pretty }}</button>
                         {% endfor %}
                       </div>
