@@ -352,21 +352,40 @@ def hub_collection_rows(
     name: str,
     page: int = 1,
     size: int = duckdb_browser.DEFAULT_PAGE_SIZE,
+    q: str = "",
 ) -> dict[str, Any]:
     """Paginated rows from the DuckDB table backing collection ``name``.
 
-    Returns ``{columns, rows, total, page, size, pages, ...}`` for the
-    UI to render a Rows tab on the collection landing page. Throws a
-    404 when the collection has no registered DuckDB backing (most
-    collections don't yet — this is an opt-in surface).
+    ``q`` is a case-insensitive substring filter applied to the columns
+    listed in the collection's ``search_cols``. Empty ``q`` returns the
+    unfiltered slice. Throws a 404 when the collection isn't registered.
     """
-    payload = duckdb_browser.list_rows(name, page=page, size=size)
+    payload = duckdb_browser.list_rows(name, page=page, size=size, q=q)
     if payload is None:
         raise HTTPException(
             status_code=404,
             detail=f"collection {name!r} has no DuckDB backing registered",
         )
     return payload
+
+
+@router.get(
+    "/api/hub/c/{name}/stats",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_collection_stats(name: str) -> dict[str, Any]:
+    """Headline scalar stats for the collection landing page."""
+    stats = duckdb_browser.top_stats(name)
+    if stats is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"collection {name!r} has no DuckDB backing registered",
+        )
+    return {
+        "collection": name,
+        "stats": stats,
+        "search": duckdb_browser.search_info(name) or {},
+    }
 
 
 @router.get(

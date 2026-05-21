@@ -1327,6 +1327,204 @@ code.hljs .hljs-type        { color: var(--code-title); }
   border-radius: 4px;
 }
 
+/* ── DuckDB row browser on /hub/c/<name> ──────────────────────────
+ * Stats tiles, search bar, pagination row and the actual table.
+ * Keeps every surface aligned with the rest of the hub palette.
+ */
+.duckdb-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.duckdb-stat-tile {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.duckdb-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+.duckdb-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.duckdb-rows-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.duckdb-rows-page-indicator { margin-left: auto; }
+
+.duckdb-search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.duckdb-search-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 240px;
+  max-width: 480px;
+}
+.duckdb-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.duckdb-search-input {
+  width: 100%;
+  padding: 7px 30px 7px 32px;
+  font-size: 13px;
+  background: var(--surface-soft);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.duckdb-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.duckdb-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  color: var(--fg-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.duckdb-search-clear:hover { color: var(--fg); }
+
+.duckdb-search-examples {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.duckdb-search-chip {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  cursor: pointer;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  transition: background .12s, color .12s;
+}
+.duckdb-search-chip:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.duckdb-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+.duckdb-pagination[data-pos="top"]    { border-bottom: 1px solid var(--border); }
+.duckdb-pagination[data-pos="bottom"] { border-top:    1px solid var(--border); }
+.duckdb-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.duckdb-pagination-jump {
+  width: 64px;
+  text-align: center;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.duckdb-pagination-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.duckdb-pagesize-select {
+  padding: 3px 8px;
+  font-size: 12px;
+  background: var(--surface-soft);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* The table itself — no internal scroll, the page handles it.
+ * Sticky header still uses the viewport, so headers stick to the
+ * page-header area as the user scrolls past the rows. */
+.duckdb-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+table.duckdb-table {
+  margin: 0;
+  width: 100%;
+  border-collapse: collapse;
+}
+table.duckdb-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--surface-sunk);
+  z-index: 1;
+}
+table.duckdb-table th {
+  padding: 6px 10px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.duckdb-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  vertical-align: top;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+table.duckdb-table tbody tr:hover td { background: var(--surface-sunk); }
+
 /* Inline code inside metric notes (rendered by the md filter).
  * Keeps backticked field names readable against the muted note text
  * and bumps line-height so wrapping looks airy. */
