@@ -23,6 +23,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -30,6 +31,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from ..auth import get_settings, maybe_require_auth
+from ..knowledge import duckdb_browser
 from ..knowledge import enrich as enrich_mod
 from ..knowledge import normalize, opensearch, qdrant, registry, stats, stores, wanted
 
@@ -337,8 +339,34 @@ def hub_collection(request: Request, name: str) -> HTMLResponse:
             "logo_url": _logo_for_host(host),
             "homepage": meta.get("homepage", ""),
             "description": meta.get("description", ""),
+            "browsable": duckdb_browser.is_browsable(name),
         },
     )
+
+
+@router.get(
+    "/api/hub/c/{name}/rows",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_collection_rows(
+    name: str,
+    page: int = 1,
+    size: int = duckdb_browser.DEFAULT_PAGE_SIZE,
+) -> dict[str, Any]:
+    """Paginated rows from the DuckDB table backing collection ``name``.
+
+    Returns ``{columns, rows, total, page, size, pages, ...}`` for the
+    UI to render a Rows tab on the collection landing page. Throws a
+    404 when the collection has no registered DuckDB backing (most
+    collections don't yet — this is an opt-in surface).
+    """
+    payload = duckdb_browser.list_rows(name, page=page, size=size)
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"collection {name!r} has no DuckDB backing registered",
+        )
+    return payload
 
 
 @router.get(

@@ -90,9 +90,113 @@
     </div>
   {% endif %}
 
+  {% if browsable %}
+  {# ── DuckDB row browser ───────────────────────────────────────────
+       Paginated view of the source-of-truth table that backs this
+       Qdrant collection. The mapping lives in
+       knowledge/duckdb_browser.py. Lazy-fetched on first render. #}
+  <div class="card" x-data='collectionRows({{ {"name": collection_name} | tojson }})' x-init="load(1)">
+    <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px;">
+      <div class="card-title">Rows · DuckDB</div>
+      <span class="card-meta" x-show="meta.table"
+            x-text="'table ' + meta.table + ' · ' + (meta.total||0).toLocaleString() + ' rows · ' + (meta.columns||[]).length + ' cols shown' + (meta.hidden && meta.hidden.length ? ' (' + meta.hidden.length + ' hidden)' : '')"></span>
+      <span class="card-meta ml-auto" x-show="meta.pages"
+            x-text="'page ' + meta.page + ' / ' + meta.pages"></span>
+    </div>
+
+    {# Pagination controls #}
+    <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 10px;">
+      <button class="btn btn-ghost btn-tiny" @click="load(1)"           :disabled="loading || (meta.page||1) <= 1">«</button>
+      <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) - 1)" :disabled="loading || (meta.page||1) <= 1">‹ prev</button>
+      <input type="number" min="1" :max="meta.pages || 1" x-model.number="jumpPage"
+             @keydown.enter="load(jumpPage)"
+             style="width: 70px; text-align: center; padding: 2px 6px;">
+      <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) + 1)" :disabled="loading || (meta.page||1) >= (meta.pages||1)">next ›</button>
+      <button class="btn btn-ghost btn-tiny" @click="load(meta.pages||1)" :disabled="loading || (meta.page||1) >= (meta.pages||1)">»</button>
+      <span class="card-meta" style="margin-left: 8px;">page size</span>
+      <select x-model.number="pageSize" @change="load(1)" style="padding: 2px 6px;">
+        <option :value="25">25</option>
+        <option :value="50">50</option>
+        <option :value="100">100</option>
+        <option :value="200">200</option>
+      </select>
+      <span class="card-meta" x-show="loading" style="margin-left: 8px;">loading…</span>
+      <span class="card-meta tone-bad" x-show="error" x-text="error" style="margin-left: 8px;"></span>
+    </div>
+
+    <div x-show="meta.columns && meta.columns.length" style="overflow: auto; max-height: 65vh; border: 1px solid var(--border); border-radius: 6px;">
+      <table class="data" style="margin: 0; width: 100%; border-collapse: collapse;">
+        <thead style="position: sticky; top: 0; background: var(--surface-sunk); z-index: 1;">
+          <tr>
+            <template x-for="col in meta.columns" :key="col">
+              <th style="padding: 6px 10px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap;"
+                  x-text="col"></th>
+            </template>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="(row, i) in rows" :key="i">
+            <tr>
+              <template x-for="col in meta.columns" :key="col">
+                <td style="padding: 4px 10px; border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 12px; vertical-align: top; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    :title="formatCell(row[col])"
+                    x-text="formatCell(row[col])"></td>
+              </template>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <p class="card-meta" x-show="!loading && rows.length === 0 && !error" style="margin-top: 8px;">
+      No rows on this page.
+    </p>
+  </div>
+  {% endif %}
+
   <div>
     <a class="btn btn-ghost" href="/hub">← Back to the hub home</a>
   </div>
 
 </div>
+
+<script>
+function collectionRows(init) {
+  return {
+    name: init.name,
+    rows: [],
+    meta: {},          // {columns, hidden, total, page, pages, size, table, db_path}
+    pageSize: 50,
+    jumpPage: 1,
+    loading: false,
+    error: '',
+    async load(p) {
+      const page = Math.max(1, Math.min(this.meta.pages || 1e9, parseInt(p || 1, 10) || 1));
+      this.loading = true;
+      this.error = '';
+      try {
+        const r = await fetch(`/api/hub/c/${encodeURIComponent(this.name)}/rows?page=${page}&size=${this.pageSize}`);
+        if (!r.ok) {
+          this.error = `HTTP ${r.status}`;
+          return;
+        }
+        const j = await r.json();
+        this.meta = j;
+        this.rows = j.rows || [];
+        this.jumpPage = j.page || 1;
+      } catch (e) {
+        this.error = e.message || 'request failed';
+      } finally {
+        this.loading = false;
+      }
+    },
+    formatCell(v) {
+      if (v === null || v === undefined) return '—';
+      if (typeof v === 'object') {
+        try { return JSON.stringify(v); } catch (_) { return String(v); }
+      }
+      return String(v);
+    },
+  };
+}
+</script>
 {% endblock %}
