@@ -6,9 +6,29 @@ Two responsibilities:
    ``open-pulse health``. Doesn't require credentials.
 2. **Graph upload** (``upload``) — pushes the crawler's JSON graph dict
    (``{"users": {...}, "orgs": {...}, "repos": {...}}``) into Neo4j as
-   ``User``/``Org``/``Repo`` nodes plus ``OWNS`` / ``CONTRIBUTES_TO`` /
-   ``MEMBER_OF`` / ``FORK_OF`` edges. Uses batched ``UNWIND`` queries so
-   the round-trip cost is constant per node-type rather than per node.
+   ``User`` / ``Org`` / ``Repo`` nodes plus edges:
+
+   * ``OWNS`` — User|Org → Repo (from ``authored_repositories`` /
+     ``forked_repositories``)
+   * ``MEMBER_OF`` — User → Org (from ``org.members``)
+   * ``CONTRIBUTES_TO`` — User → Repo (from ``repo.contributors``)
+   * ``FORK_OF`` — Repo → Repo (from ``repo.forked_from``)
+   * ``DEPENDS_ON`` — Repo → Repo (from ``repo.dependencies`` +
+     ``dependents``)
+   * ``FOLLOWS`` — User → User (from ``user.following``)
+   * ``STARRED`` — User → Repo (from ``user.starred_repositories``)
+   * ``WATCHES`` — User → Repo (from ``user.watched_repositories``)
+   * ``OPENED_ISSUE`` — User → Repo (from ``repo.issue_authors``,
+     opt-in via crawler's ``crawl_issues`` flag)
+   * ``OPENED_PR`` — User → Repo (from ``repo.pr_authors``, opt-in
+     via crawler's ``crawl_prs`` flag)
+   * ``COMMENTED_ON`` — User → Repo (from ``repo.commenters``,
+     covers both issue and PR conversation comments)
+   * ``REVIEWED_PR`` — User → Repo (from ``repo.pr_reviewers``,
+     formal PR review submitters)
+
+   Uses batched ``UNWIND`` queries so the round-trip cost is constant
+   per edge-type rather than per row.
 
 Auth is resolved at call time from the env var named in
 ``CrawlerServiceConfig.auth_env`` (default ``NEO4J_AUTH``), formatted as
@@ -84,6 +104,16 @@ class Neo4jService:
         contributor_edges = _contributor_edges(repos)
         fork_edges = _fork_edges(repos)
         dependency_edges = _dependency_edges(repos)
+        # Extra-edges crawler payload (PR #8 in the crawler repo). Each
+        # builder is a no-op when the underlying list is missing from
+        # the payload, so older crawler outputs still ingest cleanly.
+        follow_edges = _follow_edges(users)
+        starred_edges = _starred_edges(users)
+        watches_edges = _watches_edges(users)
+        opened_issue_edges = _opened_issue_edges(repos)
+        opened_pr_edges = _opened_pr_edges(repos)
+        commented_edges = _commented_edges(repos)
+        reviewed_pr_edges = _reviewed_pr_edges(repos)
 
         with self._get_driver().session() as session:
             session.execute_write(_merge_users, user_rows)
@@ -94,6 +124,13 @@ class Neo4jService:
             session.execute_write(_merge_contributor_edges, contributor_edges)
             session.execute_write(_merge_fork_edges, fork_edges)
             session.execute_write(_merge_dependency_edges, dependency_edges)
+            session.execute_write(_merge_follow_edges, follow_edges)
+            session.execute_write(_merge_starred_edges, starred_edges)
+            session.execute_write(_merge_watches_edges, watches_edges)
+            session.execute_write(_merge_opened_issue_edges, opened_issue_edges)
+            session.execute_write(_merge_opened_pr_edges, opened_pr_edges)
+            session.execute_write(_merge_commented_edges, commented_edges)
+            session.execute_write(_merge_reviewed_pr_edges, reviewed_pr_edges)
 
         counts = {
             "users": len(user_rows),
@@ -104,10 +141,19 @@ class Neo4jService:
             "contributor_edges": len(contributor_edges),
             "fork_edges": len(fork_edges),
             "dependency_edges": len(dependency_edges),
+            "follow_edges": len(follow_edges),
+            "starred_edges": len(starred_edges),
+            "watches_edges": len(watches_edges),
+            "opened_issue_edges": len(opened_issue_edges),
+            "opened_pr_edges": len(opened_pr_edges),
+            "commented_edges": len(commented_edges),
+            "reviewed_pr_edges": len(reviewed_pr_edges),
         }
         logger.info(
             "neo4j: merged users=%d orgs=%d repos=%d "
-            "(owner=%d member=%d contributor=%d fork=%d depends_on=%d)",
+            "(owner=%d member=%d contributor=%d fork=%d depends_on=%d "
+            "follow=%d starred=%d watches=%d "
+            "opened_issue=%d opened_pr=%d commented=%d reviewed_pr=%d)",
             counts["users"],
             counts["orgs"],
             counts["repos"],
@@ -116,6 +162,13 @@ class Neo4jService:
             counts["contributor_edges"],
             counts["fork_edges"],
             counts["dependency_edges"],
+            counts["follow_edges"],
+            counts["starred_edges"],
+            counts["watches_edges"],
+            counts["opened_issue_edges"],
+            counts["opened_pr_edges"],
+            counts["commented_edges"],
+            counts["reviewed_pr_edges"],
         )
         return counts
 
@@ -386,6 +439,211 @@ def _merge_dependency_edges(tx: Any, rows: list[dict[str, Any]]) -> None:
         MERGE (c:Repo {full_name: row.consumer})
         MERGE (p:Repo {full_name: row.package})
         MERGE (c)-[:DEPENDS_ON]->(p)
+        """,
+        rows=rows,
+    )
+
+
+# -- Extra edges from crawler PR-8 (followers / starred / watching /
+#    issue + PR participation). Each builder reads a single optional
+#    field on the per-entity payload, so missing keys (older crawler
+#    output) silently degrade to zero rows rather than failing.
+
+
+def _follow_edges(
+    users: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build (User)-[:FOLLOWS]->(User) edges.
+
+    Reads ``user.following`` only; ``user.followers`` is the inverse of
+    the same relation seen from the other side, so loading both would
+    double up the same edge with no extra information.
+    """
+    rows: list[dict[str, Any]] = []
+    for login, u in users.items():
+        for target in u.get("following") or []:
+            if not isinstance(target, str) or not target or target == login:
+                continue
+            rows.append({"follower": login, "followed": target})
+    return rows
+
+
+def _starred_edges(
+    users: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build (User)-[:STARRED]->(Repo) edges from ``user.starred_repositories``."""
+    rows: list[dict[str, Any]] = []
+    for login, u in users.items():
+        for repo in u.get("starred_repositories") or []:
+            if isinstance(repo, str) and repo:
+                rows.append({"user": login, "repo": repo})
+    return rows
+
+
+def _watches_edges(
+    users: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build (User)-[:WATCHES]->(Repo) edges from ``user.watched_repositories``."""
+    rows: list[dict[str, Any]] = []
+    for login, u in users.items():
+        for repo in u.get("watched_repositories") or []:
+            if isinstance(repo, str) and repo:
+                rows.append({"user": login, "repo": repo})
+    return rows
+
+
+def _opened_issue_edges(
+    repos: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build (User)-[:OPENED_ISSUE]->(Repo) edges from ``repo.issue_authors``."""
+    rows: list[dict[str, Any]] = []
+    for full_name, r in repos.items():
+        for author in r.get("issue_authors") or []:
+            if isinstance(author, str) and author:
+                rows.append({"user": author, "repo": full_name})
+    return rows
+
+
+def _opened_pr_edges(
+    repos: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build (User)-[:OPENED_PR]->(Repo) edges from ``repo.pr_authors``."""
+    rows: list[dict[str, Any]] = []
+    for full_name, r in repos.items():
+        for author in r.get("pr_authors") or []:
+            if isinstance(author, str) and author:
+                rows.append({"user": author, "repo": full_name})
+    return rows
+
+
+def _commented_edges(
+    repos: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build (User)-[:COMMENTED_ON]->(Repo) edges from ``repo.commenters``.
+
+    The crawler folds issue and PR conversation commenters into a
+    single list — both surfaces are fetched via the issues API and
+    they don't carry enough metadata to split into two relation
+    types here.
+    """
+    rows: list[dict[str, Any]] = []
+    for full_name, r in repos.items():
+        for user in r.get("commenters") or []:
+            if isinstance(user, str) and user:
+                rows.append({"user": user, "repo": full_name})
+    return rows
+
+
+def _reviewed_pr_edges(
+    repos: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build (User)-[:REVIEWED_PR]->(Repo) edges from ``repo.pr_reviewers``.
+
+    Distinct from COMMENTED_ON: a reviewer is a user who submitted a
+    formal PR review (approve / request changes / comment-review),
+    not just any commenter on the PR conversation.
+    """
+    rows: list[dict[str, Any]] = []
+    for full_name, r in repos.items():
+        for user in r.get("pr_reviewers") or []:
+            if isinstance(user, str) and user:
+                rows.append({"user": user, "repo": full_name})
+    return rows
+
+
+def _merge_follow_edges(tx: Any, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    tx.run(
+        """
+        UNWIND $rows AS row
+        MERGE (a:User {login: row.follower})
+        MERGE (b:User {login: row.followed})
+        MERGE (a)-[:FOLLOWS]->(b)
+        """,
+        rows=rows,
+    )
+
+
+def _merge_starred_edges(tx: Any, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    tx.run(
+        """
+        UNWIND $rows AS row
+        MERGE (u:User {login: row.user})
+        MERGE (r:Repo {full_name: row.repo})
+        MERGE (u)-[:STARRED]->(r)
+        """,
+        rows=rows,
+    )
+
+
+def _merge_watches_edges(tx: Any, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    tx.run(
+        """
+        UNWIND $rows AS row
+        MERGE (u:User {login: row.user})
+        MERGE (r:Repo {full_name: row.repo})
+        MERGE (u)-[:WATCHES]->(r)
+        """,
+        rows=rows,
+    )
+
+
+def _merge_opened_issue_edges(tx: Any, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    tx.run(
+        """
+        UNWIND $rows AS row
+        MERGE (u:User {login: row.user})
+        MERGE (r:Repo {full_name: row.repo})
+        MERGE (u)-[:OPENED_ISSUE]->(r)
+        """,
+        rows=rows,
+    )
+
+
+def _merge_opened_pr_edges(tx: Any, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    tx.run(
+        """
+        UNWIND $rows AS row
+        MERGE (u:User {login: row.user})
+        MERGE (r:Repo {full_name: row.repo})
+        MERGE (u)-[:OPENED_PR]->(r)
+        """,
+        rows=rows,
+    )
+
+
+def _merge_commented_edges(tx: Any, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    tx.run(
+        """
+        UNWIND $rows AS row
+        MERGE (u:User {login: row.user})
+        MERGE (r:Repo {full_name: row.repo})
+        MERGE (u)-[:COMMENTED_ON]->(r)
+        """,
+        rows=rows,
+    )
+
+
+def _merge_reviewed_pr_edges(tx: Any, rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    tx.run(
+        """
+        UNWIND $rows AS row
+        MERGE (u:User {login: row.user})
+        MERGE (r:Repo {full_name: row.repo})
+        MERGE (u)-[:REVIEWED_PR]->(r)
         """,
         rows=rows,
     )
