@@ -1,0 +1,1091 @@
+{% extends "base.html" %}
+{% block title %}Canvas · Open Pulse{% endblock %}
+{% block heading %}Canvas{% endblock %}
+{% block subheading %}
+  Free-form knowledge canvas. Press <span class="kbd">⌘/Ctrl+/</span> to search any hub entity and drop it as a node;
+  use Excalidraw's number-keyed toolbar (<span class="kbd">1</span>–<span class="kbd">9</span>) to select, draw, annotate, connect.
+{% endblock %}
+
+{% block content %}
+{# Excalidraw ships as a React component. We load React + ReactDOM +
+   @excalidraw/excalidraw straight from esm.sh — no build step. The
+   ?deps= pin keeps every dependency pointing at the same React copy,
+   without which Excalidraw refuses to render (two-React error). #}
+<link rel="stylesheet" href="https://esm.sh/@excalidraw/excalidraw@0.17.6/index.css">
+
+<div x-data="canvasPage()" x-init="init()" class="canvas-page">
+
+  {# Excalidraw mounts into this div. The wrapper takes the full
+     viewport minus the hub sidebar + topbar so the canvas feels truly
+     borderless — Excalidraw's own toolbar then renders inside it. #}
+  <div id="excalidraw-root" class="canvas-stage"></div>
+
+  {# Status pill in the bottom-left — shows how many entity nodes the
+     user has placed and the current Excalidraw loading state.
+     ``Cmd+K`` is taken by Excalidraw (Add link to selected element);
+     we use ``Cmd+/`` for the entity palette instead. #}
+  <div class="canvas-status">
+    <span x-show="!ready" x-cloak>loading canvas…</span>
+    <span x-show="ready" x-cloak>
+      <span class="kbd">⌘/</span>
+      <span x-text="placed === 0 ? '— search entities to start' : (placed + ' nodes placed')"></span>
+    </span>
+  </div>
+
+  {# Cmd+/ palette. Two modes:
+     - ``search``: typing hits /api/hub/autocomplete, click drops an
+       entity onto the canvas. Default when no canvas selection.
+     - ``expand``: triggered when exactly one ``op_entity`` node is
+       selected — lists its sibling/backlink groups with checkboxes;
+       applying places the chosen items as children connected back to
+       the parent with arrows. #}
+  <div class="cmdk-backdrop" x-show="cmdkOpen" x-cloak
+       @click.self="closeCmdk()"
+       @keydown.escape.window="closeCmdk()">
+    <div class="cmdk-panel" @click.stop>
+
+      {# ── Search mode ────────────────────────────── #}
+      <template x-if="mode === 'search'">
+        <div>
+          <input class="cmdk-input"
+                 x-ref="cmdkInput"
+                 x-model="cmdkQ"
+                 @input.debounce.180ms="cmdkSearch()"
+                 @keydown.enter.prevent="placeFirst()"
+                 @keydown.arrow-down.prevent="cmdkCursor = Math.min(cmdkCursor + 1, cmdkResults.length - 1)"
+                 @keydown.arrow-up.prevent="cmdkCursor = Math.max(cmdkCursor - 1, 0)"
+                 placeholder="Search any hub entity — repos, papers, people, orgs…"
+                 autocomplete="off" spellcheck="false">
+          <div class="cmdk-hint" x-show="!cmdkQ" x-cloak>
+            Start typing to search across <strong>github · zenodo · huggingface · openalex · infoscience · ror · orcid · …</strong>
+          </div>
+          <ul class="cmdk-list" x-show="cmdkResults.length" x-cloak>
+            <template x-for="(r, i) in cmdkResults" :key="r.hub_url">
+              <li :class="i === cmdkCursor ? 'is-active' : ''"
+                  @mouseenter="cmdkCursor = i"
+                  @click="placeEntity(r); closeCmdk()">
+                <span class="cmdk-kind" x-text="r.source_type || r.kind || 'entity'"></span>
+                <span class="cmdk-title" x-text="r.title"></span>
+                <span class="cmdk-badge" x-show="r.badge" x-text="r.badge"></span>
+              </li>
+            </template>
+          </ul>
+          <div class="cmdk-empty" x-show="cmdkQ && !cmdkResults.length && !cmdkBusy" x-cloak>
+            no matches.
+          </div>
+          <div class="cmdk-busy" x-show="cmdkBusy" x-cloak>searching…</div>
+          <div class="cmdk-footer">
+            <span><span class="kbd">↑↓</span> navigate</span>
+            <span><span class="kbd">↵</span> place</span>
+            <span><span class="kbd">esc</span> close</span>
+          </div>
+        </div>
+      </template>
+
+      {# ── Expand mode ────────────────────────────── #}
+      <template x-if="mode === 'expand'">
+        <div>
+          <div class="cmdk-expand-head">
+            <div class="cmdk-expand-title">
+              Expand <strong x-text="expandFor?.title || expandFor?.label || 'node'"></strong>
+              <span class="cmdk-kind" x-show="expandFor?.source_type" x-text="expandFor?.source_type" style="margin-left: 6px;"></span>
+            </div>
+            <button class="cmdk-mode-switch" @click="switchToSearch()" title="Search a new entity instead">
+              ← Search instead
+            </button>
+          </div>
+
+          {# Per-source progress chips — each backend lights up as
+             it resolves so the user can pick from fast sources
+             without waiting for slower ones (typically Qdrant). #}
+          <div class="cmdk-source-row" x-cloak>
+            <template x-for="s in sourceStatusList()" :key="s.id">
+              <span class="cmdk-source-chip"
+                    :data-kind="s.kind"
+                    :data-status="s.status"
+                    :title="s.id + ' — ' + s.status">
+                <span class="cmdk-source-name" x-text="s.id"></span>
+                <span class="cmdk-source-mark"
+                      x-text="s.status === 'loading' ? '…' :
+                              s.status === 'done'    ? '✓' :
+                              s.status === 'cached'  ? '⚡' :
+                              s.status === 'error'   ? '×' : '○'"></span>
+              </span>
+            </template>
+          </div>
+
+          <input class="cmdk-input"
+                 x-ref="expandFilter"
+                 x-model="expandQ"
+                 placeholder="Filter by label, group, badge…"
+                 autocomplete="off" spellcheck="false">
+
+          <div class="cmdk-expand-empty"
+               x-show="!expandLoading && !expandGroups.length" x-cloak>
+            no related entities found for this node.
+          </div>
+
+          <div class="cmdk-expand-body" x-show="expandGroups.length" x-cloak>
+            <template x-for="(g, gi) in expandFilteredGroups()" :key="g.title">
+              <div class="cmdk-expand-group">
+                <label class="cmdk-expand-grouphead">
+                  <input type="checkbox"
+                         :checked="g.items.length > 0 && g.items.every(it => it.checked)"
+                         @change="toggleGroupByTitle(g.title, $event.target.checked)">
+                  <span class="cmdk-expand-grouptitle" x-text="g.title"></span>
+                  <span class="cmdk-expand-groupkind" :data-kind="g.kind" x-text="g.kind"></span>
+                  <span class="cmdk-expand-groupcount" x-text="g.items.length + (expandQ ? ' shown' : ' items')"></span>
+                </label>
+                <ul class="cmdk-expand-items">
+                  <template x-for="(it, ii) in g.items" :key="(it.hub_url || '') + '|' + it.label">
+                    <li>
+                      <label>
+                        <input type="checkbox" x-model="it.checked">
+                        <span class="cmdk-title" x-text="it.label"></span>
+                        <span class="cmdk-badge" x-show="it.badge" x-text="it.badge"></span>
+                      </label>
+                    </li>
+                  </template>
+                </ul>
+              </div>
+            </template>
+            <p class="cmdk-expand-empty" x-show="expandQ && expandFilteredGroups().length === 0" x-cloak>
+              no items match "<span x-text="expandQ"></span>".
+            </p>
+          </div>
+
+          <div class="cmdk-footer cmdk-footer-actions" x-show="!expandLoading">
+            <span x-text="expandCheckedCount() + ' items selected'"></span>
+            <button class="cmdk-action"
+                    :disabled="!expandCheckedCount()"
+                    @click="applyExpand()">Add to canvas →</button>
+          </div>
+        </div>
+      </template>
+
+    </div>
+  </div>
+
+</div>
+
+<style>
+  /* The canvas page lives inside the regular content area so the hub
+   * sidebar stays in view. ``.canvas-page`` is the relative container
+   * and ``.canvas-stage`` fills it with the Excalidraw mount. */
+  .canvas-page {
+    position: relative;
+    width: 100%;
+    /* Calc keeps the canvas right under the page header without
+     * forcing scrolling. Tunable if the header height changes. */
+    height: calc(100vh - 160px);
+    min-height: 540px;
+    overflow: hidden;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .canvas-stage {
+    position: absolute;
+    inset: 0;
+    background: var(--surface-sunk, #0d1116);
+  }
+  /* Excalidraw injects its own dark/light styles; we leave them alone
+   * and just remove the white card behind it. */
+  .canvas-stage .excalidraw {
+    background: transparent;
+  }
+  /* Move ONLY the shape picker (the 1–9 tools) to the bottom of the
+   * stage. The rest of Excalidraw's top container — burger menu,
+   * Library button, and the property panel that appears on selection
+   * (stroke colour, fill, stroke width…) — stays anchored at the top
+   * so it never shoves the canvas around when a node is selected. */
+  .canvas-stage .excalidraw .shapes-section {
+    position: absolute !important;
+    bottom: 12px !important;
+    left: 50% !important;
+    transform: translateX(-50%);
+    top: auto !important;
+    z-index: 4;
+  }
+  /* The original spot the shape picker leaves behind sits empty;
+   * collapse the top container's gap so the burger + library aren't
+   * spread across the whole top with a wide blank middle. */
+  .canvas-stage .excalidraw .App-menu_top {
+    grid-template-columns: auto 0px auto !important;
+    gap: 0 !important;
+  }
+  /* Make sure no Excalidraw popover or container can push the page
+   * layout — they all live inside the absolutely-positioned stage
+   * so they overlay rather than reflow. */
+  .canvas-stage .excalidraw .FixedSideContainer,
+  .canvas-stage .excalidraw .layer-ui__wrapper,
+  .canvas-stage .excalidraw .Island {
+    pointer-events: auto;
+  }
+  .canvas-stage .excalidraw .layer-ui__wrapper {
+    position: absolute !important;
+    inset: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none;
+  }
+  .canvas-stage .excalidraw .layer-ui__wrapper > * {
+    pointer-events: auto;
+  }
+
+  /* Bottom-left status pill. */
+  .canvas-status {
+    position: absolute;
+    left: 14px;
+    bottom: 14px;
+    z-index: 50;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--surface, rgba(20, 26, 36, 0.85));
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 12px;
+    backdrop-filter: blur(6px);
+  }
+  .canvas-status .kbd {
+    background: var(--surface-sunk);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    margin-right: 6px;
+  }
+
+  /* Cmd+K modal — full-screen backdrop, panel centred. */
+  .cmdk-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 1000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 14vh;
+  }
+  .cmdk-panel {
+    width: 100%;
+    max-width: 640px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .cmdk-input {
+    border: 0;
+    background: transparent;
+    color: var(--fg);
+    font-size: 18px;
+    padding: 18px 22px;
+    outline: none;
+    width: 100%;
+    border-bottom: 1px solid var(--border);
+  }
+  .cmdk-input::placeholder { color: var(--fg-faint); }
+  .cmdk-hint {
+    padding: 14px 22px;
+    color: var(--fg-muted);
+    font-size: 13px;
+  }
+  .cmdk-list {
+    list-style: none;
+    margin: 0;
+    padding: 6px 0;
+    max-height: 56vh;
+    overflow-y: auto;
+  }
+  .cmdk-list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 18px;
+    cursor: pointer;
+    color: var(--fg);
+    font-size: 14px;
+  }
+  .cmdk-list li.is-active {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--fg);
+  }
+  .cmdk-kind {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-sunk);
+    color: var(--fg-muted);
+    flex-shrink: 0;
+  }
+  .cmdk-title {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 13px;
+  }
+  .cmdk-badge {
+    font-size: 11px;
+    color: var(--fg-muted);
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  .cmdk-empty, .cmdk-busy {
+    padding: 18px 22px;
+    color: var(--fg-muted);
+    font-style: italic;
+  }
+  .cmdk-footer {
+    display: flex;
+    gap: 14px;
+    padding: 10px 22px;
+    border-top: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 11px;
+  }
+  .cmdk-footer .kbd {
+    background: var(--surface-sunk);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 10px;
+    margin-right: 4px;
+  }
+
+  /* Expand-mode panel — checklist of relation groups to splat onto
+   * the canvas as children of the selected node. */
+  .cmdk-expand-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 22px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cmdk-expand-title {
+    font-size: 14px;
+    color: var(--fg);
+  }
+  .cmdk-mode-switch {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .cmdk-mode-switch:hover { color: var(--fg); border-color: var(--fg-muted); }
+  .cmdk-expand-empty {
+    padding: 18px 22px;
+    color: var(--fg-muted);
+    font-style: italic;
+  }
+
+  /* Per-source progress chips. Each backend gets a pill that mirrors
+   * its kind colour; the mark on the right reflects loading / done /
+   * cached / error so the user knows what's still in flight. */
+  .cmdk-source-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 12px 22px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cmdk-source-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--surface-sunk);
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+  /* Kind tint when the source has produced anything (done/cached). */
+  .cmdk-source-chip[data-status="done"][data-kind="people"],
+  .cmdk-source-chip[data-status="cached"][data-kind="people"]     { background: color-mix(in srgb, #a3be8c 22%, transparent); color: #a3be8c; border-color: #a3be8c44; }
+  .cmdk-source-chip[data-status="done"][data-kind="neo4j"],
+  .cmdk-source-chip[data-status="cached"][data-kind="neo4j"]      { background: color-mix(in srgb, #ebcb8b 22%, transparent); color: #ebcb8b; border-color: #ebcb8b44; }
+  .cmdk-source-chip[data-status="done"][data-kind="sparql"],
+  .cmdk-source-chip[data-status="cached"][data-kind="sparql"]     { background: color-mix(in srgb, #88c0d0 22%, transparent); color: #88c0d0; border-color: #88c0d044; }
+  .cmdk-source-chip[data-status="done"][data-kind="opensearch"],
+  .cmdk-source-chip[data-status="cached"][data-kind="opensearch"] { background: color-mix(in srgb, #d08770 22%, transparent); color: #d08770; border-color: #d0877044; }
+  .cmdk-source-chip[data-status="done"][data-kind="related"],
+  .cmdk-source-chip[data-status="cached"][data-kind="related"]    { background: color-mix(in srgb, #5294e2 22%, transparent); color: #5294e2; border-color: #5294e244; }
+  .cmdk-source-chip[data-status="done"][data-kind="backlink"],
+  .cmdk-source-chip[data-status="cached"][data-kind="backlink"]   { background: color-mix(in srgb, #b48ead 22%, transparent); color: #b48ead; border-color: #b48ead44; }
+  .cmdk-source-chip[data-status="loading"] {
+    color: var(--fg);
+    border-color: var(--accent);
+  }
+  .cmdk-source-chip[data-status="error"] {
+    color: var(--tone-bad, #bf616a);
+    border-color: var(--tone-bad, #bf616a);
+    opacity: 0.7;
+  }
+  .cmdk-source-mark {
+    font-weight: 700;
+    font-size: 11px;
+  }
+  /* Subtle pulse on the loading mark. */
+  .cmdk-source-chip[data-status="loading"] .cmdk-source-mark {
+    animation: op-cmdk-pulse 1s ease-in-out infinite;
+  }
+  @keyframes op-cmdk-pulse {
+    0%, 100% { opacity: 0.4; }
+    50%      { opacity: 1; }
+  }
+  .cmdk-expand-body {
+    max-height: 52vh;
+    overflow-y: auto;
+    padding: 8px 6px;
+  }
+  .cmdk-expand-group {
+    padding: 6px 14px;
+    border-bottom: 1px dashed color-mix(in srgb, var(--border) 55%, transparent);
+  }
+  .cmdk-expand-group:last-child { border-bottom: 0; }
+  .cmdk-expand-grouphead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    cursor: pointer;
+    color: var(--fg);
+    font-size: 13px;
+  }
+  .cmdk-expand-grouphead input { accent-color: var(--accent); }
+  .cmdk-expand-grouptitle { font-weight: 600; }
+  /* Group-kind pill that mirrors the per-kind palette used on the
+   * canvas (people=green, related=blue, backlink=purple). Lets the
+   * user predict where each group will land before applying. */
+  .cmdk-expand-groupkind {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--surface-sunk);
+    color: var(--fg-muted);
+    font-weight: 500;
+  }
+  .cmdk-expand-groupkind[data-kind="people"]     { background: color-mix(in srgb, #a3be8c 22%, transparent); color: #a3be8c; }
+  .cmdk-expand-groupkind[data-kind="related"]    { background: color-mix(in srgb, #5294e2 22%, transparent); color: #5294e2; }
+  .cmdk-expand-groupkind[data-kind="backlink"]   { background: color-mix(in srgb, #b48ead 22%, transparent); color: #b48ead; }
+  .cmdk-expand-groupkind[data-kind="neo4j"]      { background: color-mix(in srgb, #ebcb8b 22%, transparent); color: #ebcb8b; }
+  .cmdk-expand-groupkind[data-kind="sparql"]     { background: color-mix(in srgb, #88c0d0 22%, transparent); color: #88c0d0; }
+  .cmdk-expand-groupkind[data-kind="opensearch"] { background: color-mix(in srgb, #d08770 22%, transparent); color: #d08770; }
+  .cmdk-expand-groupcount {
+    color: var(--fg-muted);
+    font-size: 11px;
+    margin-left: auto;
+  }
+  .cmdk-expand-items {
+    list-style: none;
+    margin: 0;
+    padding: 4px 0 8px 22px;
+  }
+  .cmdk-expand-items li label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--fg);
+    font-size: 12px;
+  }
+  .cmdk-expand-items li label:hover { background: var(--surface-sunk); }
+  .cmdk-expand-items label input { accent-color: var(--accent); }
+  .cmdk-footer-actions {
+    justify-content: space-between !important;
+    padding: 10px 22px !important;
+    border-top: 1px solid var(--border);
+  }
+  .cmdk-action {
+    background: var(--accent);
+    color: var(--fg);
+    border: 0;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .cmdk-action:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+</style>
+
+<script type="module">
+  // ESM imports from esm.sh — no bundler. The ``?deps=react,react-dom``
+  // pin makes sure Excalidraw and our mounter use exactly one copy of
+  // React (Excalidraw asserts on this; mismatch → "Invalid hook call").
+  const REACT_VER = '18.2.0';
+  const EX_VER    = '0.17.6';
+  const [ReactNS, ReactDOM, Excal] = await Promise.all([
+    import(`https://esm.sh/react@${REACT_VER}`),
+    import(`https://esm.sh/react-dom@${REACT_VER}/client`),
+    import(`https://esm.sh/@excalidraw/excalidraw@${EX_VER}?deps=react@${REACT_VER},react-dom@${REACT_VER}`),
+  ]);
+  // esm.sh re-exports CommonJS packages under ``.default``. React works
+  // either way thanks to its own ESM build; Excalidraw lives entirely
+  // inside the default export.
+  const React = ReactNS.default || ReactNS;
+  const { Excalidraw, convertToExcalidrawElements } = Excal.default || Excal;
+
+  // Captured on first mount — Alpine reaches in via ``window.canvasAPI``.
+  let api = null;
+  let placedCount = 0;
+
+  function pickTheme() {
+    return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  }
+
+  function App() {
+    return React.createElement(Excalidraw, {
+      excalidrawAPI: (a) => { api = a; window.canvasAPI = a; signalReady(); },
+      theme: pickTheme(),
+      // UI tweaks — keep the Excalidraw toolbar visible but drop the
+      // welcome screen so the canvas looks like a real working surface.
+      UIOptions: {
+        canvasActions: { saveToActiveFile: false, loadScene: false },
+      },
+    });
+  }
+
+  ReactDOM.createRoot(document.getElementById('excalidraw-root'))
+          .render(React.createElement(App));
+
+  // Once the React tree mounts, broadcast a custom event so the
+  // Alpine wrapper can flip its ``ready`` flag reactively. Direct
+  // mutation of Alpine's internal stack bypasses reactivity and the
+  // status pill never updates.
+  function signalReady() {
+    window.dispatchEvent(new CustomEvent('canvas-ready'));
+  }
+
+  // Track theme switches so Excalidraw repaints. The hub toggles
+  // ``data-theme`` on the documentElement.
+  new MutationObserver(() => {
+    if (!api) return;
+    api.updateScene({ appState: { theme: pickTheme() } });
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  // ── Public bridge from Alpine ─────────────────────────────────
+  // ``window.canvasPlaceEntity(entity)`` drops a single entity onto the
+  // canvas as a labelled rectangle, near the current viewport centre.
+  // Fire a custom event after each placement so Alpine can bump its
+  // ``placed`` counter through the reactive path (avoid mutating
+  // Alpine internals directly).
+  function signalPlaced(n) {
+    window.dispatchEvent(new CustomEvent('canvas-placed', { detail: { n } }));
+  }
+
+  // Card geometry — one source of truth so single-place and expand
+  // placement produce identical-looking cards. A bit wider + taller
+  // than v1 so a 3rd metadata line (badge) fits comfortably.
+  const CARD_W = 320;
+  const CARD_H = 96;
+
+  // Build the elements of one entity card. Only the rectangle carries
+  // ``link`` + ``customData.op_entity``; the text lines ride along in
+  // the same group so clicking selects the whole card (Excalidraw
+  // selects an entire group on first click). Centralising here keeps
+  // search-mode and expand-mode visually identical.
+  function _buildEntityCard(entity, x, y, style) {
+    style = style || KIND_STYLE.default;
+    const groupId = 'op-' + Math.random().toString(36).slice(2, 10);
+    const link = entity.hub_url || entity.external_url || null;
+    const customData = {
+      op_entity: {
+        hub_url: entity.hub_url,
+        external_url: entity.external_url,
+        kind: entity.kind,
+        source_type: entity.source_type,
+        label: entity.title || entity.label || '',
+        badge: entity.badge || '',
+      },
+    };
+    const cleft = x - CARD_W / 2;
+    const ctop  = y - CARD_H / 2;
+    const kindLabel = (entity.source_type || entity.kind || 'entity').toUpperCase();
+    const title = entity.title || entity.label || entity.hub_url || 'untitled';
+    const badge = entity.badge || '';
+
+    const specs = [
+      // Rectangle — the only element that holds the link + entity
+      // data, so the user sees a single ↗ on the card instead of one
+      // per sub-element.
+      {
+        type: 'rectangle',
+        x: cleft, y: ctop, width: CARD_W, height: CARD_H,
+        strokeColor: style.stroke,
+        backgroundColor: style.background,
+        fillStyle: 'solid',
+        strokeWidth: 1.2,
+        roughness: 0.5,
+        roundness: { type: 3 },
+        groupIds: [groupId],
+        link,
+        customData,
+      },
+      // KIND label — small, uppercase, kind-coloured.
+      {
+        type: 'text',
+        x: cleft + 14, y: ctop + 12,
+        text: kindLabel,
+        fontSize: 11,
+        fontFamily: 3,
+        strokeColor: style.stroke,
+        groupIds: [groupId],
+      },
+      // Title — primary text, mono.
+      {
+        type: 'text',
+        x: cleft + 14, y: ctop + 32,
+        text: title,
+        fontSize: 16,
+        fontFamily: 3,
+        groupIds: [groupId],
+      },
+    ];
+    // Badge — third line only when the source actually supplies one.
+    if (badge) {
+      specs.push({
+        type: 'text',
+        x: cleft + 14, y: ctop + 64,
+        text: badge,
+        fontSize: 12,
+        fontFamily: 3,
+        strokeColor: style.stroke + 'cc',  // faded kind colour
+        groupIds: [groupId],
+      });
+    }
+    const els = convertToExcalidrawElements(specs);
+    return { els, groupId, rectId: els[0].id };
+  }
+
+  window.canvasPlaceEntity = (entity) => {
+    if (!api) return;
+    const state = api.getAppState();
+    const cx = state.scrollX + state.width  / state.zoom.value / 2;
+    const cy = state.scrollY + state.height / state.zoom.value / 2;
+    // Spread placements so they don't stack exactly on top of each
+    // other when the user opens Cmd+/ several times in a row.
+    const jitter = () => (Math.random() - 0.5) * 220;
+    const { els } = _buildEntityCard(
+      entity, cx + jitter(), cy + jitter(), KIND_STYLE.related
+    );
+    api.updateScene({ elements: [...api.getSceneElements(), ...els] });
+    placedCount += 1;
+    signalPlaced(placedCount);
+  };
+
+  // Per-kind visual palette + side-of-parent layout. Different
+  // relation kinds get different stroke / background tints so the
+  // user can scan the canvas and tell people from siblings at a
+  // glance. Sides also differ — people fly above, related to the
+  // right, backlinks to the left — so they don't pile on top of
+  // each other when the user expands multiple kinds at once.
+  const KIND_STYLE = {
+    people:     { stroke: '#a3be8c', background: '#a3be8c14', side: 'top'    },  // green   ↑ people
+    neo4j:      { stroke: '#ebcb8b', background: '#ebcb8b14', side: 'top'    },  // yellow  ↑ graph
+    sparql:     { stroke: '#88c0d0', background: '#88c0d014', side: 'bottom' },  // cyan    ↓ triples
+    opensearch: { stroke: '#d08770', background: '#d0877014', side: 'bottom' },  // orange  ↓ commits
+    related:    { stroke: '#5294e2', background: '#5294e210', side: 'right'  },  // blue    → siblings
+    backlink:   { stroke: '#b48ead', background: '#b48ead14', side: 'left'   },  // purple  ← references
+    default:    { stroke: '#5294e2', background: '#5294e210', side: 'right'  },
+  };
+
+  // Returns the centre-point of a parent rectangle's outgoing edge
+  // for the requested side, plus the unit vector along which children
+  // should be laid out.
+  function _anchor(parent, side) {
+    const cx = parent.x + parent.width / 2;
+    const cy = parent.y + parent.height / 2;
+    if (side === 'top')    return { ax: cx, ay: parent.y,                axisX: 1,  axisY: 0,  dirX:  0, dirY: -1 };
+    if (side === 'bottom') return { ax: cx, ay: parent.y + parent.height, axisX: 1,  axisY: 0,  dirX:  0, dirY:  1 };
+    if (side === 'left')   return { ax: parent.x,               ay: cy,   axisX: 0,  axisY: 1,  dirX: -1, dirY:  0 };
+    // right (default)
+    return { ax: parent.x + parent.width, ay: cy,                         axisX: 0,  axisY: 1,  dirX:  1, dirY:  0 };
+  }
+
+  // ── Expand: place N related entities as children of a parent node.
+  // Children are grouped by relation kind (people / related / backlink),
+  // each kind extending from a different side of the parent. The
+  // connecting arrow carries a bound text label naming the relation,
+  // and the child card uses a kind-specific colour so the graph self-
+  // documents at a glance.
+  window.canvasExpandFrom = (parent, picks) => {
+    if (!api || !parent || !picks?.length) return;
+    const parentRect = parent._rect || api.getSceneElements().find(el => el.id === parent.id);
+    if (!parentRect) return;
+
+    // Bucket by groupKind|groupTitle so each (kind, group) lays out
+    // its own row spanning from the parent. ``Authors`` stays
+    // separate from ``Contributors`` even though both are kind="people".
+    const buckets = new Map();
+    for (const p of picks) {
+      const key = (p.groupKind || 'default') + '|' + (p.groupTitle || '');
+      if (!buckets.has(key)) buckets.set(key, { kind: p.groupKind || 'default', label: p.groupTitle || '', items: [] });
+      buckets.get(key).items.push(p.entity);
+    }
+
+    const fresh = [];
+    // Track index per side so multiple groups on the same side stagger.
+    const sideIdx = { right: 0, left: 0, top: 0, bottom: 0 };
+    // Collect arrow IDs to attach to the parent's ``boundElements``
+    // array (Excalidraw's reciprocal binding — without it the arrow
+    // start does NOT track parent movement, which is exactly what
+    // the user just reported).
+    const parentArrowIds = [];
+
+    for (const bucket of buckets.values()) {
+      const style = KIND_STYLE[bucket.kind] || KIND_STYLE.default;
+      const a = _anchor(parentRect, style.side);
+      const distance = 260 + sideIdx[style.side] * 200;       // each successive group on this side pushes further out
+      sideIdx[style.side] += 1;
+      const rowGap = 110;
+      const n = bucket.items.length;
+      // Group origin: a point ``distance`` away along the side's
+      // outward direction; siblings spread perpendicular to that.
+      const ox = a.ax + a.dirX * distance;
+      const oy = a.ay + a.dirY * distance;
+
+      bucket.items.forEach((entity, i) => {
+        const off = i - (n - 1) / 2;
+        const cx = ox + a.axisX * off * rowGap;
+        const cy = oy + a.axisY * off * rowGap;
+
+        // Build the child card via the shared helper so it matches
+        // the single-place style (rounded corners, 3-line layout
+        // with kind / title / badge, link only on rect).
+        const card = _buildEntityCard(entity, cx, cy, style);
+        const childRectId = card.rectId;
+
+        // Arrow skeleton + raw bindings (see canvasPlaceEntity comment).
+        const ax2 = cx;                              // child centre x
+        const ay2 = cy;                              // child centre y
+        const arrow = convertToExcalidrawElements([{
+          type: 'arrow',
+          x: a.ax, y: a.ay,
+          points: [[0, 0], [ax2 - a.ax, ay2 - a.ay]],
+          strokeColor: style.stroke,
+          strokeWidth: 1.2,
+          roughness: 0.5,
+          label: { text: bucket.label || bucket.kind, fontSize: 11 },
+        }]);
+        const arrowId = arrow[0].id;
+        arrow[0] = {
+          ...arrow[0],
+          startBinding: { elementId: parentRect.id, focus: 0, gap: 6 },
+          endBinding:   { elementId: childRectId,   focus: 0, gap: 6 },
+        };
+
+        // Reciprocal binding on the child rect (the parent's update
+        // happens once after the loop, via patchedExisting below).
+        card.els[0] = {
+          ...card.els[0],
+          boundElements: [
+            ...(card.els[0].boundElements || []),
+            { id: arrowId, type: 'arrow' },
+          ],
+        };
+        parentArrowIds.push(arrowId);
+
+        fresh.push(...card.els, ...arrow);
+      });
+    }
+
+    // Patch the existing parent rectangle to carry the new arrow IDs
+    // in its ``boundElements``. Without this side of the binding,
+    // moving the parent leaves the arrow start floating where it
+    // was. Other existing scene elements pass through unchanged.
+    const patchedExisting = api.getSceneElements().map(el => {
+      if (el.id !== parentRect.id) return el;
+      return {
+        ...el,
+        boundElements: [
+          ...(el.boundElements || []),
+          ...parentArrowIds.map(id => ({ id, type: 'arrow' })),
+        ],
+      };
+    });
+
+    api.updateScene({ elements: [...patchedExisting, ...fresh] });
+    placedCount += picks.length;
+    signalPlaced(placedCount);
+  };
+</script>
+
+<script>
+function canvasPage() {
+  return {
+    ready: false,
+    placed: 0,
+    cmdkOpen: false,
+    mode: 'search',            // 'search' | 'expand'
+    cmdkQ: '',
+    cmdkBusy: false,
+    cmdkCursor: 0,
+    cmdkResults: [],
+    _cmdkSeq: 0,
+    // expand state
+    expandFor: null,           // { id, title, source_type, hub_url, ... }
+    expandGroups: [],          // [{ title, kind, items: [{ ..., checked }] }]
+    expandLoading: false,      // true while ANY source still pending
+    expandQ: '',
+    // Per-source fetch state — pill chips beside the filter input.
+    // States: 'pending' (not started) | 'loading' | 'done' | 'cached' | 'error'.
+    sourceStatus: {},
+    // Browser-tab cache for already-fetched (ref, source) pairs so that
+    // re-opening the same node within ~5 min returns instantly. Mirrors
+    // the server-side ``cached_panel`` TTL.
+    _expandCache: {},
+    _CACHE_TTL_MS: 5 * 60 * 1000,
+
+    init() {
+      // ⌘// / Ctrl+/ opens the palette. ``Cmd+K`` is already bound by
+      // Excalidraw (Add link to selected element) so we use a free
+      // slash combo — also natural as a "search/command" cue.
+      // When a single op_entity node is selected on the canvas the
+      // same shortcut opens the palette in expand mode instead.
+      window.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+          e.preventDefault();
+          this.openCmdk();
+        }
+      });
+      window.addEventListener('canvas-ready',  () => { this.ready = true; });
+      window.addEventListener('canvas-placed', (e) => { this.placed = e.detail?.n || 0; });
+    },
+
+    // Detects whether exactly one ``op_entity`` node is selected and,
+    // if so, returns its identifying metadata. Used to decide whether
+    // ⌘/ opens search mode (no selection) or expand mode (selection).
+    _selectedEntity() {
+      // Find the op_entity rectangle linked to the current selection.
+      // Only the rectangle carries customData.op_entity (text pieces
+      // no longer duplicate it — keeps the card to one ↗ link), so
+      // when the user clicks a text piece we still resolve it via
+      // the shared groupId.
+      const api = window.canvasAPI;
+      if (!api) return null;
+      const ids = api.getAppState().selectedElementIds || {};
+      const allEls = api.getSceneElements();
+      const sel = allEls.filter(el => ids[el.id] && !el.isDeleted);
+      if (!sel.length) return null;
+      // Collect every groupId the selection touches.
+      const groups = new Set();
+      for (const el of sel) for (const g of (el.groupIds || [])) groups.add(g);
+      // Locate the op_entity rectangle (either selected directly, or
+      // sharing a groupId with anything that IS selected).
+      for (const el of allEls) {
+        if (el.type !== 'rectangle' || !el.customData?.op_entity) continue;
+        if (ids[el.id] || (el.groupIds || []).some(g => groups.has(g))) {
+          return { id: el.id, ...el.customData.op_entity, _rect: el };
+        }
+      }
+      return null;
+    },
+
+    openCmdk() {
+      const entity = this._selectedEntity();
+      if (entity) {
+        this._openExpand(entity);
+      } else {
+        this._openSearch();
+      }
+    },
+    _openSearch() {
+      this.mode = 'search';
+      this.cmdkOpen = true;
+      this.cmdkQ = '';
+      this.cmdkResults = [];
+      this.cmdkCursor = 0;
+      this.$nextTick(() => this.$refs.cmdkInput?.focus());
+    },
+    _openExpand(entity) {
+      this.mode = 'expand';
+      this.cmdkOpen = true;
+      this.expandFor = entity;
+      this.expandGroups = [];
+      this.expandQ = '';
+      this.loadExpand(entity);
+      this.$nextTick(() => this.$refs.expandFilter?.focus());
+    },
+    switchToSearch() {
+      this._openSearch();
+    },
+    closeCmdk() {
+      this.cmdkOpen = false;
+      this.cmdkQ = '';
+      this.cmdkResults = [];
+      this.expandGroups = [];
+      this.expandFor = null;
+      this.expandQ = '';
+    },
+
+    // ── Expand mode ──────────────────────────────────────────────
+    // Fetch each backend in parallel and stream their groups into the
+    // modal as soon as each one resolves — the user can start picking
+    // (typically people / neo4j arrive first) without waiting for the
+    // slowest source (usually Qdrant backlinks across collections).
+    // A short browser-tab cache mirrors the server's ``cached_panel``
+    // TTL so re-opening the same node is instant within the session.
+    SOURCES: [
+      // path is the endpoint segment under /api/hub/expand/
+      // kind is the colour bucket reused by the canvas palette.
+      { id: 'people',     path: 'people',     kind: 'people'     },
+      { id: 'neo4j',      path: 'neo4j',      kind: 'neo4j'      },
+      { id: 'sparql',     path: 'sparql',     kind: 'sparql'     },
+      { id: 'opensearch', path: 'opensearch', kind: 'opensearch' },
+      { id: 'related',    path: 'related',    kind: 'related'    },
+      { id: 'backlinks',  path: 'backlinks',  kind: 'backlink'   },
+    ],
+    loadExpand(entity) {
+      const ref = (entity.hub_url || '').replace(/^\/hub\//, '');
+      if (!ref) return;
+      this.expandGroups = [];
+      this.sourceStatus = {};
+      for (const s of this.SOURCES) this.sourceStatus[s.id] = 'pending';
+      this.expandLoading = true;
+
+      // Fire all sources concurrently. Each one settles independently;
+      // ``Promise.allSettled`` lets us flip ``expandLoading`` off once
+      // every source is done (success, cache, or error).
+      const promises = this.SOURCES.map(src => this._fetchSource(ref, src));
+      Promise.allSettled(promises).then(() => { this.expandLoading = false; });
+    },
+    async _fetchSource(ref, src) {
+      const cacheKey = src.id + '|' + ref;
+      const hit = this._expandCache[cacheKey];
+      if (hit && (Date.now() - hit.ts) < this._CACHE_TTL_MS) {
+        this._appendGroups(hit.groups, src.kind);
+        this.sourceStatus[src.id] = 'cached';
+        return;
+      }
+      this.sourceStatus[src.id] = 'loading';
+      try {
+        const r = await fetch(
+          `/api/hub/expand/${src.path}?ref=${encodeURIComponent(ref)}`
+        );
+        if (!r.ok) { this.sourceStatus[src.id] = 'error'; return; }
+        const j = await r.json();
+        const groups = j.groups || [];
+        this._appendGroups(groups, src.kind);
+        this._expandCache[cacheKey] = { ts: Date.now(), groups };
+        this.sourceStatus[src.id] = 'done';
+      } catch (_) {
+        this.sourceStatus[src.id] = 'error';
+      }
+    },
+    _appendGroups(groups, kind) {
+      // Append each new group with a ``checked`` flag per item so
+      // x-model picks them up. Done as one push of multiple entries
+      // (Alpine reactivity will fire once per push).
+      const fresh = (groups || []).map(g => ({
+        title: g.title,
+        kind,
+        items: (g.items || []).map(it => ({ ...it, checked: false })),
+      }));
+      if (fresh.length) this.expandGroups.push(...fresh);
+    },
+    // Visible status chips ordered by source priority. Returned as an
+    // array so x-for is stable; sourceStatus is a sparse map.
+    sourceStatusList() {
+      return this.SOURCES.map(s => ({
+        id: s.id,
+        kind: s.kind,
+        status: this.sourceStatus[s.id] || 'pending',
+      }));
+    },
+    // Title-based toggle so it still works on filtered view (where
+    // the visible group index doesn't match expandGroups indexing).
+    toggleGroupByTitle(title, on) {
+      const g = this.expandGroups.find(gg => gg.title === title);
+      if (!g) return;
+      g.items.forEach(it => { it.checked = !!on; });
+    },
+    expandCheckedCount() {
+      let n = 0;
+      for (const g of this.expandGroups) for (const it of g.items) if (it.checked) n += 1;
+      return n;
+    },
+    // Clientside filter: matches against group title, item label, badge.
+    // Returns groups with the matching items only; empty groups dropped.
+    expandFilteredGroups() {
+      const q = (this.expandQ || '').toLowerCase().trim();
+      if (!q) return this.expandGroups;
+      const out = [];
+      for (const g of this.expandGroups) {
+        const groupHit = g.title.toLowerCase().includes(q);
+        const items = groupHit
+          ? g.items
+          : g.items.filter(it =>
+              (it.label || '').toLowerCase().includes(q) ||
+              (it.badge || '').toLowerCase().includes(q) ||
+              (it.source_type || '').toLowerCase().includes(q)
+            );
+        if (items.length) out.push({ ...g, items });
+      }
+      return out;
+    },
+    applyExpand() {
+      const parent = this.expandFor;
+      if (!parent || !window.canvasExpandFrom) { this.closeCmdk(); return; }
+      // Flatten checked items, keeping group title + kind so the
+      // placement function can label edges and pick a layout side.
+      const picks = [];
+      for (const g of this.expandGroups) {
+        for (const it of g.items) {
+          if (it.checked) picks.push({ entity: it, groupTitle: g.title, groupKind: g.kind });
+        }
+      }
+      window.canvasExpandFrom(parent, picks);
+      this.closeCmdk();
+    },
+    async cmdkSearch() {
+      const q = this.cmdkQ.trim();
+      if (q.length < 2) { this.cmdkResults = []; return; }
+      const seq = ++this._cmdkSeq;
+      this.cmdkBusy = true;
+      try {
+        const r = await fetch(`/api/hub/autocomplete?q=${encodeURIComponent(q)}&limit=20`);
+        if (!r.ok) { this.cmdkResults = []; return; }
+        const j = await r.json();
+        if (seq !== this._cmdkSeq) return;       // a newer query already fired
+        this.cmdkResults = j.suggestions || [];
+        this.cmdkCursor = 0;
+      } catch (_) {
+        this.cmdkResults = [];
+      } finally {
+        if (seq === this._cmdkSeq) this.cmdkBusy = false;
+      }
+    },
+    placeFirst() {
+      const r = this.cmdkResults[this.cmdkCursor] || this.cmdkResults[0];
+      if (r) this.placeEntity(r);
+      this.closeCmdk();
+    },
+    placeEntity(entity) {
+      if (window.canvasPlaceEntity) window.canvasPlaceEntity(entity);
+    },
+  };
+}
+</script>
+{% endblock %}
