@@ -58,12 +58,16 @@ def test_check_health_returns_false_on_connection_error() -> None:
 # -- submit_crawl -------------------------------------------------------------
 
 
-def test_submit_crawl_returns_job_id(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_submit_crawl_returns_job_id_defaults_to_graphql(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("TEST_TOKEN", "secret-value")
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
-        assert request.url.path == "/api/v1/crawl"
+        # GraphQL is the project-default endpoint; submit_crawl() must
+        # hit /api/v1/crawl/graphql unless the caller opts out.
+        assert request.url.path == "/api/v1/crawl/graphql"
         assert request.headers["Authorization"] == "Bearer secret-value"
         body = json.loads(request.content)
         assert body["seeds"] == ["sdsc-ordes/open-pulse"]
@@ -72,6 +76,22 @@ def test_submit_crawl_returns_job_id(monkeypatch: pytest.MonkeyPatch) -> None:
     svc = _service(httpx.MockTransport(handler))
     job_id = svc.submit_crawl({"seeds": ["sdsc-ordes/open-pulse"], "max_rounds": 1})
     assert job_id == "abc-123"
+
+
+def test_submit_crawl_use_graphql_false_routes_to_rest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_TOKEN", "secret-value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        # Opt-out path: legacy REST endpoint.
+        assert request.url.path == "/api/v1/crawl"
+        return httpx.Response(202, json={"job_id": "rest-1", "status": "pending"})
+
+    svc = _service(httpx.MockTransport(handler))
+    job_id = svc.submit_crawl({"seeds": ["x"]}, use_graphql=False)
+    assert job_id == "rest-1"
 
 
 def test_submit_crawl_raises_when_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
