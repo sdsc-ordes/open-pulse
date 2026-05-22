@@ -46,48 +46,165 @@
     </p>
   </div>
 
-  {% if not samples %}
-    <div class="card tone-warn">
-      <div class="card-title">No sample entries available</div>
-      <p style="margin: 6px 0 0;">
-        The collection is reachable but no point payloads exposed a public
-        URL we could resolve. The entries are still searchable in the
-        Databases console.
+  {# When the collection has a DuckDB backing (browsable=true), the
+     stats card + Rows table below replace the static Entry-points
+     sample. Otherwise fall back to the old sample list. #}
+  {% if not browsable %}
+    {% if not samples %}
+      <div class="card tone-warn">
+        <div class="card-title">No sample entries available</div>
+        <p style="margin: 6px 0 0;">
+          The collection is reachable but no point payloads exposed a public
+          URL we could resolve. The entries are still searchable in the
+          Databases console.
+        </p>
+      </div>
+    {% else %}
+      <div class="card">
+        <div class="card-title">Entry points</div>
+        <div class="card-meta" style="margin: 4px 0 12px;">
+          A sample of {{ samples|length }} entries from the collection. Click any
+          to land on its hub page.
+        </div>
+        <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px;">
+          {% for s in samples %}
+            <li>
+              <span class="hub-hover" data-preview-ref="{{ s.hub_url[5:] }}">
+                {% if source_type %}
+                  <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ source_type }}</span>
+                {% endif %}
+                <a href="{{ s.hub_url }}" class="mono" style="word-break: break-all;">{{ s.title }}</a>
+                {% if s.external_url %}
+                  <a href="{{ s.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>
+                {% endif %}
+                {% if s.badge %}
+                  <span class="card-meta" style="font-size: 11px;">· {{ s.badge }}</span>
+                {% endif %}
+                <span class="hub-preview" aria-hidden="true">
+                  <p class="hub-preview-title">{{ s.title }}</p>
+                  {% if source_type %}<div class="hub-preview-meta">{{ source_type }} · {{ collection_name }}</div>{% endif %}
+                  <div class="hub-preview-description"></div>
+                  {% if s.badge %}<div class="hub-preview-badge">{{ s.badge }}</div>{% endif %}
+                  <div class="hub-preview-hint">Click to open the hub page →</div>
+                </span>
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if browsable %}
+  {# ── DuckDB row browser ───────────────────────────────────────────
+       Top stats + search bar + paginated table backed by the
+       source-of-truth DuckDB. Mapping lives in
+       knowledge/duckdb_browser.py. Lazy-fetched on first render. #}
+  <div x-data='collectionRows({{ {"name": collection_name} | tojson }})' x-init="loadStats(); load(1)" style="display: flex; flex-direction: column; gap: 14px;">
+
+    {# ── 4 headline stats — only renders when stats arrive ─── #}
+    <div class="card" x-show="stats.length" x-cloak>
+      <div class="card-title" style="margin-bottom: 10px;">At a glance</div>
+      <div class="duckdb-stats">
+        <template x-for="s in stats" :key="s.label">
+          <div class="duckdb-stat-tile">
+            <div class="duckdb-stat-label" x-text="s.label"></div>
+            <div class="duckdb-stat-value mono" x-text="s.value"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    {# ── Rows table card ─── #}
+    <div class="card">
+      <div class="duckdb-rows-header">
+        <div class="card-title">Rows · DuckDB</div>
+        <span class="card-meta" x-show="meta.table"
+              x-text="'table ' + meta.table + ' · ' + ((meta.q && meta.matched !== meta.total) ? (meta.matched||0).toLocaleString() + ' of ' + (meta.total||0).toLocaleString() : (meta.total||0).toLocaleString()) + ' rows · ' + (meta.columns||[]).length + ' cols shown' + (meta.hidden && meta.hidden.length ? ' (' + meta.hidden.length + ' hidden)' : '')"></span>
+        <span class="card-meta duckdb-rows-page-indicator" x-show="meta.pages"
+              x-text="'page ' + meta.page + ' / ' + meta.pages"></span>
+      </div>
+
+      {# ── Search bar with example chips ─── #}
+      <div class="duckdb-search-row" x-show="search.enabled" x-cloak>
+        <div class="duckdb-search-input-wrap">
+          <span class="duckdb-search-icon">🔍</span>
+          <input type="text" x-model="q"
+                 @input.debounce.350ms="load(1)"
+                 @keydown.enter="load(1)"
+                 :placeholder="'search ' + (search.columns || []).join(', ')"
+                 class="duckdb-search-input">
+          <button type="button" class="duckdb-search-clear"
+                  x-show="q" @click="q = ''; load(1)" aria-label="clear">×</button>
+        </div>
+        <div class="duckdb-search-examples" x-show="search.examples && search.examples.length">
+          <span class="card-meta">try:</span>
+          <template x-for="ex in (search.examples || [])" :key="ex">
+            <button type="button" class="duckdb-search-chip"
+                    @click="q = ex; load(1)"
+                    x-text="ex"></button>
+          </template>
+        </div>
+      </div>
+
+      {# ── Pagination row (rendered at TOP and BOTTOM) ─── #}
+      <template x-for="pos in ['top', 'bottom']" :key="pos">
+        <div class="duckdb-pagination" :data-pos="pos"
+             :style="pos === 'bottom' ? 'margin-top: 12px;' : 'margin: 10px 0 12px;'">
+          <div class="duckdb-pagination-controls">
+            <button class="btn btn-ghost btn-tiny" @click="load(1)"
+                    :disabled="loading || (meta.page||1) <= 1">«</button>
+            <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) - 1)"
+                    :disabled="loading || (meta.page||1) <= 1">‹ prev</button>
+            <input type="number" min="1" :max="meta.pages || 1" x-model.number="jumpPage"
+                   @keydown.enter="load(jumpPage)"
+                   class="duckdb-pagination-jump">
+            <span class="card-meta" x-text="'/ ' + (meta.pages || 1)"></span>
+            <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) + 1)"
+                    :disabled="loading || (meta.page||1) >= (meta.pages||1)">next ›</button>
+            <button class="btn btn-ghost btn-tiny" @click="load(meta.pages||1)"
+                    :disabled="loading || (meta.page||1) >= (meta.pages||1)">»</button>
+            <span class="card-meta" x-show="loading" style="margin-left: 8px;">loading…</span>
+            <span class="card-meta tone-bad" x-show="error" x-text="error" style="margin-left: 8px;"></span>
+          </div>
+          <div class="duckdb-pagination-size">
+            <span class="card-meta">items per page</span>
+            <select x-model.number="pageSize" @change="load(1)" class="duckdb-pagesize-select">
+              <option :value="25">25</option>
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+              <option :value="200">200</option>
+            </select>
+          </div>
+        </div>
+      </template>
+
+      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap">
+        <table class="data duckdb-table">
+          <thead>
+            <tr>
+              <template x-for="col in meta.columns" :key="col">
+                <th x-text="col"></th>
+              </template>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(row, i) in rows" :key="i">
+              <tr>
+                <template x-for="col in meta.columns" :key="col">
+                  <td :title="formatCell(row[col])" x-text="formatCell(row[col])"></td>
+                </template>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <p class="card-meta" x-show="!loading && rows.length === 0 && !error" style="margin-top: 8px;">
+        No rows match.
       </p>
     </div>
-  {% else %}
-    <div class="card">
-      <div class="card-title">Entry points</div>
-      <div class="card-meta" style="margin: 4px 0 12px;">
-        A sample of {{ samples|length }} entries from the collection. Click any
-        to land on its hub page.
-      </div>
-      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px;">
-        {% for s in samples %}
-          <li>
-            <span class="hub-hover" data-preview-ref="{{ s.hub_url[5:] }}">
-              {% if source_type %}
-                <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ source_type }}</span>
-              {% endif %}
-              <a href="{{ s.hub_url }}" class="mono" style="word-break: break-all;">{{ s.title }}</a>
-              {% if s.external_url %}
-                <a href="{{ s.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>
-              {% endif %}
-              {% if s.badge %}
-                <span class="card-meta" style="font-size: 11px;">· {{ s.badge }}</span>
-              {% endif %}
-              <span class="hub-preview" aria-hidden="true">
-                <p class="hub-preview-title">{{ s.title }}</p>
-                {% if source_type %}<div class="hub-preview-meta">{{ source_type }} · {{ collection_name }}</div>{% endif %}
-                <div class="hub-preview-description"></div>
-                {% if s.badge %}<div class="hub-preview-badge">{{ s.badge }}</div>{% endif %}
-                <div class="hub-preview-hint">Click to open the hub page →</div>
-              </span>
-            </span>
-          </li>
-        {% endfor %}
-      </ul>
-    </div>
+
+  </div>
   {% endif %}
 
   <div>
@@ -95,4 +212,56 @@
   </div>
 
 </div>
+
+<script>
+function collectionRows(init) {
+  return {
+    name: init.name,
+    rows: [],
+    meta: {},          // {columns, hidden, total, matched, page, pages, size, table, q}
+    stats: [],         // [{label, value}, ...]
+    search: { enabled: false, columns: [], examples: [] },
+    q: '',
+    pageSize: 50,
+    jumpPage: 1,
+    loading: false,
+    error: '',
+    async loadStats() {
+      try {
+        const r = await fetch(`/api/hub/c/${encodeURIComponent(this.name)}/stats`);
+        if (!r.ok) return;
+        const j = await r.json();
+        this.stats = j.stats || [];
+        this.search = j.search || { enabled: false, columns: [], examples: [] };
+      } catch (_) { /* stats are optional; failure is silent */ }
+    },
+    async load(p) {
+      const page = Math.max(1, Math.min(this.meta.pages || 1e9, parseInt(p || 1, 10) || 1));
+      this.loading = true;
+      this.error = '';
+      try {
+        const qs = new URLSearchParams({ page: String(page), size: String(this.pageSize) });
+        if (this.q) qs.set('q', this.q);
+        const r = await fetch(`/api/hub/c/${encodeURIComponent(this.name)}/rows?${qs}`);
+        if (!r.ok) { this.error = `HTTP ${r.status}`; return; }
+        const j = await r.json();
+        this.meta = j;
+        this.rows = j.rows || [];
+        this.jumpPage = j.page || 1;
+      } catch (e) {
+        this.error = e.message || 'request failed';
+      } finally {
+        this.loading = false;
+      }
+    },
+    formatCell(v) {
+      if (v === null || v === undefined) return '—';
+      if (typeof v === 'object') {
+        try { return JSON.stringify(v); } catch (_) { return String(v); }
+      }
+      return String(v);
+    },
+  };
+}
+</script>
 {% endblock %}
