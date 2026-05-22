@@ -69,6 +69,7 @@ def _humanize(seconds: int) -> str:
 
 async def _sparql_count(client: httpx.AsyncClient, base: str) -> int | None:
     """Repo count via COUNT(?repo) — cheap on Oxigraph."""
+    settings = get_settings()
     url = base.rstrip("/")
     if not url.endswith("/query"):
         url += "/query"
@@ -76,11 +77,17 @@ async def _sparql_count(client: httpx.AsyncClient, base: str) -> int | None:
         "PREFIX schema: <http://schema.org/> "
         "SELECT (COUNT(?r) AS ?c) WHERE { ?r a schema:SoftwareSourceCode }"
     )
+    # sparql-proxy in front of Oxigraph requires Basic Auth; without it
+    # the marquee + overview "SPARQL repos" tile silently shows "—".
+    auth: tuple[str, str] | None = None
+    if settings.sparql_user and settings.sparql_password:
+        auth = (settings.sparql_user, settings.sparql_password)
     try:
         r = await client.get(
             url,
             params={"query": query},
             headers={"Accept": "application/sparql-results+json"},
+            auth=auth,
             timeout=4.0,
         )
         if r.status_code != 200:
