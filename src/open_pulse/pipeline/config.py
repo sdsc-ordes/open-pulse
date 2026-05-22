@@ -113,6 +113,11 @@ class MetadataExtractorStepConfig(StepConfig):
     v2_agent_runtime: str = "rule_based"
     v2_poll_interval_seconds: float = 2.0
     v2_timeout_seconds: float = 600.0
+    include_internal_fields: bool = False
+    """Keep `_`-prefixed internal fields (``_bio``, ``_avatar_url``,
+    ``_orcid_keywords``, ``_company``) in the response. The GME's strict
+    SHACL validation still runs identically — this just controls what the
+    consumer sees. Default False for ontology compliance."""
 
 
 class SparqlUploadStepConfig(StepConfig):

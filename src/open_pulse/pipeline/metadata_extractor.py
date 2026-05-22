@@ -63,6 +63,7 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     v2_agent_runtime = str(step_cfg.get("v2_agent_runtime", "rule_based"))
     v2_poll = float(step_cfg.get("v2_poll_interval_seconds", 2.0))
     v2_timeout = float(step_cfg.get("v2_timeout_seconds", 600.0))
+    include_internal_fields = bool(step_cfg.get("include_internal_fields", False))
     if mode not in ("v1_gimie", "v2"):
         raise ValueError(
             f"metadata_extractor: unknown mode {mode!r}; expected 'v1_gimie' or 'v2'."
@@ -111,6 +112,7 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
                 payload = services.metadata_extractor.extract_repo_jsonld_v2(
                     full_name,
                     agent_runtime=v2_agent_runtime,
+                    include_internal_fields=include_internal_fields,
                     poll_interval=v2_poll,
                     timeout=v2_timeout,
                 )

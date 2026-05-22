@@ -185,6 +185,9 @@ def test_submit_extract_returns_job_id_with_rule_based_default() -> None:
         "source_url": "https://github.com/sdsc-ordes/gimie",
         "output_format": "jsonld",
         "agent_runtime": "rule_based",
+        # New extractor :develop knob — defaults to False; the GME
+        # strips ``_``-prefixed internal fields unless asked.
+        "include_internal_fields": False,
     }
 
 

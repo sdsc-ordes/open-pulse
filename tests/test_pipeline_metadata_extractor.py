@@ -293,8 +293,11 @@ def test_run_metadata_extractor_uses_v2_by_default(tmp_path: Path) -> None:
     _seed_crawler_graph(crawler_dir, ["sdsc-ordes/gimie"])
 
     extractor = MagicMock(spec=MetadataExtractorService)
+    # Accept ``**kwargs`` so this lambda doesn't have to chase
+    # signature additions (``include_internal_fields`` and any future
+    # optional knobs) every time the service grows.
     extractor.extract_repo_jsonld_v2.side_effect = (
-        lambda full, agent_runtime, poll_interval, timeout: _v2_response(full)
+        lambda full, **kwargs: _v2_response(full)
     )
 
     services = _make_container(extractor)
