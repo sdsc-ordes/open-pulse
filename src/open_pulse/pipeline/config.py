@@ -36,9 +36,10 @@ class CrawlerStepConfig(StepConfig):
     """Crawler step configuration.
 
     Mirrors the ``CrawlRequest`` body of the Open Pulse Crawler API. These
-    fields are sent verbatim as the POST body to ``/api/v1/crawl``; only
-    the trailing local-IO fields (``output_dir``, ``output_filename``) and
-    the polling controls are read by the pipeline step itself.
+    fields are sent verbatim as the POST body to ``/api/v1/crawl`` (or
+    ``/api/v1/crawl/graphql`` when ``use_graphql`` is true); only the
+    trailing local-IO fields (``output_dir``, ``output_filename``) and the
+    polling controls are read by the pipeline step itself.
     """
 
     seeds: list[str] = Field(default_factory=list)
@@ -47,7 +48,29 @@ class CrawlerStepConfig(StepConfig):
     crawl_dependents: bool = False
     min_stars: int = Field(default=0, ge=0)
     max_dependents: int | None = None
+    max_contributors: int | None = None
+    """Skip contributor expansion for repos with more than N contributors.
+    The repo node stays in the graph; only its contributor users are not
+    queued. Useful for avoiding mega-projects (Linux, k8s, …)."""
+    # PR-8 opt-in flags — added to the crawler in
+    # https://github.com/sdsc-ordes/open-pulse-crawler/pull/8. Default
+    # False so existing quests don't trigger the (much heavier) issue
+    # + PR scans by accident.
+    crawl_issues: bool = False
+    """Fetch issue authors and conversation commenters per repo (one
+    GitHub API page per ``issue_max`` issues)."""
+    crawl_prs: bool = False
+    """Fetch PR authors, conversation commenters, and reviewers per repo
+    (one GitHub API page per ``pr_max`` PRs)."""
+    issue_max: int = Field(default=100, ge=1)
+    pr_max: int = Field(default=100, ge=1)
     batch_size: int | None = None
+    # GraphQL is the canonical endpoint per project convention — one
+    # multi-resource query replaces N REST round-trips, so the GitHub
+    # rate-limit cost is much lower for the same payload. Override to
+    # False to fall back to the legacy REST endpoint at
+    # ``/api/v1/crawl`` (e.g. to bisect a suspected GraphQL regression).
+    use_graphql: bool = True
     output_dir: str = ".quest-artifacts/crawler-json"
     output_filename: str = "crawler-graph.json"
     poll_interval_seconds: float = 5.0
@@ -74,11 +97,19 @@ class FrontierExtendStepConfig(StepConfig):
     crawl_dependents: bool = True
     min_stars: int = Field(default=0, ge=0)
     max_dependents: int | None = None
+    max_contributors: int | None = None
+    crawl_issues: bool = False
+    crawl_prs: bool = False
+    issue_max: int = Field(default=100, ge=1)
+    pr_max: int = Field(default=100, ge=1)
     batch_size: int | None = None
     max_frontier_seeds: int | None = None
     """Hard cap on how many frontier nodes to send as seeds. ``None`` means
     no cap. Useful when the frontier is huge and a smaller probe is
     desired."""
+    # Matches ``CrawlerStepConfig.use_graphql`` so a frontier extension
+    # uses the same endpoint convention as the parent crawl.
+    use_graphql: bool = True
     poll_interval_seconds: float = 5.0
     timeout_seconds: float = 3600.0
 

@@ -141,6 +141,10 @@ _CRAWL_BODY_FIELDS = (
     "min_stars",
     "max_dependents",
     "max_contributors",
+    "crawl_issues",
+    "crawl_prs",
+    "issue_max",
+    "pr_max",
     "batch_size",
 )
 
@@ -195,8 +199,9 @@ def run_frontier_extend(context: dict[str, object]) -> None:
 
     poll_interval = float(step_cfg.get("poll_interval_seconds", 5.0))
     timeout = float(step_cfg.get("timeout_seconds", 3600.0))
+    use_graphql = bool(step_cfg.get("use_graphql", True))
 
-    job_id = services.crawler.submit_crawl(body)
+    job_id = services.crawler.submit_crawl(body, use_graphql=use_graphql)
     logger.info(
         "frontier_extend: submitted job_id=%s frontier_seeds=%d max_rounds=%s",
         job_id,
