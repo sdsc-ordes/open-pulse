@@ -64,6 +64,12 @@ class Backing:
     search_cols: tuple[str, ...] = ()
     # Example terms shown as clickable chips below the search input.
     search_examples: tuple[str, ...] = ()
+    # Optional full SELECT statement used as the source for the row
+    # browser instead of the bare ``"<table>"``. Lets us expose
+    # joined / derived columns (e.g. records + aggregated community
+    # list) without writing to the DuckDB. When ``None`` the browser
+    # behaves as before — straight reads off ``table``.
+    select_sql: str | None = None
 
 
 # Only the surfaces the user asked for in this pass — OAM Monitor +
@@ -166,6 +172,51 @@ _BACKING: dict[str, Backing] = {
         ),
         search_cols=("name", "type", "country_code", "acronyms"),
         search_examples=("EPFL", "Swiss", "University", "CH"),
+    ),
+    "zenodo_records": Backing(
+        db_path=_DATA_ROOT / "extractor/index/zenodo/duckdb/zenodo.duckdb",
+        table="records",
+        hidden_cols=("raw", "keywords_json"),
+        # SELECT joins ``record_communities`` so each record carries an
+        # aggregated list of communities it belongs to. LEFT JOIN keeps
+        # records with no community (984 of 1638) — their ``community``
+        # cell renders as ``[]``. ``LIST(DISTINCT ...)`` dedupes when
+        # the join table happens to repeat a pair.
+        select_sql=(
+            "SELECT r.zenodo_id, r.doi, r.title, r.description, "
+            "r.publication_date, r.resource_type, r.access_right, "
+            "r.license_id, r.keywords_json, r.raw, r.ingested_at, "
+            "r.concept_recid, "
+            "LIST(DISTINCT rc.community_id) FILTER "
+            "(WHERE rc.community_id IS NOT NULL) AS community "
+            "FROM records r "
+            "LEFT JOIN record_communities rc ON r.zenodo_id = rc.record_id "
+            "GROUP BY r.zenodo_id, r.doi, r.title, r.description, "
+            "r.publication_date, r.resource_type, r.access_right, "
+            "r.license_id, r.keywords_json, r.raw, r.ingested_at, "
+            "r.concept_recid"
+        ),
+        stats=(
+            Stat("Total records", "SELECT COUNT(*) FROM records"),
+            Stat(
+                "Distinct DOIs",
+                "SELECT COUNT(DISTINCT doi) FROM records WHERE doi IS NOT NULL",
+            ),
+            Stat(
+                "Distinct communities",
+                "SELECT COUNT(DISTINCT community_id) FROM record_communities",
+            ),
+            Stat(
+                "With community",
+                "SELECT COUNT(DISTINCT record_id) FROM record_communities",
+            ),
+        ),
+        # Include ``community`` in search_cols so typing ``epfl`` filters
+        # to records affiliated with that community. ILIKE on a list
+        # column casts to text and matches the stringified array, which
+        # is exactly the substring the user expects.
+        search_cols=("zenodo_id", "doi", "title", "description", "community"),
+        search_examples=("dataset", "epfl", "10.5281", "machine learning"),
     ),
     "oamonitor_publishers": Backing(
         db_path=_DATA_ROOT / "index/oamonitor/duckdb/oamonitor.duckdb",
@@ -328,11 +379,19 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "extractor/index/swissubase/duckdb/swissubase.duckdb",
         "studies",
     ),
-    # Zenodo — records is the headline table (creators / files / communities
-    # are link tables better surfaced from a record's hub page).
-    "zenodo_records": (
+    # Zenodo — ``zenodo_records`` is hand-tuned in ``_BACKING`` above
+    # (it joins ``record_communities`` to expose a per-record community
+    # list). ``communities`` + ``creators`` are exposed here so the
+    # row browser can serve them directly via ``/hub/c/<name>`` even
+    # though they don't have their own Qdrant collection (yet — they
+    # live only in the DuckDB source-of-truth).
+    "zenodo_communities": (
         _DATA_ROOT / "extractor/index/zenodo/duckdb/zenodo.duckdb",
-        "records",
+        "communities",
+    ),
+    "zenodo_creators": (
+        _DATA_ROOT / "extractor/index/zenodo/duckdb/zenodo.duckdb",
+        "creators",
     ),
 }
 
@@ -391,6 +450,8 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "swissubase_entities": ("survey", "FORS", "Switzerland", "households"),
     # Zenodo
     "zenodo_records": ("dataset", "epfl", "10.5281", "machine learning"),
+    "zenodo_communities": ("epfl", "swiss", "open", "research"),
+    "zenodo_creators": ("EPFL", "Müller", "Patrick", "Anna"),
 }
 
 
@@ -629,6 +690,20 @@ def _connect(db_path: Path) -> duckdb.DuckDBPyConnection:
     return duckdb.connect(str(db_path), read_only=True)
 
 
+def _source_expr(b: Backing) -> str:
+    """The SQL fragment usable after ``FROM`` for this backing.
+
+    Either a plain ``"<table>"`` identifier or a wrapped subquery
+    (when ``b.select_sql`` overrides the source — e.g. zenodo_records
+    joining ``record_communities`` to expose a per-record community
+    list). The wrapping ``_t`` alias gives both branches the same
+    callable shape for downstream ``SELECT … WHERE … LIMIT …`` use.
+    """
+    if b.select_sql:
+        return f"({b.select_sql}) AS _t"
+    return f'"{b.table}"'
+
+
 def _row_count(b: Backing) -> int:
     key = (str(b.db_path), b.table)
     with _COUNT_LOCK:
@@ -636,9 +711,9 @@ def _row_count(b: Backing) -> int:
     if cached is not None:
         return cached
     with _connect(b.db_path) as con:
-        # Table name is hardcoded in the mapping; quoting via double-
-        # quote identifiers is safe (DuckDB does not interpolate them).
-        n = con.execute(f'SELECT COUNT(*) FROM "{b.table}"').fetchone()[0]
+        # Table name (or wrapped subquery) is hardcoded in the
+        # mapping; quoting via double-quote identifiers is safe.
+        n = con.execute(f"SELECT COUNT(*) FROM {_source_expr(b)}").fetchone()[0]
     n = int(n)
     with _COUNT_LOCK:
         _COUNT_CACHE[key] = n
@@ -739,8 +814,18 @@ def _build_order(sort: str, visible_cols: list[str]) -> str:
 def _resolve_visible_cols(
     con: duckdb.DuckDBPyConnection, b: Backing
 ) -> tuple[list[str], list[str]]:
-    """Return ``(all_cols, visible_cols)`` for the backing's table."""
-    all_cols = [c[0] for c in con.execute(f'DESCRIBE "{b.table}"').fetchall()]
+    """Return ``(all_cols, visible_cols)`` for the backing's source.
+
+    Uses ``DESCRIBE "<table>"`` for plain-table backings; for those
+    wrapping a ``select_sql`` we ``EXPLAIN``-style probe the wrapped
+    query with ``LIMIT 0`` to get cursor descriptions — DESCRIBE
+    doesn't accept arbitrary subqueries.
+    """
+    if b.select_sql:
+        cur = con.execute(f"SELECT * FROM {_source_expr(b)} LIMIT 0")
+        all_cols = [d[0] for d in (cur.description or [])]
+    else:
+        all_cols = [c[0] for c in con.execute(f'DESCRIBE "{b.table}"').fetchall()]
     visible = [c for c in all_cols if c not in b.hidden_cols]
     if not visible:
         visible = all_cols
@@ -780,11 +865,12 @@ def list_rows(
     where_sql, params_filter = _build_filter(b, q)
     offset = (page - 1) * size
 
+    src = _source_expr(b)
     with _connect(b.db_path) as con:
         if where_sql:
             matched = int(
                 con.execute(
-                    f'SELECT COUNT(*) FROM "{b.table}" {where_sql}', params_filter
+                    f"SELECT COUNT(*) FROM {src} {where_sql}", params_filter
                 ).fetchone()[0]
             )
         else:
@@ -797,8 +883,7 @@ def list_rows(
         order_sql = _build_order(sort, visible_cols)
 
         rows = con.execute(
-            f'SELECT {col_list} FROM "{b.table}" {where_sql} {order_sql} '
-            "LIMIT ? OFFSET ?",
+            f"SELECT {col_list} FROM {src} {where_sql} {order_sql} LIMIT ? OFFSET ?",
             [*params_filter, size, offset],
         ).fetchall()
 
@@ -850,12 +935,13 @@ def export_rows(
     limit = max(1, min(int(limit or MAX_EXPORT_ROWS), MAX_EXPORT_ROWS))
 
     where_sql, params_filter = _build_filter(b, q)
+    src = _source_expr(b)
 
     with _connect(b.db_path) as con:
         if where_sql:
             matched = int(
                 con.execute(
-                    f'SELECT COUNT(*) FROM "{b.table}" {where_sql}', params_filter
+                    f"SELECT COUNT(*) FROM {src} {where_sql}", params_filter
                 ).fetchone()[0]
             )
         else:
@@ -866,7 +952,7 @@ def export_rows(
         order_sql = _build_order(sort, visible_cols)
 
         rows = con.execute(
-            f'SELECT {col_list} FROM "{b.table}" {where_sql} {order_sql} LIMIT ?',
+            f"SELECT {col_list} FROM {src} {where_sql} {order_sql} LIMIT ?",
             [*params_filter, limit + 1],
         ).fetchall()
 
