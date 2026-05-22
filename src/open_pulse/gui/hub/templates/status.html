@@ -85,13 +85,17 @@
   <section>
     <h2 class="card-title mb-3">Quick links</h2>
     <div class="grid-tiles">
+      {# All upstream URLs resolve via template globals seeded in main.py
+         (which in turn derive from HUB_PUBLIC_HOST + per-service env vars).
+         No hostname literal lives here so the same template works on a
+         laptop, a staging box, or the openpulse.epfl.ch deployment. #}
       {% set links = [
-        ('Neo4j Browser', 'http://localhost:7474', 'graph database', 'tone-info'),
-        ('SPARQL store',  'http://localhost:7878', 'oxigraph + caddy', 'tone-info'),
-        ('Crawler API',   'http://localhost:8000/docs', 'github crawler swagger', 'tone-info'),
-        ('GME extractor', 'http://localhost:1234/docs', 'metadata extractor swagger', 'tone-info'),
-        ('Kibiter',       kibiter_url, 'grimoirelab dashboards', 'tone-info'),
-        ('Hub API',       '/healthz', 'control-plane healthz', 'tone-ok'),
+        ('Neo4j Browser', neo4j_browser_url,        'graph database',                'tone-info'),
+        ('SPARQL store',  sparql_browser_url,       'oxigraph + caddy',              'tone-info'),
+        ('Crawler API',   crawler_docs_url,         'github crawler swagger',        'tone-info'),
+        ('GME extractor', extractor_docs_url,       'metadata extractor swagger',    'tone-info'),
+        ('OpenSearch',    opensearch_dashboards_url,'grimoirelab dashboards',        'tone-info'),
+        ('Hub API',       '/healthz',               'control-plane healthz',         'tone-ok'),
       ] %}
       {% for label, url, sub, tone in links %}
         <a href="{{ url }}" target="_blank" rel="noopener" class="card {{ tone }}" style="text-decoration:none; color: inherit; display: block;">
