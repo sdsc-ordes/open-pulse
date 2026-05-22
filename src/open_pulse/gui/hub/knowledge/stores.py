@@ -127,11 +127,24 @@ def sparql_describe(subject_iri: str, limit: int = 200) -> list[dict[str, Any]]:
 # ── Neo4j graph helpers ──────────────────────────────────────────────────
 
 # Pretty-print the relationship names from the crawler's schema.
+# Kept in sync with the upload-side edge types in
+# ``open_pulse/services/neo4j.py`` so the canvas expand modal renders
+# friendly group titles instead of raw uppercase Cypher edge names.
 _REL_LABELS: dict[str, str] = {
+    # Original crawler edges
     "CONTRIBUTES_TO": "contributor",
     "OWNS": "owner",
     "FORK_OF": "fork of",
     "MEMBER_OF": "member of",
+    "DEPENDS_ON": "depends on",
+    # PR-8 extra-edges crawler payload
+    "FOLLOWS": "follows",
+    "STARRED": "starred",
+    "WATCHES": "watches",
+    "OPENED_ISSUE": "opened issue in",
+    "OPENED_PR": "opened PR in",
+    "COMMENTED_ON": "commented on",
+    "REVIEWED_PR": "reviewed PR in",
 }
 
 
