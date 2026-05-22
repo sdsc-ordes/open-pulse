@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1](https://github.com/sdsc-ordes/open-pulse/compare/v1.0.0...v1.0.1) (2026-05-22)
+
+
+### Documentation
+
+* escape literal pipes in nodes schema tables (markdownlint MD056) ([a22af39](https://github.com/sdsc-ordes/open-pulse/commit/a22af3999a1e866345b55ee294216ad68c4f1b8f))
+* **landing,docs:** static node builder app + cross-links + footer date ([b4e5f0a](https://github.com/sdsc-ordes/open-pulse/commit/b4e5f0ad7191520a9fc4b9726f8f6c3a4055a10b))
+* **landing,site:** logos in node tabs, minimal color blocks, consistent panel size ([665d8fc](https://github.com/sdsc-ordes/open-pulse/commit/665d8fc07e8068a815b40c925ac548f0803e575e))
+* **landing:** drop 'Public soon' sticker, pill-style install tabs, add .env wizard CTA under Docs button ([1e7c5ad](https://github.com/sdsc-ordes/open-pulse/commit/1e7c5add1fa56833ccd339ecfd3886515a1d9271))
+* **landing:** install tabs + Docs button + space-styled wizard + Docusaurus at /docs/ ([48584ee](https://github.com/sdsc-ordes/open-pulse/commit/48584ee880aebaecff6f9bc0427cfddfca985b1e))
+* **landing:** install tabs + Docs button + space-styled wizard + Docusaurus at /docs/ ([ab2fcab](https://github.com/sdsc-ordes/open-pulse/commit/ab2fcabef71fed33eae488d5e3c4cc6a8c88440a))
+* **landing:** self-deploy leaf bodies — description, prereqs, follow-up and next link ([9278f8b](https://github.com/sdsc-ordes/open-pulse/commit/9278f8b0a1d8d1f49607cfcb8899efccaea9257a))
+* **landing:** split 'hosted instance' vs 'self-deploy' + YAML-driven nodes registry ([290a417](https://github.com/sdsc-ordes/open-pulse/commit/290a4170487823d8199d501952352a7cea53d3f8))
+* **landing:** super-tabs + left-rail leaf-tabs for Nodes / Self-deploy ([e3cd46f](https://github.com/sdsc-ordes/open-pulse/commit/e3cd46fd9d2069c688735bd80e33be9566633df3))
+* **site:** align Docusaurus theme with the landing palette ([864c57e](https://github.com/sdsc-ordes/open-pulse/commit/864c57eb7c1839ed9b09da5916dd545f303cc18b))
+
 ## [Unreleased]
 
 ### Changed
