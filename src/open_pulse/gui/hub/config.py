@@ -189,7 +189,8 @@ def load_settings() -> Settings:
             "HUB_OPENSEARCH_DASHBOARDS_URL", f"http://{public_host}:7508"
         ),
         ontology_url=os.environ.get(
-            "HUB_ONTOLOGY_URL", "https://github.com/sdsc-ordes/open-pulse-ontology"
+            "HUB_ONTOLOGY_URL",
+            "https://sdsc-ordes.github.io/open-pulse-ontology/versions/v2.1.2/index.html",
         ),
         # Default to the hub-proxied Swagger surfaces (routes/crawler.py +
         # routes/extractor.py) — hub auth gates discovery, so we don't have
