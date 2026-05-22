@@ -285,11 +285,12 @@ services:
       - "${SPARQL_PROXY_PORT:-7878}:7878"
     environment:
       # Paths to protect with the reader/admin Basic Auth block in the
-      # Caddyfile. Default `__off__` is a sentinel that matches no real
-      # request, so reads pass through anonymously. Set to e.g.
-      # `/query /query/*` in your .env to require auth on reads (admin
-      # OR reader credentials accepted).
-      SPARQL_READ_AUTH_PATHS: "${SPARQL_READ_AUTH_PATHS:-__off__}"
+      # Caddyfile. Default is **read-gated** so the YASGUI UI on
+      # ``/`` and the ``/query`` endpoint require the admin credential
+      # (``SPARQL_AUTH``) — or a reader credential when
+      # ``SPARQL_READER_AUTH`` is set. Override to ``__off__`` in
+      # ``infra/.env`` to expose reads anonymously (matches no path).
+      SPARQL_READ_AUTH_PATHS: "${SPARQL_READ_AUTH_PATHS:-/ /query /query/*}"
     volumes:
       - ../services/sparql-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ../services/sparql-proxy/users:/etc/caddy/users:ro
