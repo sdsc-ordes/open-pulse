@@ -585,6 +585,25 @@ def backing_for(collection: str) -> Backing | None:
     return _BACKING.get(collection)
 
 
+def row_count_for(collection: str) -> int | None:
+    """Public wrapper around the cached row counter.
+
+    Returns the underlying DuckDB row count for a browsable collection,
+    or ``None`` if the collection isn't registered / its backing file
+    is missing. Used by the hub home tiles to display the
+    source-of-truth entity count instead of the (chunk-inflated)
+    Qdrant points count.
+    """
+    b = _BACKING.get(collection)
+    if b is None:
+        return None
+    try:
+        return _row_count(b)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("row_count_for(%s) failed: %s", collection, exc)
+        return None
+
+
 def _json_safe(v: Any) -> Any:
     """Coerce a DuckDB cell value into something the JSON encoder can handle.
 

@@ -217,12 +217,21 @@ def _collection_stats() -> list[dict[str, object]]:
     for name in names:
         label, host = _COLLECTION_LABELS.get(name, (name, ""))
         meta = _SOURCE_METADATA.get(host, {})
+        # Prefer the source-of-truth DuckDB row count over Qdrant
+        # ``count_points`` when the collection has a registered
+        # backing. Qdrant points include text chunks (a single repo
+        # with a long README becomes 3+ points), which inflates the
+        # tile number 3-4× and confuses visitors who then click into
+        # the row browser and see a smaller table. Collections with
+        # no DuckDB backing fall back to the Qdrant count as before.
+        ddb_count = duckdb_browser.row_count_for(name)
+        count = ddb_count if ddb_count is not None else qdrant.count_points(name)
         rows.append(
             {
                 "name": name,
                 "label": label,
                 "host": host,
-                "count": qdrant.count_points(name),
+                "count": count,
                 "logo_url": _logo_for_host(host),
                 "homepage": meta.get("homepage", ""),
                 "description": meta.get("description", ""),
