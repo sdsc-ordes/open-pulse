@@ -1328,84 +1328,118 @@ code.hljs .hljs-type        { color: var(--code-title); }
 }
 
 /* ── DuckDB row browser on /hub/c/<name> ──────────────────────────
- * Stats tiles, search bar, pagination row and the actual table.
- * Keeps every surface aligned with the rest of the hub palette.
- */
+ * Stats tiles, search bar, pagination row + the table. All surfaces
+ * pull from the unified --surface* / --accent* / --code-* palette
+ * so the section stays consistent with the rest of the hub. */
+
+/* — Stats: a row of 4 compact tiles. Auto-fit so smaller viewports
+ *   collapse to 2 cols cleanly. */
 .duckdb-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
 }
 .duckdb-stat-tile {
   background: var(--surface-sunk);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
 }
 .duckdb-stat-label {
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--fg-muted);
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .duckdb-stat-value {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.01em;
   line-height: 1.15;
   color: var(--fg);
   font-variant-numeric: tabular-nums;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* — Row card header sits on a single line — title left, the
+ *   "X rows · Y cols shown" meta right. */
 .duckdb-rows-header {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 8px;
 }
-.duckdb-rows-page-indicator { margin-left: auto; }
+.duckdb-rows-meta {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* — Search row: input + chips on one line. Chips wrap to a new line
+ *   on narrow screens. */
+/* — Download toolbar. Sits between the search bar and the top
+ *   pagination strip. Mirrors the /databases console buttons. */
+.duckdb-export-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.duckdb-export-row .btn-tiny {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.duckdb-export-note {
+  color: var(--tone-warn, var(--fg-muted));
+  font-style: italic;
+}
+.duckdb-export-state {
+  margin-left: auto;
+  color: var(--accent);
+}
 
 .duckdb-search-row {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 10px 0 4px;
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
+  margin-top: 12px;
 }
 .duckdb-search-input-wrap {
   position: relative;
-  flex: 1;
-  min-width: 240px;
-  max-width: 480px;
-}
-.duckdb-search-icon {
-  position: absolute;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 12px;
-  opacity: 0.55;
-  pointer-events: none;
+  flex: 1 1 320px;
+  max-width: 520px;
 }
 .duckdb-search-input {
   width: 100%;
-  padding: 7px 30px 7px 32px;
-  font-size: 13px;
+  padding: 9px 36px 9px 14px;
+  font-size: 14px;
   background: var(--surface-soft);
   color: var(--fg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+.duckdb-search-input::placeholder { color: var(--fg-faint); }
+.duckdb-search-input:hover {
+  border-color: color-mix(in srgb, var(--border) 60%, var(--fg-muted));
 }
 .duckdb-search-input:focus {
   outline: none;
+  background: var(--surface);
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
@@ -1414,14 +1448,21 @@ code.hljs .hljs-type        { color: var(--code-title); }
   right: 8px;
   top: 50%;
   transform: translateY(-50%);
-  background: transparent;
-  border: 0;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--fg-muted);
-  font-size: 18px;
+  font-size: 14px;
+  line-height: 1;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0;
 }
-.duckdb-search-clear:hover { color: var(--fg); }
+.duckdb-search-clear:hover { color: var(--fg); border-color: var(--fg-muted); }
 
 .duckdb-search-examples {
   display: flex;
@@ -1445,6 +1486,8 @@ code.hljs .hljs-type        { color: var(--code-title); }
   color: var(--accent-fg);
 }
 
+/* — Pagination strip: prev/next group on the LEFT, items-per-page
+ *   anchored on the RIGHT. Same layout above and below the table. */
 .duckdb-pagination {
   display: flex;
   align-items: center;
@@ -1453,8 +1496,6 @@ code.hljs .hljs-type        { color: var(--code-title); }
   flex-wrap: wrap;
   padding: 8px 0;
 }
-.duckdb-pagination[data-pos="top"]    { border-bottom: 1px solid var(--border); }
-.duckdb-pagination[data-pos="bottom"] { border-top:    1px solid var(--border); }
 .duckdb-pagination-controls {
   display: flex;
   align-items: center;
@@ -1462,10 +1503,17 @@ code.hljs .hljs-type        { color: var(--code-title); }
   flex-wrap: wrap;
 }
 .duckdb-pagination-jump {
-  width: 64px;
+  width: 58px;
   text-align: center;
   padding: 3px 6px;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.duckdb-pagination-of {
+  margin: 0 4px 0 2px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .duckdb-pagination-size {
   display: flex;
@@ -1480,14 +1528,16 @@ code.hljs .hljs-type        { color: var(--code-title); }
   border: 1px solid var(--border);
   border-radius: 4px;
 }
+.duckdb-pagination-state { color: var(--fg-muted); font-size: 12px; }
 
-/* The table itself — no internal scroll, the page handles it.
- * Sticky header still uses the viewport, so headers stick to the
- * page-header area as the user scrolls past the rows. */
+/* — Table: page handles vertical scroll, the wrap handles horizontal
+ *   only (so a wide table doesn't blow the layout). Sticky header
+ *   pinned to viewport top by the page scroll, not an inner container. */
 .duckdb-table-wrap {
   border: 1px solid var(--border);
   border-radius: 6px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 table.duckdb-table {
   margin: 0;
@@ -1501,7 +1551,7 @@ table.duckdb-table thead {
   z-index: 1;
 }
 table.duckdb-table th {
-  padding: 6px 10px;
+  padding: 8px 12px;
   text-align: left;
   font-weight: 600;
   font-size: 11px;
@@ -1511,11 +1561,29 @@ table.duckdb-table th {
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
+table.duckdb-table th.sortable-col {
+  cursor: pointer;
+  user-select: none;
+}
+table.duckdb-table th.sortable-col:hover { color: var(--fg); }
+table.duckdb-table th.sortable-col .sort-indicator {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  opacity: 0.4;
+  transition: opacity 80ms ease;
+}
+table.duckdb-table th.sortable-col:hover .sort-indicator { opacity: 0.8; }
+table.duckdb-table th.sort-active {
+  color: var(--accent);
+}
+table.duckdb-table th.sort-active .sort-indicator { opacity: 1; color: var(--accent); }
 table.duckdb-table td {
-  padding: 4px 10px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
   font-size: 12px;
+  line-height: 1.5;
   vertical-align: top;
   max-width: 360px;
   overflow: hidden;
@@ -1524,6 +1592,42 @@ table.duckdb-table td {
   color: var(--fg);
 }
 table.duckdb-table tbody tr:hover td { background: var(--surface-sunk); }
+
+/* — Sticky first column: pins horizontally inside .duckdb-table-wrap.
+ *   Background must be opaque so cells underneath don't bleed through
+ *   during horizontal scroll. The header cell also stays pinned to the
+ *   top via the thead's own sticky positioning. */
+table.duckdb-table th.sticky-col,
+table.duckdb-table td.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+table.duckdb-table th.sticky-col {
+  background: var(--surface-sunk);
+  z-index: 3;
+  box-shadow: 1px 0 0 0 var(--border);
+}
+table.duckdb-table td.sticky-col {
+  background: var(--surface);
+  box-shadow: 1px 0 0 0 var(--border);
+}
+table.duckdb-table tbody tr:hover td.sticky-col { background: var(--surface-sunk); }
+
+/* — Cell content rendering: clickable URLs and highlighted search matches. */
+table.duckdb-table a {
+  color: var(--accent);
+  text-decoration: none;
+}
+table.duckdb-table a:hover { text-decoration: underline; }
+table.duckdb-table mark {
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+table.duckdb-table .cell-null { color: var(--fg-faint); }
 
 /* Inline code inside metric notes (rendered by the md filter).
  * Keeps backticked field names readable against the muted note text
