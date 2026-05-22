@@ -147,17 +147,23 @@ class MetadataExtractorService:
         *,
         agent_runtime: str = "rule_based",
         output_format: str = "jsonld",
+        include_internal_fields: bool = False,
     ) -> str:
         """POST ``/v2/extract`` and return the ``job_id``.
 
         ``agent_runtime`` defaults to ``"rule_based"`` so the GME server
         doesn't need an LLM provider token (e.g. ``RCP_TOKEN``).
+
+        ``include_internal_fields`` keeps the ``_``-prefixed internal
+        fields (``_bio``, ``_avatar_url``, ``_orcid_keywords``, …) in the
+        response — by default the GME strips them for ontology compliance.
         """
         url = self.endpoint + _V2_EXTRACT_PATH
         body: dict[str, Any] = {
             "source_url": _normalize_repo_url(source_url),
             "output_format": output_format,
             "agent_runtime": agent_runtime,
+            "include_internal_fields": include_internal_fields,
         }
         try:
             resp = self._client.post(url, json=body, headers=self._auth_headers())
@@ -264,6 +270,7 @@ class MetadataExtractorService:
         source_url: str,
         *,
         agent_runtime: str = "rule_based",
+        include_internal_fields: bool = False,
         poll_interval: float = _DEFAULT_V2_POLL_INTERVAL,
         timeout: float = _DEFAULT_V2_TIMEOUT,
     ) -> dict[str, Any]:
@@ -273,7 +280,10 @@ class MetadataExtractorService:
         ``stats``, etc.). The JSON-LD payload is at ``result["output"]``.
         """
         job_id = self.submit_extract(
-            source_url, agent_runtime=agent_runtime, output_format="jsonld"
+            source_url,
+            agent_runtime=agent_runtime,
+            output_format="jsonld",
+            include_internal_fields=include_internal_fields,
         )
         logger.info(
             "metadata_extractor v2: submitted job %s for %s (runtime=%s)",
