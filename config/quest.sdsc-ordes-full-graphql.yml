@@ -1,0 +1,76 @@
+# Reference quest: two-round crawl of the ``sdsc-ordes`` GitHub org via
+# the crawler's GraphQL endpoint, capturing every relation type the
+# crawler emits (contributors, dependencies, dependents, issue authors
+# + commenters, PR authors + commenters + reviewers, plus the user-level
+# follows / starred / watched populated as round 2 explores the
+# contributors found in round 1).
+#
+# Pipeline: crawler → metadata_extractor (v2, rule_based runtime) →
+# neo4j_upload → sparql_upload. Output lands in
+# ``.quest-artifacts/<this-name>/...`` and ingests into Neo4j + Oxigraph.
+#
+# Pass with::
+#
+#     open-pulse quest start --config config/quest.sdsc-ordes-full-graphql.yml
+
+quest:
+  name: sdsc-ordes-full-graphql
+  description: |
+    Two rounds, sdsc-ordes seed, every PR-8 opt-in turned on, via GraphQL.
+
+  retry:
+    max_attempts: 2
+    backoff_seconds: 30
+
+  logging:
+    level: INFO
+
+  steps:
+    crawler:
+      enabled: true
+      use_graphql: true
+      seeds:
+        - sdsc-ordes
+      max_rounds: 2
+      crawl_dependencies: true
+      crawl_dependents: true
+      crawl_issues: true
+      crawl_prs: true
+      issue_max: 100
+      pr_max: 100
+      # ``max_contributors`` left unset → the crawler will still cap its
+      # cached contributor list at the internal default (~10), but no
+      # repo gets marked ``skipped_high_contributors`` for the
+      # threshold-based skip.
+      output_dir: .quest-artifacts/crawler-json-sdsc-ordes-full
+      output_filename: crawler-graph.json
+      poll_interval_seconds: 5.0
+      timeout_seconds: 3600.0
+
+    frontier_extend:
+      enabled: false
+
+    metadata_extractor:
+      enabled: true
+      mode: v2
+      v2_agent_runtime: rule_based
+      v2_poll_interval_seconds: 2.0
+      v2_timeout_seconds: 600.0
+      input_dir: .quest-artifacts/crawler-json-sdsc-ordes-full
+      input_filename: crawler-graph.json
+      output_dir: .quest-artifacts/metadata-json-sdsc-ordes-full
+      skip_existing: true
+      force_refresh: false
+      max_repos: 0
+
+    neo4j_upload:
+      enabled: true
+      input_dir: .quest-artifacts/crawler-json-sdsc-ordes-full
+      input_filename: crawler-graph.json
+
+    sparql_upload:
+      enabled: true
+      input_dir: .quest-artifacts/metadata-json-sdsc-ordes-full
+
+    apply_grimoire_projects:
+      enabled: false

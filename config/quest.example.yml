@@ -40,12 +40,19 @@ quest:
   steps:
     crawler:
       enabled: true
+      use_graphql: true              # POST /api/v1/crawl/graphql (default).
+                                     # Set false for the REST /api/v1/crawl.
       seeds: ["sdsc-ordes/open-pulse-crawler"]
       max_rounds: 2                  # BFS depth (1–10)
       crawl_dependencies: false
       crawl_dependents: false
+      crawl_issues: false            # fetch issue authors + commenters per repo
+      crawl_prs: false               # fetch PR authors, commenters, reviewers
+      issue_max: 100                 # cap issues scanned per repo
+      pr_max: 100                    # cap PRs scanned per repo
       min_stars: 0                   # filter dependents/dependencies below this
       max_dependents: null           # cap dependents per repo (null = no cap)
+      max_contributors: null         # skip contributor expansion above N (null = off)
       batch_size: null               # crawler default (matches max_concurrent)
       output_dir: ".quest-artifacts/crawler-json"
       output_filename: "crawler-graph.json"

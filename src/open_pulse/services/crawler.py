@@ -78,9 +78,19 @@ class CrawlerService:
 
     # -- Job lifecycle -----------------------------------------------------
 
-    def submit_crawl(self, request: dict[str, object]) -> str:
-        """Start a crawl job and return its ``job_id``."""
-        url = f"{self.endpoint}/api/v1/crawl"
+    def submit_crawl(
+        self, request: dict[str, object], *, use_graphql: bool = True
+    ) -> str:
+        """Start a crawl job and return its ``job_id``.
+
+        ``use_graphql`` selects the endpoint variant. Both accept the
+        same ``CrawlRequest`` body schema; GraphQL is the project
+        default because it batches what REST does in N round-trips
+        into a single multi-resource query (lower GitHub rate-limit
+        cost for the same payload).
+        """
+        path = "/api/v1/crawl/graphql" if use_graphql else "/api/v1/crawl"
+        url = f"{self.endpoint}{path}"
         resp = self._client.post(url, json=request, headers=self._bearer_headers())
         if resp.status_code != 202:
             raise RuntimeError(
