@@ -30,9 +30,13 @@ indexed in the collection's schema, so the over-broad filter is safe.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
+import duckdb
 import httpx
 
 from ..auth import get_settings
@@ -1596,6 +1600,188 @@ def lookup_related(ref: HubRef, *, per_group_limit: int = 6) -> list[RelatedGrou
                 target_collection="infoscience_articles",
                 limit=4,
             )
+
+    return groups
+
+
+def _github_contributors_from_duckdb(
+    repo_id: str | None, limit: int
+) -> list[dict[str, Any]]:
+    """Read ``repos.contributors`` for ``owner/repo`` from the github
+    DuckDB. Returns a list of ``{login, contributions}`` dicts, or an
+    empty list when the file / row / column isn't available.
+
+    The duckdb file location matches the ``_AUTO_TABLES`` mapping in
+    ``duckdb_browser`` so we stay in sync with what the canvas's
+    sibling features expect.
+    """
+    if not repo_id or "/" not in str(repo_id):
+        return []
+    db_path = (
+        Path(os.environ.get("HUB_DATA_DIR_HOST", "/data"))
+        / "extractor/index/github/duckdb/github.duckdb"
+    )
+    if not db_path.is_file():
+        return []
+    try:
+        con = duckdb.connect(str(db_path), read_only=True)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("contributors duckdb open failed: %s", exc)
+        return []
+    try:
+        try:
+            row = con.execute(
+                "SELECT contributors FROM repos WHERE repo_id = ? LIMIT 1",
+                [repo_id],
+            ).fetchone()
+        finally:
+            con.close()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("contributors query failed for %s: %s", repo_id, exc)
+        return []
+    if not row or row[0] is None:
+        return []
+    raw = row[0]
+    if isinstance(raw, list):
+        return raw[:limit]
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed[:limit] if isinstance(parsed, list) else []
+        except Exception:  # noqa: BLE001
+            return []
+    return []
+
+
+def lookup_people(ref: HubRef, *, per_group_limit: int = 30) -> list[RelatedGroup]:
+    """People-shaped relations for an entity: contributors of a repo,
+    authors of a paper, owners of a dataset, etc.
+
+    Each person becomes a :class:`RelatedItem` with a usable hub URL
+    when one can be resolved (a GitHub login maps to
+    ``/hub/github.com/<login>``); authors found only as free-form
+    names get the same shape minus the URL so the canvas can still
+    place them as labelled nodes the user can later wire up by hand.
+
+    Read straight out of the entity's primary Qdrant payload — no
+    extra parallel scrolls. Cheap to call from the expand endpoint
+    even when the entity has dozens of authors.
+    """
+    collection = _related_primary_collection(ref.host, ref.path)
+    if collection is None:
+        return []
+
+    candidates = _candidate_keys(ref)
+    if not candidates:
+        return []
+    should = [{"key": f, "match": {"value": v}} for f, v in candidates]
+    own = _scroll_with_timeout(
+        collection, {"should": should}, 1, timeout=_BACKLINK_TIMEOUT
+    )
+    if not own:
+        return []
+    payload: dict[str, Any] = own[0].get("payload") or {}
+
+    def _maybe_load(v: Any) -> list[Any]:
+        # Some duckdb-derived fields land here as JSON-encoded strings.
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str) and v.startswith("[") and v.endswith("]"):
+            try:
+                parsed = json.loads(v)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:  # noqa: BLE001
+                return []
+        return []
+
+    groups: list[RelatedGroup] = []
+
+    # GitHub repo → contributors. The Qdrant payload only carries the
+    # repo metadata used for embedding; the per-contributor list lives
+    # in the source-of-truth DuckDB. Fall back there when the payload
+    # doesn't already include it.
+    if collection == "github_repos":
+        contribs = _maybe_load(payload.get("contributors"))
+        if not contribs:
+            contribs = _github_contributors_from_duckdb(
+                payload.get("repo_id"), per_group_limit
+            )
+        items: list[RelatedItem] = []
+        for c in contribs[:per_group_limit]:
+            if isinstance(c, dict):
+                login = (c.get("login") or "").strip()
+                count = c.get("contributions")
+            else:
+                login = str(c).strip()
+                count = None
+            if not login:
+                continue
+            badge = f"{count} commits" if isinstance(count, int) else ""
+            items.append(
+                RelatedItem(
+                    label=login,
+                    hub_url=f"/hub/github.com/{login}",
+                    external_url=f"https://github.com/{login}",
+                    badge=badge,
+                    source_type="GitHub user",
+                )
+            )
+        if items:
+            groups.append(RelatedGroup(title="Contributors", items=items))
+
+    # Publication-shaped collections → authors. Schemas vary slightly:
+    # infoscience stores a flat ``authors`` list; OpenAlex ``works``
+    # carries ``author_names`` and ``authorships``; ETHZ has authors
+    # too. We accept either form.
+    if (
+        collection.startswith("infoscience_")
+        or collection == "works"
+        or collection.startswith("ethz_research_collection_")
+        or collection == "oamonitor_publications"
+        or collection == "zenodo_records"
+    ):
+        raw_authors = (
+            _maybe_load(payload.get("authors"))
+            or _maybe_load(payload.get("author_names"))
+            or _maybe_load(payload.get("creators"))
+            or _maybe_load(payload.get("authorships"))
+            or []
+        )
+        seen: set[str] = set()
+        items: list[RelatedItem] = []
+        for a in raw_authors[:per_group_limit]:
+            if isinstance(a, dict):
+                label = (
+                    a.get("display_name")
+                    or a.get("name")
+                    or a.get("full_name")
+                    or a.get("author_name")
+                    or ""
+                ).strip()
+                orcid = (a.get("orcid") or "").strip()
+                if orcid and orcid.startswith("http"):
+                    hub_url = "/hub/" + orcid.replace("https://", "").replace(
+                        "http://", ""
+                    )
+                else:
+                    hub_url = ""
+            else:
+                label = str(a).strip()
+                hub_url = ""
+            if not label or label in seen:
+                continue
+            seen.add(label)
+            items.append(
+                RelatedItem(
+                    label=label,
+                    hub_url=hub_url,
+                    external_url="",
+                    badge="",
+                    source_type="Author",
+                )
+            )
+        if items:
+            groups.append(RelatedGroup(title="Authors", items=items))
 
     return groups
 
