@@ -26,6 +26,9 @@ from open_pulse.services.container import ServiceContainer
 logger = logging.getLogger(__name__)
 
 
+# Fields copied verbatim from step_cfg into the crawler's ``CrawlRequest``
+# POST body. Keep in sync with ``CrawlerStepConfig`` — any field added
+# there that the crawler also understands needs an entry here.
 _BODY_FIELDS = (
     "seeds",
     "max_rounds",
@@ -33,6 +36,11 @@ _BODY_FIELDS = (
     "crawl_dependents",
     "min_stars",
     "max_dependents",
+    "max_contributors",
+    "crawl_issues",
+    "crawl_prs",
+    "issue_max",
+    "pr_max",
     "batch_size",
 )
 
@@ -77,9 +85,18 @@ def run_crawler(context: dict[str, object]) -> None:
     request = _build_request(step_cfg)
     poll_interval = float(step_cfg.get("poll_interval_seconds", 5.0))
     timeout = float(step_cfg.get("timeout_seconds", 3600.0))
+    # GraphQL is the canonical endpoint per project convention — see
+    # ``CrawlerStepConfig.use_graphql`` for the rationale. Quests can
+    # opt out by setting ``use_graphql: false`` in their YAML.
+    use_graphql = bool(step_cfg.get("use_graphql", True))
 
-    job_id = services.crawler.submit_crawl(request)
-    logger.info("crawler: submitted job_id=%s seeds=%d", job_id, len(seeds))
+    job_id = services.crawler.submit_crawl(request, use_graphql=use_graphql)
+    logger.info(
+        "crawler: submitted job_id=%s seeds=%d endpoint=%s",
+        job_id,
+        len(seeds),
+        "graphql" if use_graphql else "rest",
+    )
 
     final = services.crawler.wait_for_completion(
         job_id,
