@@ -27,13 +27,27 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.templating import Jinja2Templates
 
 from ..auth import get_settings, maybe_require_auth
 from ..knowledge import duckdb_browser
 from ..knowledge import enrich as enrich_mod
-from ..knowledge import normalize, opensearch, qdrant, registry, stats, stores, wanted
+from ..knowledge import (
+    normalize,
+    opensearch,
+    qdrant,
+    registry,
+    relations,
+    stats,
+    stores,
+    wanted,
+)
 
 router = APIRouter(tags=["hub"])
 log = logging.getLogger(__name__)
@@ -353,20 +367,61 @@ def hub_collection_rows(
     page: int = 1,
     size: int = duckdb_browser.DEFAULT_PAGE_SIZE,
     q: str = "",
+    sort: str = "",
 ) -> dict[str, Any]:
     """Paginated rows from the DuckDB table backing collection ``name``.
 
     ``q`` is a case-insensitive substring filter applied to the columns
     listed in the collection's ``search_cols``. Empty ``q`` returns the
-    unfiltered slice. Throws a 404 when the collection isn't registered.
+    unfiltered slice. ``sort`` is ``"col"`` (asc) or ``"col:desc"``.
+    Throws a 404 when the collection isn't registered.
     """
-    payload = duckdb_browser.list_rows(name, page=page, size=size, q=q)
+    payload = duckdb_browser.list_rows(name, page=page, size=size, q=q, sort=sort)
     if payload is None:
         raise HTTPException(
             status_code=404,
             detail=f"collection {name!r} has no DuckDB backing registered",
         )
     return payload
+
+
+@router.get(
+    "/api/hub/c/{name}/export",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_collection_export(
+    name: str,
+    fmt: str = "csv",
+    q: str = "",
+    sort: str = "",
+) -> PlainTextResponse:
+    """Download the full filtered+sorted dataset as ``fmt``.
+
+    Supported formats: ``csv``, ``tsv``, ``md``, ``json-rec``, ``json-col``.
+    Capped at ``duckdb_browser.MAX_EXPORT_ROWS`` rows; the response body
+    silently truncates beyond that.
+    """
+    rendered = duckdb_browser.render_export(name, fmt, q=q, sort=sort)
+    if rendered is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"collection {name!r} has no DuckDB backing registered (or fmt {fmt!r} unknown)",
+        )
+    body, mime = rendered
+    ext_map = {
+        "csv": "csv",
+        "tsv": "tsv",
+        "md": "md",
+        "json-rec": "json",
+        "json-col": "json",
+    }
+    ext = ext_map.get(fmt, "txt")
+    filename = f"{name}-{fmt}.{ext}"
+    return PlainTextResponse(
+        content=body,
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get(
@@ -672,6 +727,203 @@ def hub_related(request: Request, ref: str) -> HTMLResponse:
         "hub/_related_body.html",
         {"groups": groups, "ref": parsed},
     )
+
+
+# ── Expand: shared helpers for both the all-in-one endpoint and the
+# per-source ones the canvas calls in parallel. Each per-source route
+# is wafer-thin so the canvas can render whichever source returns
+# first instead of waiting for the slowest one (typically the
+# Qdrant cross-collection backlink scroll). All routes share
+# ``qdrant.cached_panel`` for a 5-minute server-side TTL.
+
+
+def _expand_parse(ref: str) -> "normalize.HubRef":
+    parsed = normalize.parse_ref(ref)
+    if not parsed.is_known_host:
+        raise HTTPException(status_code=400, detail="ref must be a known hub URL")
+    return parsed
+
+
+def _expand_it(it: Any) -> dict[str, str]:
+    return {
+        "label": getattr(it, "label", ""),
+        "hub_url": getattr(it, "hub_url", ""),
+        "external_url": getattr(it, "external_url", "") or "",
+        "badge": getattr(it, "badge", "") or "",
+        "source_type": getattr(it, "source_type", "") or "",
+    }
+
+
+def _expand_grp(g: Any) -> dict[str, Any]:
+    return {"title": g.title, "items": [_expand_it(it) for it in g.items]}
+
+
+@router.get(
+    "/api/hub/expand/people",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_expand_people(ref: str) -> dict[str, Any]:
+    """People-shaped relations (contributors, authors) for the canvas."""
+    parsed = _expand_parse(ref)
+    groups = qdrant.cached_panel(
+        "people", parsed.canonical_url, lambda: qdrant.lookup_people(parsed)
+    )
+    return {"groups": [_expand_grp(g) for g in groups if g.items]}
+
+
+@router.get(
+    "/api/hub/expand/related",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_expand_related(ref: str) -> dict[str, Any]:
+    """Qdrant siblings on the same axis (owner, language, author, …)."""
+    parsed = _expand_parse(ref)
+    groups = qdrant.cached_panel(
+        "related", parsed.canonical_url, lambda: qdrant.lookup_related(parsed)
+    )
+    return {"groups": [_expand_grp(g) for g in groups if g.items]}
+
+
+@router.get(
+    "/api/hub/expand/backlinks",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_expand_backlinks(ref: str) -> dict[str, Any]:
+    """Cross-collection points that reference this entity's canonical URL."""
+    parsed = _expand_parse(ref)
+    exclude = _PRIMARY_COLLECTIONS_BY_HOST.get(parsed.host, [])
+    groups = qdrant.cached_panel(
+        "backlinks",
+        parsed.canonical_url,
+        lambda: qdrant.lookup_backlinks(parsed, exclude_collections=exclude),
+    )
+    out = []
+    for g in groups:
+        if not g.items:
+            continue
+        out.append(
+            {
+                "title": g.label,
+                "collection": g.collection,
+                "items": [_expand_it(it) for it in g.items],
+            }
+        )
+    return {"groups": out}
+
+
+@router.get(
+    "/api/hub/expand/neo4j",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_expand_neo4j(ref: str) -> dict[str, Any]:
+    """1-hop neighbours from the Neo4j graph, bucketed by edge type."""
+    parsed = _expand_parse(ref)
+    groups = qdrant.cached_panel(
+        "neo4j", parsed.canonical_url, lambda: relations.from_neo4j(parsed)
+    )
+    return {"groups": [_expand_grp(g) for g in groups if g.items]}
+
+
+@router.get(
+    "/api/hub/expand/sparql",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_expand_sparql(ref: str) -> dict[str, Any]:
+    """RDF triples about this URL, bucketed by predicate."""
+    parsed = _expand_parse(ref)
+    groups = qdrant.cached_panel(
+        "sparql", parsed.canonical_url, lambda: relations.from_sparql(parsed)
+    )
+    return {"groups": [_expand_grp(g) for g in groups if g.items]}
+
+
+@router.get(
+    "/api/hub/expand/opensearch",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_expand_opensearch(ref: str) -> dict[str, Any]:
+    """Top commit authors from the GrimoireLab-enriched git index."""
+    parsed = _expand_parse(ref)
+    groups = qdrant.cached_panel(
+        "opensearch", parsed.canonical_url, lambda: relations.from_opensearch(parsed)
+    )
+    return {"groups": [_expand_grp(g) for g in groups if g.items]}
+
+
+@router.get(
+    "/api/hub/expand",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_expand_json(ref: str) -> dict[str, Any]:
+    """JSON sibling/backlink groups for the Canvas expand-node modal.
+
+    Mirrors the data that powers ``/api/hub/related`` and
+    ``/api/hub/backlinks`` (both of which return HTML for the entity
+    page panels) but returns plain JSON so the canvas can render a
+    filterable checklist client-side. Each group becomes one row the
+    user can tick to splat all its items onto the canvas as connected
+    children.
+    """
+    parsed = normalize.parse_ref(ref)
+    if not parsed.is_known_host:
+        raise HTTPException(status_code=400, detail="ref must be a known hub URL")
+
+    related = qdrant.cached_panel(
+        "related", parsed.canonical_url, lambda: qdrant.lookup_related(parsed)
+    )
+    parsed_host_exclude = _PRIMARY_COLLECTIONS_BY_HOST.get(parsed.host, [])
+    backlinks = qdrant.cached_panel(
+        "backlinks",
+        parsed.canonical_url,
+        lambda: qdrant.lookup_backlinks(
+            parsed, exclude_collections=parsed_host_exclude
+        ),
+    )
+    people = qdrant.cached_panel(
+        "people", parsed.canonical_url, lambda: qdrant.lookup_people(parsed)
+    )
+    # The three additional graph stores. Each helper is best-effort:
+    # if a store is unreachable the helper just returns [] so the
+    # canvas still gets whatever the others surfaced.
+    neo4j_groups = qdrant.cached_panel(
+        "neo4j", parsed.canonical_url, lambda: relations.from_neo4j(parsed)
+    )
+    sparql_groups = qdrant.cached_panel(
+        "sparql", parsed.canonical_url, lambda: relations.from_sparql(parsed)
+    )
+    os_groups = qdrant.cached_panel(
+        "opensearch", parsed.canonical_url, lambda: relations.from_opensearch(parsed)
+    )
+
+    def _it(it: Any) -> dict[str, str]:
+        return {
+            "label": getattr(it, "label", ""),
+            "hub_url": getattr(it, "hub_url", ""),
+            "external_url": getattr(it, "external_url", "") or "",
+            "badge": getattr(it, "badge", "") or "",
+            "source_type": getattr(it, "source_type", "") or "",
+        }
+
+    def _grp(g: Any) -> dict[str, Any]:
+        return {"title": g.title, "items": [_it(it) for it in g.items]}
+
+    return {
+        "ref": parsed.canonical_url,
+        "people": [_grp(g) for g in people if g.items],
+        "neo4j": [_grp(g) for g in neo4j_groups if g.items],
+        "sparql": [_grp(g) for g in sparql_groups if g.items],
+        "opensearch": [_grp(g) for g in os_groups if g.items],
+        "related": [_grp(g) for g in related if g.items],
+        "backlinks": [
+            {
+                "title": g.label,
+                "collection": g.collection,
+                "items": [_it(it) for it in g.items],
+            }
+            for g in backlinks
+            if g.items
+        ],
+    }
 
 
 @router.get(

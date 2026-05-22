@@ -117,28 +117,31 @@
 
     {# ── Rows table card ─── #}
     <div class="card">
+
+      {# Header — title left, "X of Y rows · Z cols" right. #}
       <div class="duckdb-rows-header">
         <div class="card-title">Rows · DuckDB</div>
-        <span class="card-meta" x-show="meta.table"
-              x-text="'table ' + meta.table + ' · ' + ((meta.q && meta.matched !== meta.total) ? (meta.matched||0).toLocaleString() + ' of ' + (meta.total||0).toLocaleString() : (meta.total||0).toLocaleString()) + ' rows · ' + (meta.columns||[]).length + ' cols shown' + (meta.hidden && meta.hidden.length ? ' (' + meta.hidden.length + ' hidden)' : '')"></span>
-        <span class="card-meta duckdb-rows-page-indicator" x-show="meta.pages"
-              x-text="'page ' + meta.page + ' / ' + meta.pages"></span>
+        <span class="card-meta duckdb-rows-meta" x-show="meta.table" x-cloak
+              x-text="(meta.q && meta.matched !== meta.total
+                       ? (meta.matched||0).toLocaleString() + ' of ' + (meta.total||0).toLocaleString()
+                       : (meta.total||0).toLocaleString()) + ' rows · '
+                      + (meta.columns||[]).length + ' cols'
+                      + (meta.hidden && meta.hidden.length ? ' (+' + meta.hidden.length + ' hidden)' : '')"></span>
       </div>
 
-      {# ── Search bar with example chips ─── #}
+      {# Search bar — clean input, no prefix icon. Examples float right. #}
       <div class="duckdb-search-row" x-show="search.enabled" x-cloak>
         <div class="duckdb-search-input-wrap">
-          <span class="duckdb-search-icon">🔍</span>
           <input type="text" x-model="q"
                  @input.debounce.350ms="load(1)"
                  @keydown.enter="load(1)"
-                 :placeholder="'search ' + (search.columns || []).join(', ')"
+                 :placeholder="'Search ' + (search.columns || []).join(' · ')"
                  class="duckdb-search-input">
           <button type="button" class="duckdb-search-clear"
                   x-show="q" @click="q = ''; load(1)" aria-label="clear">×</button>
         </div>
         <div class="duckdb-search-examples" x-show="search.examples && search.examples.length">
-          <span class="card-meta">try:</span>
+          <span class="card-meta">try</span>
           <template x-for="ex in (search.examples || [])" :key="ex">
             <button type="button" class="duckdb-search-chip"
                     @click="q = ex; load(1)"
@@ -147,52 +150,56 @@
         </div>
       </div>
 
-      {# ── Pagination row (rendered at TOP and BOTTOM) ─── #}
-      <template x-for="pos in ['top', 'bottom']" :key="pos">
-        <div class="duckdb-pagination" :data-pos="pos"
-             :style="pos === 'bottom' ? 'margin-top: 12px;' : 'margin: 10px 0 12px;'">
-          <div class="duckdb-pagination-controls">
-            <button class="btn btn-ghost btn-tiny" @click="load(1)"
-                    :disabled="loading || (meta.page||1) <= 1">«</button>
-            <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) - 1)"
-                    :disabled="loading || (meta.page||1) <= 1">‹ prev</button>
-            <input type="number" min="1" :max="meta.pages || 1" x-model.number="jumpPage"
-                   @keydown.enter="load(jumpPage)"
-                   class="duckdb-pagination-jump">
-            <span class="card-meta" x-text="'/ ' + (meta.pages || 1)"></span>
-            <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) + 1)"
-                    :disabled="loading || (meta.page||1) >= (meta.pages||1)">next ›</button>
-            <button class="btn btn-ghost btn-tiny" @click="load(meta.pages||1)"
-                    :disabled="loading || (meta.page||1) >= (meta.pages||1)">»</button>
-            <span class="card-meta" x-show="loading" style="margin-left: 8px;">loading…</span>
-            <span class="card-meta tone-bad" x-show="error" x-text="error" style="margin-left: 8px;"></span>
-          </div>
-          <div class="duckdb-pagination-size">
-            <span class="card-meta">items per page</span>
-            <select x-model.number="pageSize" @change="load(1)" class="duckdb-pagesize-select">
-              <option :value="25">25</option>
-              <option :value="50">50</option>
-              <option :value="100">100</option>
-              <option :value="200">200</option>
-            </select>
-          </div>
+      {# Pagination strip — rendered ABOVE the table. #}
+      <div class="duckdb-pagination" data-pos="top">
+        <div class="duckdb-pagination-controls">
+          <button class="btn btn-ghost btn-tiny" @click="load(1)"
+                  :disabled="loading || (meta.page||1) <= 1" title="first">«</button>
+          <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) - 1)"
+                  :disabled="loading || (meta.page||1) <= 1">‹ prev</button>
+          <input type="number" min="1" :max="meta.pages || 1" x-model.number="jumpPage"
+                 @keydown.enter="load(jumpPage)"
+                 class="duckdb-pagination-jump">
+          <span class="duckdb-pagination-of" x-text="'of ' + (meta.pages || 1)"></span>
+          <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) + 1)"
+                  :disabled="loading || (meta.page||1) >= (meta.pages||1)">next ›</button>
+          <button class="btn btn-ghost btn-tiny" @click="load(meta.pages||1)"
+                  :disabled="loading || (meta.page||1) >= (meta.pages||1)" title="last">»</button>
+          <span class="duckdb-pagination-state" x-show="loading" style="margin-left: 8px;">loading…</span>
+          <span class="duckdb-pagination-state tone-bad" x-show="error" x-text="error" style="margin-left: 8px;"></span>
         </div>
-      </template>
+        <div class="duckdb-pagination-size">
+          <span class="card-meta">items per page</span>
+          <select x-model.number="pageSize" @change="load(1)" class="duckdb-pagesize-select">
+            <option :value="25">25</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+            <option :value="200">200</option>
+          </select>
+        </div>
+      </div>
 
-      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap">
+      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap" x-cloak>
         <table class="data duckdb-table">
           <thead>
             <tr>
-              <template x-for="col in meta.columns" :key="col">
-                <th x-text="col"></th>
+              <template x-for="(col, ci) in meta.columns" :key="col">
+                <th :class="(ci === 0 ? 'sticky-col ' : '') + 'sortable-col' + (sort.col === col ? ' sort-active' : '')"
+                    @click="cycleSort(col)" :title="'Sort by ' + col">
+                  <span x-text="col"></span>
+                  <span class="sort-indicator"
+                        x-text="sort.col === col ? (sort.dir === 'desc' ? '▼' : '▲') : '↕'"></span>
+                </th>
               </template>
             </tr>
           </thead>
           <tbody>
             <template x-for="(row, i) in rows" :key="i">
               <tr>
-                <template x-for="col in meta.columns" :key="col">
-                  <td :title="formatCell(row[col])" x-text="formatCell(row[col])"></td>
+                <template x-for="(col, ci) in meta.columns" :key="col">
+                  <td :class="ci === 0 ? 'sticky-col' : ''"
+                      :title="formatCell(row[col])"
+                      x-html="renderCell(row[col])"></td>
                 </template>
               </tr>
             </template>
@@ -202,6 +209,50 @@
       <p class="card-meta" x-show="!loading && rows.length === 0 && !error" style="margin-top: 8px;">
         No rows match.
       </p>
+
+      {# Pagination strip — rendered BELOW the table (identical to top). #}
+      <div class="duckdb-pagination" data-pos="bottom">
+        <div class="duckdb-pagination-controls">
+          <button class="btn btn-ghost btn-tiny" @click="load(1)"
+                  :disabled="loading || (meta.page||1) <= 1" title="first">«</button>
+          <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) - 1)"
+                  :disabled="loading || (meta.page||1) <= 1">‹ prev</button>
+          <input type="number" min="1" :max="meta.pages || 1" x-model.number="jumpPage"
+                 @keydown.enter="load(jumpPage)"
+                 class="duckdb-pagination-jump">
+          <span class="duckdb-pagination-of" x-text="'of ' + (meta.pages || 1)"></span>
+          <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) + 1)"
+                  :disabled="loading || (meta.page||1) >= (meta.pages||1)">next ›</button>
+          <button class="btn btn-ghost btn-tiny" @click="load(meta.pages||1)"
+                  :disabled="loading || (meta.page||1) >= (meta.pages||1)" title="last">»</button>
+        </div>
+        <div class="duckdb-pagination-size">
+          <span class="card-meta">items per page</span>
+          <select x-model.number="pageSize" @change="load(1)" class="duckdb-pagesize-select">
+            <option :value="25">25</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+            <option :value="200">200</option>
+          </select>
+        </div>
+      </div>
+
+      {# Download toolbar — sits below everything else so it's the last
+         thing the user sees after scanning the table. Streams the FULL
+         filtered+sorted dataset (cap: 50k rows). #}
+      <div class="duckdb-export-row" x-show="meta.columns && meta.columns.length" x-cloak>
+        <span class="card-meta">download</span>
+        <button class="btn btn-tiny" @click="exportAs('csv')"      title="CSV (RFC 4180)">CSV</button>
+        <button class="btn btn-tiny" @click="exportAs('tsv')"      title="Tab-separated">TSV</button>
+        <button class="btn btn-tiny" @click="exportAs('md')"       title="Markdown table">MD</button>
+        <button class="btn btn-tiny" @click="exportAs('json-rec')" title="JSON: array of {col: value} records">JSON rec</button>
+        <button class="btn btn-tiny" @click="exportAs('json-col')" title="JSON: {col: [values]} columnar">JSON col</button>
+        <span class="card-meta duckdb-export-note" x-show="meta.matched > 50000" x-cloak>
+          capped at 50k rows
+        </span>
+        <span class="card-meta duckdb-export-state" x-show="sort.col" x-cloak
+              x-text="'sorted by ' + sort.col + ' ' + (sort.dir === 'desc' ? '↓' : '↑')"></span>
+      </div>
     </div>
 
   </div>
@@ -218,10 +269,11 @@ function collectionRows(init) {
   return {
     name: init.name,
     rows: [],
-    meta: {},          // {columns, hidden, total, matched, page, pages, size, table, q}
+    meta: {},          // {columns, hidden, total, matched, page, pages, size, table, q, sort}
     stats: [],         // [{label, value}, ...]
     search: { enabled: false, columns: [], examples: [] },
     q: '',
+    sort: { col: '', dir: '' },   // dir: '' | 'asc' | 'desc'
     pageSize: 50,
     jumpPage: 1,
     loading: false,
@@ -235,6 +287,10 @@ function collectionRows(init) {
         this.search = j.search || { enabled: false, columns: [], examples: [] };
       } catch (_) { /* stats are optional; failure is silent */ }
     },
+    _sortParam() {
+      if (!this.sort.col || !this.sort.dir) return '';
+      return this.sort.dir === 'desc' ? `${this.sort.col}:desc` : this.sort.col;
+    },
     async load(p) {
       const page = Math.max(1, Math.min(this.meta.pages || 1e9, parseInt(p || 1, 10) || 1));
       this.loading = true;
@@ -242,6 +298,8 @@ function collectionRows(init) {
       try {
         const qs = new URLSearchParams({ page: String(page), size: String(this.pageSize) });
         if (this.q) qs.set('q', this.q);
+        const sortParam = this._sortParam();
+        if (sortParam) qs.set('sort', sortParam);
         const r = await fetch(`/api/hub/c/${encodeURIComponent(this.name)}/rows?${qs}`);
         if (!r.ok) { this.error = `HTTP ${r.status}`; return; }
         const j = await r.json();
@@ -254,12 +312,65 @@ function collectionRows(init) {
         this.loading = false;
       }
     },
+    cycleSort(col) {
+      // none → asc → desc → none
+      if (this.sort.col !== col) {
+        this.sort = { col, dir: 'asc' };
+      } else if (this.sort.dir === 'asc') {
+        this.sort = { col, dir: 'desc' };
+      } else {
+        this.sort = { col: '', dir: '' };
+      }
+      this.load(1);
+    },
+    exportAs(fmt) {
+      const qs = new URLSearchParams({ fmt });
+      if (this.q) qs.set('q', this.q);
+      const sortParam = this._sortParam();
+      if (sortParam) qs.set('sort', sortParam);
+      // Same-origin GET; browser handles Content-Disposition.
+      window.location.href = `/api/hub/c/${encodeURIComponent(this.name)}/export?${qs}`;
+    },
     formatCell(v) {
+      // Raw text — used for the `title` tooltip (must not be HTML).
       if (v === null || v === undefined) return '—';
       if (typeof v === 'object') {
         try { return JSON.stringify(v); } catch (_) { return String(v); }
       }
       return String(v);
+    },
+    escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+      ));
+    },
+    escapeRegex(s) {
+      return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    },
+    highlight(escapedText) {
+      // `escapedText` is already HTML-escaped — only injecting <mark> here.
+      if (!this.q) return escapedText;
+      const term = this.escapeRegex(this.q.trim());
+      if (!term) return escapedText;
+      try {
+        return escapedText.replace(new RegExp(`(${term})`, 'gi'), '<mark>$1</mark>');
+      } catch (_) { return escapedText; }
+    },
+    renderCell(v) {
+      // Returns HTML — escaped, then optionally wrapped in <a> (URLs)
+      // and decorated with <mark> for the current search term.
+      if (v === null || v === undefined) return '<span class="cell-null">—</span>';
+      if (typeof v === 'object') {
+        let s; try { s = JSON.stringify(v); } catch (_) { s = String(v); }
+        return this.highlight(this.escapeHtml(s));
+      }
+      const s = String(v);
+      if (/^https?:\/\//i.test(s)) {
+        const href = this.escapeHtml(s);
+        const text = this.highlight(this.escapeHtml(s));
+        return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+      }
+      return this.highlight(this.escapeHtml(s));
     },
   };
 }

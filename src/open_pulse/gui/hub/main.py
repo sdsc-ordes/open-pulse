@@ -16,6 +16,7 @@ from .auth import _COOKIE_NAME, clear_session, get_settings, require_auth
 from .chaoss import routes as chaoss_routes
 from .routes import (
     admin,
+    canvas,
     crawler,
     databases,
     extractor,
@@ -112,10 +113,12 @@ def _propagate_globals(target: Jinja2Templates) -> None:
 
 _propagate_globals(chaoss_routes.templates)
 _propagate_globals(hub.templates)
+_propagate_globals(canvas.templates)
 
 app.include_router(services.router)
 app.include_router(projects.router)
 app.include_router(databases.router)
+app.include_router(canvas.router)
 app.include_router(pipeline.router)
 app.include_router(stack.router)
 app.include_router(stats.router)
