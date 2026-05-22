@@ -24,7 +24,15 @@ ARG UV_VERSION=0.8.15
 
 # OS deps + Docker CLI + compose plugin (the orchestrator role drives the
 # rest of the stack via the bind-mounted /var/run/docker.sock).
+#
+# ``apt-get upgrade`` pulls the latest Debian security updates that
+# the python:3.11-slim-bookworm base image hasn't been rebuilt to
+# include yet. Without this the Trivy CRITICAL gate trips on stale
+# packages (libgnutls30, glibc, etc.) until the base re-tags. Cheap
+# guarantee that ``open-pulse:local`` ships with current security
+# fixes regardless of when the base was last published.
 RUN apt-get update \
+    && apt-get upgrade --yes \
     && apt-get install --yes --no-install-recommends \
          ca-certificates curl gnupg git \
     && install -m 0755 -d /etc/apt/keyrings \
