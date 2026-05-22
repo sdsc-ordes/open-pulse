@@ -8,6 +8,78 @@
    in both light and dark hub themes. #}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
+{# Register SPARQL + Cypher with highlight.js — neither ships in the
+   common bundle, so we declare minimal grammars locally. SQL and JSON
+   come pre-loaded (SQL for SPARQL fallback / OS-SQL, JSON for OS-DSL).
+   Definitions are intentionally permissive: misclassifying a
+   identifier as a keyword is harmless; flagging valid syntax as
+   "illegal" would break highlighting mid-edit. #}
+<script>
+(function () {
+  if (!window.hljs) return;
+  hljs.registerLanguage('sparql', () => ({
+    name: 'SPARQL',
+    case_insensitive: true,
+    keywords: {
+      keyword:
+        'BASE PREFIX SELECT CONSTRUCT DESCRIBE ASK FROM NAMED WHERE ' +
+        'OPTIONAL UNION MINUS FILTER NOT EXISTS BIND VALUES SERVICE GRAPH ' +
+        'DISTINCT REDUCED ORDER BY ASC DESC LIMIT OFFSET GROUP HAVING ' +
+        'DELETE INSERT DATA WITH USING DEFAULT ALL LOAD CLEAR CREATE DROP ' +
+        'COPY MOVE ADD SILENT INTO',
+      built_in:
+        'STR LANG LANGMATCHES DATATYPE BOUND SAMETERM IF COALESCE ' +
+        'REGEX REPLACE CONCAT SUBSTR STRLEN UCASE LCASE STARTS ENDS ' +
+        'CONTAINS COUNT SUM MIN MAX AVG SAMPLE GROUP_CONCAT NOW YEAR ' +
+        'MONTH DAY HOURS MINUTES SECONDS TIMEZONE TZ UUID STRUUID MD5 ' +
+        'SHA1 SHA256 RAND ABS ROUND CEIL FLOOR ISIRI ISURI ISBLANK ' +
+        'ISLITERAL ISNUMERIC IRI URI BNODE',
+      literal: 'true false',
+    },
+    contains: [
+      hljs.HASH_COMMENT_MODE,
+      { className: 'variable', begin: /[?$][A-Za-z_][\w]*/ },
+      { className: 'symbol',   begin: /<[^>\s]+>/ },                 // IRIs
+      { className: 'symbol',   begin: /\b[A-Za-z_][\w-]*:[A-Za-z_][\w-]*/ }, // pname
+      { className: 'string',   begin: /"""/, end: /"""/ },
+      { className: 'string',   begin: /'''/, end: /'''/ },
+      hljs.QUOTE_STRING_MODE,
+      hljs.APOS_STRING_MODE,
+      hljs.C_NUMBER_MODE,
+    ],
+  }));
+
+  hljs.registerLanguage('cypher', () => ({
+    name: 'Cypher',
+    case_insensitive: true,
+    keywords: {
+      keyword:
+        'MATCH OPTIONAL RETURN WHERE WITH UNWIND CREATE MERGE DELETE ' +
+        'DETACH SET REMOVE FOREACH CALL YIELD UNION ORDER BY ASC DESC ' +
+        'LIMIT SKIP DISTINCT AS IS NULL NOT AND OR XOR IN STARTS ENDS ' +
+        'CONTAINS CASE WHEN THEN ELSE END USE USING INDEX CONSTRAINT ON ' +
+        'EXISTS ANY ALL NONE SINGLE PROFILE EXPLAIN DROP SHOW',
+      built_in:
+        'count sum avg min max collect size length head tail last ' +
+        'toString toInteger toFloat toLower toUpper trim split replace ' +
+        'coalesce labels type id keys properties nodes relationships ' +
+        'path range reduce abs round ceil floor rand exists',
+      literal: 'true false null TRUE FALSE NULL',
+    },
+    contains: [
+      hljs.C_LINE_COMMENT_MODE,
+      hljs.C_BLOCK_COMMENT_MODE,
+      // Node label or relationship type — :CamelCase / :lowercase.
+      { className: 'symbol', begin: /:[A-Za-z_][\w]*/ },
+      // Parameter $foo
+      { className: 'variable', begin: /\$[A-Za-z_][\w]*/ },
+      hljs.QUOTE_STRING_MODE,
+      hljs.APOS_STRING_MODE,
+      hljs.C_NUMBER_MODE,
+    ],
+  }));
+})();
+</script>
 <div x-data="dbConsole()" x-init="init()" class="space-y-4">
 
   <!-- Engine picker -->
@@ -73,26 +145,33 @@
           </div>
         </div>
 
-        <!-- Code editor with line-number gutter -->
+        <!-- Code editor with line-number gutter + highlight overlay.
+             The textarea sits transparent on top; a `<pre><code class="hljs">`
+             pinned underneath shows the syntax-highlighted version. The
+             textarea drives the pane's height (resize: vertical) so the
+             overlay (position: absolute; inset: 0) tracks it automatically.
+             Scroll events sync gutter + overlay to the textarea's scroll. -->
         <div class="code-editor">
           <pre class="gutter" x-ref="gutter" x-text="lineNumbers"></pre>
-          <textarea class="mono"
-                    x-ref="textarea"
-                    rows="14"
-                    spellcheck="false"
-                    x-model="query"
-                    @input="onEditorInput()"
-                    @scroll="syncGutter()"
-                    @keydown.window.meta.enter.prevent="run()"
-                    @keydown.window.ctrl.enter.prevent="run()"
-                    placeholder="-- click an example chip above, or type a query here. ⌘/Ctrl+Enter to run."></textarea>
+          <div class="code-editor-pane">
+            <pre class="code-highlight" aria-hidden="true"><code x-ref="highlight" class="hljs"></code></pre>
+            <textarea class="mono code-editor-input"
+                      x-ref="textarea"
+                      rows="14"
+                      spellcheck="false"
+                      x-model="query"
+                      @input="onEditorInput()"
+                      @scroll="syncEditorScroll()"
+                      @keydown.window.meta.enter.prevent="run()"
+                      @keydown.window.ctrl.enter.prevent="run()"
+                      placeholder="-- click an example chip above, or type a query here. ⌘/Ctrl+Enter to run."></textarea>
+          </div>
         </div>
 
         <div class="flex gap-2 mt-3" style="align-items: center;">
           <button class="btn btn-primary" @click="run()" :disabled="busy">Run <span class="kbd ml-1">⌘↵</span></button>
           <button class="btn" @click="showSnippets = !showSnippets" :title="showSnippets ? 'Hide examples' : 'Show curl / python / js examples'" style="padding-left: 10px; padding-right: 10px;">&lt;/&gt;</button>
-          <input style="margin-left: 12px;" placeholder="save to library as…" x-model="saveName" />
-          <button class="btn" @click="save()" :disabled="!saveName">Save to library</button>
+          <button class="btn" @click="libraryOpen = true" title="Open the saved-queries library" style="padding-left: 10px; padding-right: 10px;">📚 Library</button>
           <span class="card-meta ml-auto" x-text="resultMeta()"></span>
         </div>
 
@@ -123,30 +202,83 @@
       </div>
     </div>
 
-    <!-- ── Saved-queries library (right, 1fr) ─────────────────────── -->
+    <!-- ── Session query log (right, 1fr) ──────────────────────────
+         Recent runs in this browser. Replaces the always-visible
+         Library card; the library now lives behind a modal opened
+         from the editor toolbar. -->
     <div class="card">
-      <div class="card-title">Library</div>
-      <p class="card-meta">
-        Server-side library (stored in the hub's SQLite). Use the
-        <em>Save to library</em> button on the editor to add the current query;
-        click an entry below to load it as a fresh tab.
+      <div class="db-sesslog-head">
+        <div class="card-title" style="margin: 0;">Session log</div>
+        <button class="btn btn-ghost btn-tiny"
+                @click="clearSessionLog()"
+                x-show="sessionLog.length"
+                title="Clear all session-log entries">clear</button>
+      </div>
+      <p class="card-meta" style="margin-top: 4px;">
+        Last <span x-text="sessionLog.length"></span> runs in this browser
+        (cap 100). Click an entry to re-open it as a new tab.
       </p>
-      <div style="margin-top: 8px;">
-        <template x-for="s in savedFiltered()" :key="s.id">
-          <button @click="loadFromLibrary(s)"
-                  style="width: 100%; text-align: left; padding: 8px 10px; border-radius: 6px; background: transparent; border: 0; color: var(--fg); cursor: pointer;"
-                  onmouseover="this.style.background='var(--surface-sunk)'"
-                  onmouseout="this.style.background='transparent'">
-            <div class="font-semibold" x-text="s.name"></div>
-            <div class="card-meta">· <span x-text="s.engine"></span></div>
+      <div class="db-sesslog-list">
+        <template x-for="e in sessionLog" :key="e.id">
+          <button @click="loadFromLog(e)" class="db-sesslog-entry">
+            <div class="db-sesslog-line1">
+              <span class="db-sesslog-engine"
+                    :class="'tag-' + e.engine"
+                    x-text="e.engine + (e.os_mode ? ' · ' + e.os_mode : '')"></span>
+              <span class="db-sesslog-meta" x-text="formatLogTime(e.ts)"></span>
+            </div>
+            <div class="db-sesslog-line2" x-text="e.tab_name || 'untitled'"></div>
+            <div class="db-sesslog-line3">
+              <span x-text="(e.row_count || 0).toLocaleString() + ' rows'"></span>
+              <span> · </span>
+              <span x-text="(e.runtime_ms || 0) + ' ms'"></span>
+            </div>
           </button>
         </template>
-        <template x-if="savedFiltered().length === 0">
-          <p class="card-meta" style="font-style: italic;">none for <span x-text="engine"></span> yet</p>
+        <template x-if="!sessionLog.length">
+          <p class="card-meta" style="font-style: italic; margin-top: 8px;">
+            no runs yet — hit ⌘↵ (or click <strong>Run</strong>) to execute the current tab.
+          </p>
         </template>
       </div>
     </div>
 
+  </div>
+
+  <!-- ── Library modal — saved queries (server-side SQLite).
+       Hidden by default; opened by the 📚 button in the editor
+       toolbar. Clicking outside the panel or the × closes it. -->
+  <div class="db-modal-backdrop" x-show="libraryOpen" x-cloak
+       @click.self="libraryOpen = false"
+       @keydown.escape.window="libraryOpen = false">
+    <div class="db-modal">
+      <div class="db-modal-header">
+        <div class="card-title" style="margin: 0;">Library &middot; <span x-text="engine"></span></div>
+        <button class="btn-close" @click="libraryOpen = false" aria-label="Close">&times;</button>
+      </div>
+      <p class="card-meta" style="margin: 0;">
+        Server-side library (stored in the hub's SQLite). Click an entry to
+        load it as a fresh tab.
+      </p>
+      <div class="db-modal-saveform">
+        <input placeholder="save the current query as…" x-model="saveName"
+               @keydown.enter="if (saveName) save()" />
+        <button class="btn btn-primary" @click="save()" :disabled="!saveName">Save</button>
+      </div>
+      <div class="db-modal-list">
+        <template x-for="s in savedFiltered()" :key="s.id">
+          <button @click="loadFromLibrary(s); libraryOpen = false" class="db-modal-entry">
+            <div class="font-semibold" x-text="s.name"></div>
+            <div class="card-meta">&middot; <span x-text="s.engine"></span></div>
+          </button>
+        </template>
+        <template x-if="savedFiltered().length === 0">
+          <p class="card-meta" style="font-style: italic; margin: 6px 0;">
+            no saved queries yet for <span x-text="engine"></span>.
+          </p>
+        </template>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -428,26 +560,240 @@
     white-space: pre;
     font-variant-numeric: tabular-nums;
   }
-  .code-editor textarea {
+  /* Pane that wraps the highlight overlay + textarea. Acts as the
+   * positioning context (relative) and is sized by the textarea inside. */
+  .code-editor-pane {
+    position: relative;
+    flex: 1;
+    display: flex;
+    min-width: 0;
+  }
+  /* The <pre><code> overlay sits behind the textarea and shows the
+   * highlighted source. ``overflow: hidden`` plus a transform-driven
+   * scroll keeps it visually identical to the textarea without a
+   * second scrollbar competing with the textarea's. */
+  .code-editor-pane .code-highlight {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 10px 14px;
+    pointer-events: none;
+    overflow: hidden;
+    background: transparent;
+    border: 0;
+    white-space: pre;
+    z-index: 0;
+  }
+  .code-editor-pane .code-highlight code.hljs {
+    display: block;
+    padding: 0;
+    background: transparent;
+    color: var(--code-fg);
+    font: 13px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
+    white-space: pre;
+    will-change: transform;
+  }
+  /* Textarea is transparent on top — caret stays visible, glyphs hide
+   * so only the highlight overlay's text shows through. */
+  .code-editor textarea.code-editor-input {
+    position: relative;
+    z-index: 1;
     flex: 1;
     margin: 0;
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
-    color: var(--code-fg) !important;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    caret-color: var(--code-fg);
     resize: vertical;
     padding: 10px 14px;
     font: 13px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
     box-shadow: none !important;
     outline: 0;
+    width: 100%;
   }
-  .code-editor textarea:focus {
+  .code-editor textarea.code-editor-input:focus {
     background: transparent !important;
+  }
+  /* Selection has to remain visible despite transparent text: tint
+   * the background, keep the foreground transparent. */
+  .code-editor textarea.code-editor-input::selection {
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+  .code-editor textarea.code-editor-input::placeholder {
+    color: var(--code-ln-fg);
+    -webkit-text-fill-color: var(--code-ln-fg);
+  }
+
+  /* ── Session query log (right column).
+   *   Each card is a clickable shortcut to re-open the run as a new
+   *   tab. Engine pills give an at-a-glance visual cue. */
+  .db-sesslog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .db-sesslog-list {
+    margin-top: 8px;
+    max-height: 540px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .db-sesslog-entry {
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--fg);
+    cursor: pointer;
+    transition: background 80ms ease, border-color 80ms ease;
+  }
+  .db-sesslog-entry:hover {
+    background: var(--surface-sunk);
+    border-color: var(--border);
+  }
+  .db-sesslog-line1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+  .db-sesslog-line2 {
+    font-size: 12px;
+    color: var(--fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    margin-bottom: 2px;
+  }
+  .db-sesslog-line3 {
+    font-size: 11px;
+    color: var(--fg-muted);
+  }
+  .db-sesslog-engine {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-sunk);
+    color: var(--fg);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  .db-sesslog-engine.tag-cypher {
+    background: color-mix(in srgb, #88c0d0 22%, transparent);
+    color: #88c0d0;
+  }
+  .db-sesslog-engine.tag-sparql {
+    background: color-mix(in srgb, #b48ead 22%, transparent);
+    color: #b48ead;
+  }
+  .db-sesslog-engine.tag-opensearch {
+    background: color-mix(in srgb, #ebcb8b 24%, transparent);
+    color: #ebcb8b;
+  }
+  .db-sesslog-meta { font-size: 11px; color: var(--fg-muted); }
+
+  /* ── Library modal. Replaces the always-visible right-side card
+   *   from the previous layout; only opens when the user clicks the
+   *   📚 button in the editor toolbar. */
+  .db-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .db-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    max-width: 640px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+  }
+  .db-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .db-modal-header .btn-close {
+    font-size: 20px;
+    padding: 0 10px;
+    line-height: 1;
+    background: transparent;
+    border: 0;
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .db-modal-header .btn-close:hover { color: var(--fg); }
+  .db-modal-saveform {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .db-modal-saveform input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-sunk);
+    color: var(--fg);
+  }
+  .db-modal-list {
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .db-modal-entry {
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--fg);
+    cursor: pointer;
+  }
+  .db-modal-entry:hover {
+    background: var(--surface-sunk);
+    border-color: var(--border);
   }
 </style>
 
 <script>
 const TAB_STORAGE_KEY = 'op:hub:db-tabs:v1';
+const SESSION_LOG_KEY = 'op:hub:db-session-log:v1';
+const SESSION_LOG_CAP = 100;
+
+function loadSessionLog() {
+  try { return JSON.parse(localStorage.getItem(SESSION_LOG_KEY) || '[]') || []; }
+  catch (_) { return []; }
+}
+function saveSessionLog(rows) {
+  try { localStorage.setItem(SESSION_LOG_KEY, JSON.stringify(rows)); }
+  catch (_) { /* localStorage quota — drop silently, log is a convenience. */ }
+}
 
 const STARTERS = {
   sparql: '# pick an example above, or type SPARQL here. ⌘/Ctrl+Enter to run.\nPREFIX schema: <http://schema.org/>\nSELECT ?repo WHERE { ?repo a schema:SoftwareSourceCode } LIMIT 25',
@@ -692,9 +1038,14 @@ function dbConsole() {
     // ── library (server-side SQLite) ─────────────────────────────
     saved: [],
     saveName: '',
+    libraryOpen: false,
+
+    // ── session query log (browser-local) ────────────────────────
+    sessionLog: [],
 
     async init() {
       this.tabs = loadTabs();
+      this.sessionLog = loadSessionLog();
       if (!this.tabs.length) {
         // Seed three default tabs, one per engine, with the engine starter.
         for (const eng of this.engines) {
@@ -711,13 +1062,20 @@ function dbConsole() {
       this.engine = first.engine;
       this.switchTab(first.id);
 
-      this.$watch('query', () => { this.recomputeGutter(); });
+      this.$watch('query', () => {
+        this.recomputeGutter();
+        this.rehighlightEditor();
+      });
       this.$watch('engine', () => {
         this.error = ''; this.rows = []; this.columns = []; this.rawDump = '';
+        this.rehighlightEditor();
       });
+      // OpenSearch toggles SQL ↔ JSON DSL — re-paint on that swap too.
+      this.$watch('osMode', () => { this.rehighlightEditor(); });
 
       await Promise.all([this.loadExamples(), this.loadSaved()]);
       this.recomputeGutter();
+      this.rehighlightEditor();
 
       // Deep-link handler: if the page was opened with a fragment
       // like ``#engine=cypher&q=…&os_mode=dsl`` (e.g. from a "Open
@@ -818,9 +1176,50 @@ function dbConsole() {
 
     onEditorInput() {
       this.tabIsDirty = true;
+      this.recomputeGutter();
+      this.rehighlightEditor();
       // Debounced auto-persist; saves on every keystroke after a short pause.
       if (this._saveTimer) clearTimeout(this._saveTimer);
       this._saveTimer = setTimeout(() => this.persistActive(), 350);
+    },
+
+    // ── syntax highlight overlay ─────────────────────────────────
+    // Returns the highlight.js language id matching the current engine.
+    // OpenSearch is bimodal: SQL plugin vs raw JSON DSL.
+    editorLanguage() {
+      if (this.engine === 'opensearch') return this.osMode === 'sql' ? 'sql' : 'json';
+      if (this.engine === 'sparql') return 'sparql';
+      if (this.engine === 'cypher') return 'cypher';
+      return 'sql';
+    },
+    rehighlightEditor() {
+      const ta = this.$refs.textarea;
+      const hl = this.$refs.highlight;
+      if (!ta || !hl || !window.hljs) return;
+      const lang = this.editorLanguage();
+      // Trailing newline guarantees the overlay has the same number of
+      // visible lines as the textarea after a newline-terminated edit.
+      const src = (ta.value || '') + '\n';
+      try {
+        hl.innerHTML = hljs.highlight(src, { language: lang, ignoreIllegals: true }).value;
+      } catch (_) {
+        hl.textContent = src;  // grammar failed — degrade to plain text
+      }
+      // Apply current scroll offset to the freshly-rendered code.
+      this.syncEditorScroll();
+    },
+    syncEditorScroll() {
+      const ta = this.$refs.textarea;
+      const hl = this.$refs.highlight;
+      const g  = this.$refs.gutter;
+      if (!ta) return;
+      if (g)  g.scrollTop  = ta.scrollTop;
+      if (hl) {
+        // Translate the code element to match textarea scroll. Using
+        // transform (not scrollTop on <pre>) avoids the pre needing
+        // its own scrollbar overlapping the textarea's.
+        hl.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+      }
     },
 
     switchTab(id) {
@@ -987,6 +1386,7 @@ function dbConsole() {
     // ── run ──────────────────────────────────────────────────────
     async run() {
       this.busy = true; this.error = ''; this.rows = []; this.columns = []; this.rawDump = '';
+      const t0 = performance.now();
       try {
         const body = { query: this.query };
         let path;
@@ -1014,8 +1414,63 @@ function dbConsole() {
         this.sortDir = 'asc';
         // New schema → drop any per-column type overrides from the previous query.
         this.cellTypes = {};
+        // Log the successful run for the session-log panel.
+        this.appendSessionLog({
+          ts: new Date().toISOString(),
+          engine: this.engine,
+          os_mode: this.engine === 'opensearch' ? this.osMode : null,
+          tab_name: this.activeTabName || 'untitled',
+          query: this.query || '',
+          runtime_ms: Math.round(performance.now() - t0),
+          row_count: this.rows.length,
+        });
       } catch (e) { this.error = e.message; }
       finally   { this.busy = false; }
+    },
+
+    // ── session query log (per-browser, capped) ──────────────────
+    // Ring-buffer FIFO: newest at index 0, oldest evicted when the
+    // array grows past SESSION_LOG_CAP. Stored in localStorage so it
+    // survives page reloads but stays local to the browser.
+    appendSessionLog(entry) {
+      entry.id = 'lg-' + Math.random().toString(36).slice(2, 10);
+      this.sessionLog.unshift(entry);
+      if (this.sessionLog.length > SESSION_LOG_CAP) {
+        this.sessionLog = this.sessionLog.slice(0, SESSION_LOG_CAP);
+      }
+      saveSessionLog(this.sessionLog);
+    },
+    clearSessionLog() {
+      if (!confirm('Clear all session log entries?')) return;
+      this.sessionLog = [];
+      saveSessionLog(this.sessionLog);
+    },
+    loadFromLog(entry) {
+      // Re-open as a fresh tab so it's clear this is a replay; the
+      // user can pin or rename if they want to keep it around.
+      const t = {
+        id: newTabId(),
+        name: '↺ ' + (entry.tab_name || 'log'),
+        engine: entry.engine,
+        content: entry.query || '',
+      };
+      this.tabs.push(t);
+      saveTabs(this.tabs);
+      if (entry.os_mode) this.osMode = entry.os_mode;
+      this.engine = entry.engine;
+      this.switchTab(t.id);
+    },
+    formatLogTime(iso) {
+      // Friendly relative time for compact log rows.
+      try {
+        const d = new Date(iso).getTime();
+        const diff = (Date.now() - d) / 1000;
+        if (diff < 5)     return 'just now';
+        if (diff < 60)    return Math.round(diff) + 's ago';
+        if (diff < 3600)  return Math.round(diff / 60) + 'm ago';
+        if (diff < 86400) return Math.round(diff / 3600) + 'h ago';
+        return new Date(iso).toLocaleDateString();
+      } catch (_) { return iso; }
     },
 
     // ── sorting ──────────────────────────────────────────────────
