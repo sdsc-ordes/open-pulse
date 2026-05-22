@@ -1,8 +1,11 @@
 # Caddyfile for the SPARQL reverse proxy.
 #
 # Always-protected writes on /update and /store (admin credential).
-# Reads (`/query` and `/`) are public BY DEFAULT but can be gated behind a
-# second credential — see SPARQL_READ_AUTH_PATHS below.
+# Reads on `/` (YASGUI UI) and `/query` are gated BY DEFAULT — the
+# compose service ships ``SPARQL_READ_AUTH_PATHS=/ /query /query/*``,
+# which this Caddyfile re-applies as a fallback when the env var
+# isn't passed. Set ``SPARQL_READ_AUTH_PATHS=__off__`` in ``infra/.env``
+# to expose reads anonymously.
 #
 # Users come from /etc/caddy/users/{admin,reader}/* (mounted from
 # infra/services/sparql-proxy/users in the host). One user per line:
@@ -32,21 +35,23 @@
 
 	# ── SPARQL reverse-proxy ──────────────────────────────────────────
 
-	# Optional read auth.
+	# Read auth (on by default).
 	#
-	# When SPARQL_READ_AUTH_PATHS is unset, Caddy substitutes the sentinel
-	# `__off__`, which matches no real request → reads pass through.
+	# The sparql-proxy service in docker-compose passes
+	# ``SPARQL_READ_AUTH_PATHS=/ /query /query/*`` by default, so this
+	# fallback only fires if compose-env doesn't reach us (e.g. when
+	# the container is started standalone via ``docker run``). Keeping
+	# both layers aligned avoids ever shipping an open YASGUI UI by
+	# accident.
 	#
-	# Set SPARQL_READ_AUTH_PATHS (in the sparql-proxy service env) to one or
-	# more paths to gate reads behind auth. Example:
+	# Override to ``__off__`` in ``infra/.env`` to expose reads anonymously.
 	#
-	#     SPARQL_READ_AUTH_PATHS=/query /query/*
-	#
-	# Both `users/admin/*` and `users/reader/*` are imported here, so admin
-	# credentials are accepted on reads (in addition to writes), while a
-	# dedicated reader credential can be issued for read-only access.
+	# Both ``users/admin/*`` and ``users/reader/*`` are imported below,
+	# so admin credentials are accepted on reads (in addition to writes),
+	# while a dedicated reader credential can be issued for read-only
+	# access via ``SPARQL_READER_AUTH``.
 	@reads_protected {
-		path {$SPARQL_READ_AUTH_PATHS:__off__}
+		path {$SPARQL_READ_AUTH_PATHS:/ /query /query/*}
 	}
 	basic_auth @reads_protected {
 		import /etc/caddy/users/admin/*
