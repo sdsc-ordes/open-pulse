@@ -190,6 +190,15 @@ _COLLECTION_LABELS: dict[str, tuple[str, str]] = {
     ),
     "swissubase_entities": ("SWISSUbase studies", "www.swissubase.ch"),
     "epfl_graph_disciplines": ("EPFL Graph disciplines", "graphsearch.epfl.ch"),
+    # OAM Monitor: publications carry openalex IDs as URLs, organisations
+    # carry ROR URLs — both surface as clickable samples via the
+    # entity_id-is-a-URL fallback in qdrant._canonical_url_for_point.
+    # Journals + publishers carry internal numeric IDs / slugged names
+    # with no canonical landing page, so their cards just stay text.
+    "oamonitor_publications": ("OAM Monitor publications", "openalex.org"),
+    "oamonitor_organisations": ("OAM Monitor organisations", "ror.org"),
+    "oamonitor_journals": ("OAM Monitor journals", ""),
+    "oamonitor_publishers": ("OAM Monitor publishers", ""),
 }
 
 # Tiny module-level cache for the collection stats. The home page is
