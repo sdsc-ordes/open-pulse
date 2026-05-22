@@ -92,6 +92,16 @@ templates.env.globals["api_docs"] = [
         "url": _settings.extractor_docs_url,
     },
 ]
+# Per-service URLs exposed as flat template globals so any page (in
+# particular ``status.html`` Quick-links) can link out to a real
+# host:port without hardcoding ``localhost``. Each value already
+# accounts for ``HUB_PUBLIC_HOST`` via the compose interpolation, so a
+# future hostname change only needs the env var, never a template edit.
+templates.env.globals["neo4j_browser_url"] = _settings.neo4j_browser_url
+templates.env.globals["sparql_browser_url"] = _settings.sparql_browser_url
+templates.env.globals["opensearch_dashboards_url"] = _settings.opensearch_dashboards_url
+templates.env.globals["crawler_docs_url"] = _settings.crawler_docs_url
+templates.env.globals["extractor_docs_url"] = _settings.extractor_docs_url
 
 
 # Several route modules ship their own Jinja2Templates instance
