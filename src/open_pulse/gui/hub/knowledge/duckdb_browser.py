@@ -328,11 +328,21 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "extractor/index/swissubase/duckdb/swissubase.duckdb",
         "studies",
     ),
-    # Zenodo — records is the headline table (creators / files / communities
-    # are link tables better surfaced from a record's hub page).
+    # Zenodo — records is the headline table; communities + creators are
+    # exposed alongside so the row browser can serve them directly via
+    # ``/hub/c/<name>`` even though they don't have their own Qdrant
+    # collection (yet — they live only in the DuckDB source-of-truth).
     "zenodo_records": (
         _DATA_ROOT / "extractor/index/zenodo/duckdb/zenodo.duckdb",
         "records",
+    ),
+    "zenodo_communities": (
+        _DATA_ROOT / "extractor/index/zenodo/duckdb/zenodo.duckdb",
+        "communities",
+    ),
+    "zenodo_creators": (
+        _DATA_ROOT / "extractor/index/zenodo/duckdb/zenodo.duckdb",
+        "creators",
     ),
 }
 
@@ -391,6 +401,8 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "swissubase_entities": ("survey", "FORS", "Switzerland", "households"),
     # Zenodo
     "zenodo_records": ("dataset", "epfl", "10.5281", "machine learning"),
+    "zenodo_communities": ("epfl", "swiss", "open", "research"),
+    "zenodo_creators": ("EPFL", "Müller", "Patrick", "Anna"),
 }
 
 

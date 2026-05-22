@@ -82,6 +82,10 @@ _SOURCE_METADATA: dict[str, dict[str, str]] = {
     "zenodo.org": {
         "homepage": "https://zenodo.org",
         "description": "Open-science deposits with DOIs (datasets, software, posters).",
+        # Google's S2 favicon service returns a tiny generic icon for
+        # zenodo.org; override with the official Zenodo wordmark so
+        # the tile is recognisable at a glance.
+        "logo_url": "https://data-repository-finder.ll.mit.edu/repo_logos/Zenodo.png",
     },
     "huggingface.co": {
         "homepage": "https://huggingface.co",
@@ -232,7 +236,11 @@ def _collection_stats() -> list[dict[str, object]]:
                 "label": label,
                 "host": host,
                 "count": count,
-                "logo_url": _logo_for_host(host),
+                # Per-source override wins (lets us pin the official
+                # Zenodo wordmark and similar branded icons); fall
+                # back to Google's S2 favicon service for hosts that
+                # don't ship a curated logo.
+                "logo_url": meta.get("logo_url") or _logo_for_host(host),
                 "homepage": meta.get("homepage", ""),
                 "description": meta.get("description", ""),
             }
@@ -368,7 +376,7 @@ def hub_collection(request: Request, name: str) -> HTMLResponse:
             "count": count,
             "samples": samples,
             "source_type": qdrant._source_type_for(name),
-            "logo_url": _logo_for_host(host),
+            "logo_url": meta.get("logo_url") or _logo_for_host(host),
             "homepage": meta.get("homepage", ""),
             "description": meta.get("description", ""),
             "browsable": duckdb_browser.is_browsable(name),
