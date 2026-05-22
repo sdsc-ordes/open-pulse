@@ -187,6 +187,14 @@ async def facets(refresh: bool = False) -> dict[str, Any]:
     """
     settings = get_settings()
     endpoint = settings.sparql_url
+    # The sparql-proxy in front of Oxigraph requires Basic Auth. Resolve
+    # the credentials the hub container was booted with (SPARQL_AUTH,
+    # parsed in the settings loader) and thread them into every per-facet
+    # query — without this the proxy returns 401 and every facet card
+    # shows "⚠ HTTP 401".
+    auth: tuple[str, str] | None = None
+    if settings.sparql_user and settings.sparql_password:
+        auth = (settings.sparql_user, settings.sparql_password)
     now = time.time()
     if (
         not refresh
@@ -198,7 +206,7 @@ async def facets(refresh: bool = False) -> dict[str, Any]:
 
     async def _facet_values(client: httpx.AsyncClient, facet) -> dict[str, Any]:
         try:
-            body = await _run_sparql(client, endpoint, facet.values_query)
+            body = await _run_sparql(client, endpoint, facet.values_query, auth=auth)
         except Exception as exc:  # noqa: BLE001 — surface the error per facet
             return {
                 "key": facet.key,
