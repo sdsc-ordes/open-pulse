@@ -385,14 +385,8 @@
                            painted: false,
                            scripts: {{ {"python": result.recipes.python, "bash": result.recipes.bash, "js": result.recipes.js} | tojson }},
                            langClass() { return "language-" + (this.lang === "js" ? "javascript" : this.lang); },
-                           repaint() {
-                             if (!window.hljs || !this.$refs.code) return;
-                             this.$refs.code.removeAttribute("data-highlighted");
-                             try { window.hljs.highlightElement(this.$refs.code); } catch (_) {}
-                             try { if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(this.$refs.code); } catch (_) {}
-                           },
                          }'
-                         @toggle="if ($el.open && !painted) { painted = true; $nextTick(() => repaint()); }">
+                         @toggle="if ($el.open && !painted) { painted = true; setTimeout(() => chaossHighlight($el), 80); }">
                   <summary class="chaoss-recipe-summary">
                     <span class="chaoss-trace-chevron" aria-hidden="true">▸</span>
                     <span>Reproduce end-to-end</span>
@@ -409,7 +403,7 @@
                       <div class="chaoss-recipe-tabs">
                         {% for L, pretty in [('python', 'python'), ('bash', 'bash'), ('js', 'node.js')] %}
                           <button type="button"
-                                  @click="lang = '{{ L }}'; $nextTick(() => repaint())"
+                                  @click="lang = '{{ L }}'; $nextTick(() => chaossHighlight($root))"
                                   :class="lang === '{{ L }}' ? 'is-active' : ''">{{ pretty }}</button>
                         {% endfor %}
                       </div>

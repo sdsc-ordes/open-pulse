@@ -23,6 +23,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -30,6 +31,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from ..auth import get_settings, maybe_require_auth
+from ..knowledge import duckdb_browser
 from ..knowledge import enrich as enrich_mod
 from ..knowledge import normalize, opensearch, qdrant, registry, stats, stores, wanted
 
@@ -337,8 +339,53 @@ def hub_collection(request: Request, name: str) -> HTMLResponse:
             "logo_url": _logo_for_host(host),
             "homepage": meta.get("homepage", ""),
             "description": meta.get("description", ""),
+            "browsable": duckdb_browser.is_browsable(name),
         },
     )
+
+
+@router.get(
+    "/api/hub/c/{name}/rows",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_collection_rows(
+    name: str,
+    page: int = 1,
+    size: int = duckdb_browser.DEFAULT_PAGE_SIZE,
+    q: str = "",
+) -> dict[str, Any]:
+    """Paginated rows from the DuckDB table backing collection ``name``.
+
+    ``q`` is a case-insensitive substring filter applied to the columns
+    listed in the collection's ``search_cols``. Empty ``q`` returns the
+    unfiltered slice. Throws a 404 when the collection isn't registered.
+    """
+    payload = duckdb_browser.list_rows(name, page=page, size=size, q=q)
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"collection {name!r} has no DuckDB backing registered",
+        )
+    return payload
+
+
+@router.get(
+    "/api/hub/c/{name}/stats",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_collection_stats(name: str) -> dict[str, Any]:
+    """Headline scalar stats for the collection landing page."""
+    stats = duckdb_browser.top_stats(name)
+    if stats is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"collection {name!r} has no DuckDB backing registered",
+        )
+    return {
+        "collection": name,
+        "stats": stats,
+        "search": duckdb_browser.search_info(name) or {},
+    }
 
 
 @router.get(

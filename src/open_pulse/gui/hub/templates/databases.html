@@ -7,6 +7,7 @@
    (atom-one-dark) plays nicely with the existing dark code panel
    in both light and dark hub themes. #}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
 <div x-data="dbConsole()" x-init="init()" class="space-y-4">
 
   <!-- Engine picker -->
@@ -401,21 +402,23 @@
     opacity: 1;
   }
 
-  /* ── code editor with gutter ───────────────────────────────────── */
+  /* ── code editor with gutter — uses the unified --code-* palette
+   *    so the editor matches the chaoss trace + recipe blocks
+   *    (background, gutter colour, line-number column). */
   .code-editor {
     display: flex;
     align-items: stretch;
     border: 1px solid var(--border);
     border-radius: 6px;
-    background: var(--surface-soft);
+    background: var(--code-bg);
     overflow: hidden;
   }
   .code-editor .gutter {
     margin: 0;
-    padding: 10px 8px 10px 10px;
-    border-right: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--fg-faint);
+    padding: 10px 12px 10px 14px;
+    border-right: 1px solid var(--code-ln-border);
+    background: var(--code-ln-bg);
+    color: var(--code-ln-fg);
     font: 13px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
     text-align: right;
     user-select: none;
@@ -423,6 +426,7 @@
     min-width: 40px;
     max-height: inherit;
     white-space: pre;
+    font-variant-numeric: tabular-nums;
   }
   .code-editor textarea {
     flex: 1;
@@ -430,14 +434,15 @@
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
+    color: var(--code-fg) !important;
     resize: vertical;
-    padding: 10px 12px;
+    padding: 10px 14px;
     font: 13px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
     box-shadow: none !important;
     outline: 0;
   }
   .code-editor textarea:focus {
-    background: var(--surface) !important;
+    background: transparent !important;
   }
 </style>
 
@@ -950,6 +955,8 @@ function dbConsole() {
       el.className = 'hljs language-' + this.snippetHljsLang();
       if (window.hljs) {
         try { window.hljs.highlightElement(el); } catch (_) {}
+        // Add line-numbers gutter, matching the chaoss expanders.
+        try { if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(el, { singleLine: true }); } catch (_) {}
       }
     },
     async copySnippet() {
