@@ -355,7 +355,7 @@ services:
       HUB_NEO4J_BROWSER_URL: "${HUB_NEO4J_BROWSER_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7503}"
       HUB_SPARQL_BROWSER_URL: "${HUB_SPARQL_BROWSER_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7502}"
       HUB_OPENSEARCH_DASHBOARDS_URL: "${HUB_OPENSEARCH_DASHBOARDS_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7508}"
-      HUB_ONTOLOGY_URL: "${HUB_ONTOLOGY_URL:-https://github.com/sdsc-ordes/open-pulse-ontology}"
+      HUB_ONTOLOGY_URL: "${HUB_ONTOLOGY_URL:-https://sdsc-ordes.github.io/open-pulse-ontology/versions/v2.1.2/index.html}"
       # Swagger UIs are proxied through the hub (auth-gated) by default, so
       # the upstream pages don't need to be reachable anonymously. Set a full
       # URL to bypass the hub proxy.
