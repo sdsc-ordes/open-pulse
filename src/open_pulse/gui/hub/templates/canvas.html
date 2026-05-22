@@ -197,7 +197,17 @@
    * stage. The rest of Excalidraw's top container — burger menu,
    * Library button, and the property panel that appears on selection
    * (stroke colour, fill, stroke width…) — stays anchored at the top
-   * so it never shoves the canvas around when a node is selected. */
+   * so it never shoves the canvas around when a node is selected.
+   *
+   * Earlier iterations of this block also forced ``layer-ui__wrapper``
+   * to ``pointer-events: none`` so its absolute box wouldn't swallow
+   * canvas clicks. That cascaded ``none`` into every descendant
+   * (because the immediate-child override doesn't reach the shape
+   * buttons), which silently broke the selection tool — the user
+   * could no longer pick the arrow / hand tool, so nothing on the
+   * canvas was selectable. Excalidraw's own CSS already prevents
+   * its UI layer from eating canvas events, so we trust the
+   * defaults here. */
   .canvas-stage .excalidraw .shapes-section {
     position: absolute !important;
     bottom: 12px !important;
@@ -205,30 +215,6 @@
     transform: translateX(-50%);
     top: auto !important;
     z-index: 4;
-  }
-  /* The original spot the shape picker leaves behind sits empty;
-   * collapse the top container's gap so the burger + library aren't
-   * spread across the whole top with a wide blank middle. */
-  .canvas-stage .excalidraw .App-menu_top {
-    grid-template-columns: auto 0px auto !important;
-    gap: 0 !important;
-  }
-  /* Make sure no Excalidraw popover or container can push the page
-   * layout — they all live inside the absolutely-positioned stage
-   * so they overlay rather than reflow. */
-  .canvas-stage .excalidraw .FixedSideContainer,
-  .canvas-stage .excalidraw .layer-ui__wrapper,
-  .canvas-stage .excalidraw .Island {
-    pointer-events: auto;
-  }
-  .canvas-stage .excalidraw .layer-ui__wrapper {
-    position: absolute !important;
-    inset: 0 !important;
-    overflow: hidden !important;
-    pointer-events: none;
-  }
-  .canvas-stage .excalidraw .layer-ui__wrapper > * {
-    pointer-events: auto;
   }
 
   /* Bottom-left status pill. */
@@ -606,8 +592,14 @@
   // the same group so clicking selects the whole card (Excalidraw
   // selects an entire group on first click). Centralising here keeps
   // search-mode and expand-mode visually identical.
-  function _buildEntityCard(entity, x, y, style) {
+  //
+  // ``via`` is an array of source-store keys (``['neo4j','sparql']``)
+  // surfaced as a small right-aligned "via NEO4J · SPARQL" line at
+  // the bottom of the card so the user can see at a glance which
+  // hub backend supplied the node.
+  function _buildEntityCard(entity, x, y, style, via) {
     style = style || KIND_STYLE.default;
+    via = (via && via.length) ? via : (entity.source_store ? [entity.source_store] : []);
     const groupId = 'op-' + Math.random().toString(36).slice(2, 10);
     const link = entity.hub_url || entity.external_url || null;
     const customData = {
@@ -618,6 +610,7 @@
         source_type: entity.source_type,
         label: entity.title || entity.label || '',
         badge: entity.badge || '',
+        sources: via,
       },
     };
     const cleft = x - CARD_W / 2;
@@ -625,6 +618,11 @@
     const kindLabel = (entity.source_type || entity.kind || 'entity').toUpperCase();
     const title = entity.title || entity.label || entity.hub_url || 'untitled';
     const badge = entity.badge || '';
+    const viaLabel = via.length ? 'via ' + via.map(v => String(v).toUpperCase()).join(' · ') : '';
+    // Approximate width of the via text so we can right-align it
+    // without relying on Excalidraw's text-measurement helpers.
+    // 6 px per character is a decent estimate for a 10 px monospace.
+    const viaX = cleft + CARD_W - 14 - Math.max(60, viaLabel.length * 5.5);
 
     const specs = [
       // Rectangle — the only element that holds the link + entity
@@ -667,11 +665,24 @@
     if (badge) {
       specs.push({
         type: 'text',
-        x: cleft + 14, y: ctop + 64,
+        x: cleft + 14, y: ctop + 60,
         text: badge,
         fontSize: 12,
         fontFamily: 3,
         strokeColor: style.stroke + 'cc',  // faded kind colour
+        groupIds: [groupId],
+      });
+    }
+    // "via NEO4J · SPARQL" — bottom-right, very faded so it sits
+    // behind the title hierarchically but is still findable.
+    if (viaLabel) {
+      specs.push({
+        type: 'text',
+        x: viaX, y: ctop + CARD_H - 16,
+        text: viaLabel,
+        fontSize: 10,
+        fontFamily: 3,
+        strokeColor: style.stroke + '88',
         groupIds: [groupId],
       });
     }
@@ -688,7 +699,7 @@
     // other when the user opens Cmd+/ several times in a row.
     const jitter = () => (Math.random() - 0.5) * 220;
     const { els } = _buildEntityCard(
-      entity, cx + jitter(), cy + jitter(), KIND_STYLE.related
+      entity, cx + jitter(), cy + jitter(), KIND_STYLE.related, ['qdrant']
     );
     api.updateScene({ elements: [...api.getSceneElements(), ...els] });
     placedCount += 1;
@@ -724,70 +735,67 @@
     return { ax: parent.x + parent.width, ay: cy,                         axisX: 0,  axisY: 1,  dirX:  1, dirY:  0 };
   }
 
-  // ── Expand: place N related entities as children of a parent node.
-  // Children are grouped by relation kind (people / related / backlink),
-  // each kind extending from a different side of the parent. The
-  // connecting arrow carries a bound text label naming the relation,
-  // and the child card uses a kind-specific colour so the graph self-
-  // documents at a glance.
+  // ── Expand: place picked entities as children of a parent node.
+  //
+  // ``picks`` is the deduplicated shape produced by ``applyExpand``:
+  //
+  //   [{ entity, relations: [{kind, title}, ...] }, ...]
+  //
+  // Each unique entity becomes ONE card (so the same repo surfacing
+  // as both a Neo4j neighbour AND a Qdrant sibling renders once),
+  // with one arrow per relation drawn from the parent. Each arrow
+  // carries its own kind colour + group-title label so the user can
+  // tell at a glance which store / why the connection exists.
   window.canvasExpandFrom = (parent, picks) => {
     if (!api || !parent || !picks?.length) return;
     const parentRect = parent._rect || api.getSceneElements().find(el => el.id === parent.id);
     if (!parentRect) return;
 
-    // Bucket by groupKind|groupTitle so each (kind, group) lays out
-    // its own row spanning from the parent. ``Authors`` stays
-    // separate from ``Contributors`` even though both are kind="people".
-    const buckets = new Map();
-    for (const p of picks) {
-      const key = (p.groupKind || 'default') + '|' + (p.groupTitle || '');
-      if (!buckets.has(key)) buckets.set(key, { kind: p.groupKind || 'default', label: p.groupTitle || '', items: [] });
-      buckets.get(key).items.push(p.entity);
-    }
-
     const fresh = [];
-    // Track index per side so multiple groups on the same side stagger.
+    // Track index per side so multiple cards on the same side stagger.
     const sideIdx = { right: 0, left: 0, top: 0, bottom: 0 };
-    // Collect arrow IDs to attach to the parent's ``boundElements``
-    // array (Excalidraw's reciprocal binding — without it the arrow
-    // start does NOT track parent movement, which is exactly what
-    // the user just reported).
     const parentArrowIds = [];
 
-    for (const bucket of buckets.values()) {
-      const style = KIND_STYLE[bucket.kind] || KIND_STYLE.default;
+    for (const pick of picks) {
+      const entity = pick.entity;
+      // Primary relation drives the card's style + which side of the
+      // parent it lands on. The "via" line on the card lists every
+      // store that contributed this entity, so the cross-source
+      // identity is visible without picking a single winner.
+      const primary = (pick.relations && pick.relations[0]) || { kind: 'default', title: '' };
+      const style = KIND_STYLE[primary.kind] || KIND_STYLE.default;
       const a = _anchor(parentRect, style.side);
-      const distance = 260 + sideIdx[style.side] * 200;       // each successive group on this side pushes further out
+      const distance = 260 + sideIdx[style.side] * 130;
       sideIdx[style.side] += 1;
-      const rowGap = 110;
-      const n = bucket.items.length;
-      // Group origin: a point ``distance`` away along the side's
-      // outward direction; siblings spread perpendicular to that.
-      const ox = a.ax + a.dirX * distance;
-      const oy = a.ay + a.dirY * distance;
+      const cx = a.ax + a.dirX * distance;
+      const cy = a.ay + a.dirY * distance;
 
-      bucket.items.forEach((entity, i) => {
-        const off = i - (n - 1) / 2;
-        const cx = ox + a.axisX * off * rowGap;
-        const cy = oy + a.axisY * off * rowGap;
+      // Build the card; ``via`` lists every kind that mentioned this
+      // entity. Order preserved so the user sees them in the same
+      // order they ticked them in the modal.
+      const via = pick.relations.map(r => r.kind);
+      const card = _buildEntityCard(entity, cx, cy, style, via);
+      const childRectId = card.rectId;
+      fresh.push(...card.els);
 
-        // Build the child card via the shared helper so it matches
-        // the single-place style (rounded corners, 3-line layout
-        // with kind / title / badge, link only on rect).
-        const card = _buildEntityCard(entity, cx, cy, style);
-        const childRectId = card.rectId;
-
-        // Arrow skeleton + raw bindings (see canvasPlaceEntity comment).
-        const ax2 = cx;                              // child centre x
-        const ay2 = cy;                              // child centre y
+      // One arrow per relation, each with its own colour + label so
+      // the user can still tell apart "this is via Neo4j" from "this
+      // is via SPARQL". Arrows fan out from the parent at slightly
+      // different angles via an automatic vertical offset on the
+      // start point — easier to tell apart than overlapping lines.
+      pick.relations.forEach((rel, ri) => {
+        const arrStyle = KIND_STYLE[rel.kind] || KIND_STYLE.default;
+        const offset = (ri - (pick.relations.length - 1) / 2) * 12;
+        const sx = a.ax + a.axisX * offset;
+        const sy = a.ay + a.axisY * offset;
         const arrow = convertToExcalidrawElements([{
           type: 'arrow',
-          x: a.ax, y: a.ay,
-          points: [[0, 0], [ax2 - a.ax, ay2 - a.ay]],
-          strokeColor: style.stroke,
+          x: sx, y: sy,
+          points: [[0, 0], [cx - sx, cy - sy]],
+          strokeColor: arrStyle.stroke,
           strokeWidth: 1.2,
           roughness: 0.5,
-          label: { text: bucket.label || bucket.kind, fontSize: 11 },
+          label: { text: rel.title || rel.kind, fontSize: 11 },
         }]);
         const arrowId = arrow[0].id;
         arrow[0] = {
@@ -795,9 +803,6 @@
           startBinding: { elementId: parentRect.id, focus: 0, gap: 6 },
           endBinding:   { elementId: childRectId,   focus: 0, gap: 6 },
         };
-
-        // Reciprocal binding on the child rect (the parent's update
-        // happens once after the loop, via patchedExisting below).
         card.els[0] = {
           ...card.els[0],
           boundElements: [
@@ -806,8 +811,7 @@
           ],
         };
         parentArrowIds.push(arrowId);
-
-        fresh.push(...card.els, ...arrow);
+        fresh.push(...arrow);
       });
     }
 
@@ -859,17 +863,58 @@ function canvasPage() {
     _CACHE_TTL_MS: 5 * 60 * 1000,
 
     init() {
-      // ⌘// / Ctrl+/ opens the palette. ``Cmd+K`` is already bound by
-      // Excalidraw (Add link to selected element) so we use a free
-      // slash combo — also natural as a "search/command" cue.
-      // When a single op_entity node is selected on the canvas the
-      // same shortcut opens the palette in expand mode instead.
-      window.addEventListener('keydown', (e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+      // ⌘// / Ctrl+/ — toggle behaviour:
+      // * Modal closed → open palette (search or expand depending on
+      //   whether a single op_entity node is currently selected).
+      // * Modal open in expand mode with at least one ticked item →
+      //   apply (place picks + draw arrows) and close.
+      // * Modal open in any other state → just close (escape-ish).
+      //
+      // ``Cmd+K`` would be the obvious shortcut but it's already
+      // bound by Excalidraw to "Add link to selected element", so we
+      // use a free slash combo — also natural as a "search /
+      // command" cue.
+      //
+      // Registered in CAPTURE phase: Excalidraw installs its own
+      // keydown handler on the document and may ``stopPropagation``
+      // on unhandled shortcuts that include a meta/ctrl modifier,
+      // which would otherwise swallow our combo before it reaches a
+      // bubble-phase window listener.
+      const handler = (e) => {
+        // Accept either the literal slash character ("/") or its
+        // physical KeyboardEvent.code ("Slash") — international
+        // layouts where ``/`` requires Shift still report ``code:
+        // 'Slash'``, so this stays portable.
+        const isSlash = e.key === '/' || e.code === 'Slash';
+        if ((e.metaKey || e.ctrlKey) && isSlash) {
           e.preventDefault();
-          this.openCmdk();
+          e.stopPropagation();
+          if (this.cmdkOpen) {
+            if (this.mode === 'expand' && this.expandCheckedCount() > 0) {
+              this.applyExpand();
+            } else {
+              this.closeCmdk();
+            }
+          } else {
+            this.openCmdk();
+          }
         }
-      });
+      };
+      // Register the keydown listener exactly once even if Alpine
+      // re-runs ``init()`` (e.g. when nested x-data scopes refresh).
+      // Without this guard the modal toggles open → closed on a
+      // single Cmd+/ because two listeners both react to the same
+      // event.
+      if (!window.__opCanvasKeydown) {
+        window.__opCanvasKeydown = handler;
+        window.addEventListener('keydown', handler, { capture: true });
+      } else {
+        // A previous init already attached one; swap in the new
+        // ``this``-bound version so the latest scope drives behaviour.
+        window.removeEventListener('keydown', window.__opCanvasKeydown, { capture: true });
+        window.__opCanvasKeydown = handler;
+        window.addEventListener('keydown', handler, { capture: true });
+      }
       window.addEventListener('canvas-ready',  () => { this.ready = true; });
       window.addEventListener('canvas-placed', (e) => { this.placed = e.detail?.n || 0; });
     },
@@ -1048,14 +1093,21 @@ function canvasPage() {
     applyExpand() {
       const parent = this.expandFor;
       if (!parent || !window.canvasExpandFrom) { this.closeCmdk(); return; }
-      // Flatten checked items, keeping group title + kind so the
-      // placement function can label edges and pick a layout side.
-      const picks = [];
+      // Deduplicate by canonical hub_url so a single entity that
+      // appears in multiple relation groups (Neo4j "owner of" +
+      // Qdrant "More from sdsc-ordes" + SPARQL "codeRepository")
+      // becomes ONE card on the canvas with N arrows — one per
+      // relation, each carrying its own colour + label.
+      const byKey = new Map();
       for (const g of this.expandGroups) {
         for (const it of g.items) {
-          if (it.checked) picks.push({ entity: it, groupTitle: g.title, groupKind: g.kind });
+          if (!it.checked) continue;
+          const key = it.hub_url || (it.external_url || (g.title + '|' + it.label));
+          if (!byKey.has(key)) byKey.set(key, { entity: it, relations: [] });
+          byKey.get(key).relations.push({ kind: g.kind, title: g.title });
         }
       }
+      const picks = Array.from(byKey.values());
       window.canvasExpandFrom(parent, picks);
       this.closeCmdk();
     },
