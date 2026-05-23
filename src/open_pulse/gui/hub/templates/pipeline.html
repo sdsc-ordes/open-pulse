@@ -209,6 +209,49 @@
     </div>
   </section>
 
+  <!-- ── Archives (zipped JSON-LD outputs from past runs) ──────────────── -->
+  <section x-init="loadArchives()">
+    <div class="flex items-baseline mb-2">
+      <h2 class="card-title">Archives</h2>
+      <span class="ml-auto card-meta" x-text="archives.length + ' file' + (archives.length === 1 ? '' : 's')"></span>
+      <button class="btn btn-ghost ml-3" @click="loadArchives()">↻</button>
+    </div>
+    <p class="card-meta" style="font-style: italic;">
+      Zipped <code>metadata_extractor.output_dir</code> from quests that ran with
+      <code>archive_outputs.enabled: true</code>. Each archive packages the JSON-LD
+      payloads for one quest run; download to ingest elsewhere or keep as a snapshot.
+    </p>
+
+    <p class="card-meta" x-show="!archives.length" style="font-style: italic; margin-top: 8px;">
+      No archives yet. Enable <code>archive_outputs</code> in a quest YAML to generate one
+      at the end of the next run.
+    </p>
+
+    <div class="card" style="padding: 0; overflow: hidden; margin-top: 8px;" x-show="archives.length">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Name</th><th>Files</th><th>Size</th><th>Created</th><th style="text-align: right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="a in archives" :key="a.name">
+            <tr>
+              <td class="mono" style="word-break: break-all;" x-text="a.name"></td>
+              <td x-text="a.file_count === null ? '— (corrupt?)' : a.file_count"></td>
+              <td x-text="formatBytes(a.size_bytes)"></td>
+              <td class="card-meta" x-text="new Date(a.created_at).toLocaleString()"></td>
+              <td style="text-align: right; white-space: nowrap;">
+                <a class="btn btn-primary" :href="archiveDownloadUrl(a.name)" x-text="'⤓ Download'"></a>
+                <button class="btn btn-danger" @click="deleteArchive(a.name)" title="Remove this archive">✕</button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   </div><!-- /tab Ongoing -->
 
   <!-- ╔══════════════ Launch tab ══════════════════════════════════════ ╗ -->
@@ -649,6 +692,9 @@ function pipelineRunner() {
     selectedRunAutoRefresh: true,
     _recentRunsHandle: null,
     _selectedRunHandle: null,
+
+    // ── Archives (zipped JSON-LD outputs, Ongoing tab) ────────────────
+    archives: [],
     // Crawler-side stats for the currently-selected run, when its
     // crawler step has logged a job_id. The runner log only knows the
     // id; the live stats come from the crawler API itself.
@@ -664,7 +710,7 @@ function pipelineRunner() {
     copyStatus: '',
 
     // Detached-run state. activeRun is the most recent run-status payload.
-    pipelineSteps: ['crawler', 'frontier_extend', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects'],
+    pipelineSteps: ['crawler', 'frontier_extend', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects', 'archive_outputs'],
     activeRun: null,
     autoRefresh: true,
     stopping: false,
@@ -674,7 +720,7 @@ function pipelineRunner() {
     showCreate: false,
     creating: false,
     createStatus: '',
-    stepIds: ['crawler', 'frontier_extend', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects'],
+    stepIds: ['crawler', 'frontier_extend', 'neo4j_upload', 'metadata_extractor', 'sparql_upload', 'apply_grimoire_projects', 'archive_outputs'],
     newQuest: {
       name: '',
       description: '',
@@ -857,6 +903,34 @@ function pipelineRunner() {
             this.recentRuns = j.runs || [];
           } catch (_) {}
         }, 8000);
+      }
+    },
+
+    // ── Archives (zipped JSON-LD outputs) ───────────────────────────────
+    async loadArchives() {
+      try {
+        const r = await fetch('/api/pipeline/archives');
+        if (!r.ok) return;
+        const j = await r.json();
+        this.archives = j.archives || [];
+      } catch (_) { /* keep last */ }
+    },
+    archiveDownloadUrl(name) {
+      // FileResponse on the server side sets Content-Disposition for us;
+      // a plain anchor href is enough to make the browser save it.
+      return '/api/pipeline/archives/' + encodeURIComponent(name) + '/download';
+    },
+    async deleteArchive(name) {
+      if (!confirm('Delete archive ' + name + '? This cannot be undone.')) return;
+      try {
+        const r = await fetch('/api/pipeline/archives/' + encodeURIComponent(name), { method: 'DELETE' });
+        if (!r.ok) {
+          alert('Delete failed: HTTP ' + r.status);
+          return;
+        }
+        await this.loadArchives();
+      } catch (e) {
+        alert('Delete failed: ' + e.message);
       }
     },
     async selectRecentRun(runId) {

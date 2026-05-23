@@ -20,6 +20,10 @@ import yaml
 from docker.errors import NotFound
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
+import zipfile
+
+from fastapi.responses import FileResponse
+
 from ..auth import get_settings, require_auth
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
@@ -67,6 +71,7 @@ PIPELINE_STEPS = (
     "metadata_extractor",
     "sparql_upload",
     "apply_grimoire_projects",
+    "archive_outputs",
 )
 
 
@@ -1023,3 +1028,108 @@ def run_stop(
         "exit_code": rc,
         "output": (out or b"").decode("utf-8", "replace").strip(),
     }
+
+
+# ── Archives ────────────────────────────────────────────────────────────────
+#
+# Zips produced by the ``archive_outputs`` pipeline step land in
+# ``data/hub/archives/`` (resolved from the cli's CWD, which is bind-mounted
+# at the same path the hub sees as ``/data/hub/archives``). The hub reads
+# this directory directly — no docker-exec — to list and stream zips.
+
+
+def _archives_dir() -> Path:
+    """Where archive zips land on the hub side.
+
+    The path is symmetric: ``archive_outputs`` writes to
+    ``data/hub/archives`` relative to the cli's CWD; that lands at
+    ``/data/hub/archives`` inside both containers via the same bind
+    mount. Settings' ``data_dir`` resolves to ``/data/hub`` for the hub.
+    """
+    settings = get_settings()
+    p = settings.data_dir / "archives"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _safe_archive_name(name: str) -> str:
+    """Sanitize a user-supplied archive filename.
+
+    The download endpoint takes the name as a path segment; we treat it
+    as a single basename (no directory traversal, no shell chars beyond
+    the safe set). Refusing rather than rewriting so a malformed request
+    returns 400, not a silently-different file.
+    """
+    if not name or "/" in name or "\\" in name or ".." in name or name.startswith("."):
+        raise HTTPException(status_code=400, detail="invalid archive name")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        raise HTTPException(status_code=400, detail="invalid archive name")
+    if not name.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="archive name must end in .zip")
+    return name
+
+
+@router.get("/archives", dependencies=[Depends(require_auth)])
+def list_archives() -> dict[str, Any]:
+    """List every ``.zip`` in the archives directory, newest first.
+
+    Each entry: ``name``, ``size_bytes``, ``created_at`` (mtime as ISO),
+    and ``file_count`` (cheap to read from the zip's central directory).
+    Listed unfiltered; the Quests-page UI groups by quest-name prefix
+    on the client side.
+    """
+    root = _archives_dir()
+    files = sorted(root.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+    out: list[dict[str, Any]] = []
+    for p in files:
+        st = p.stat()
+        entry: dict[str, Any] = {
+            "name": p.name,
+            "size_bytes": st.st_size,
+            "created_at": datetime.fromtimestamp(
+                st.st_mtime, tz=timezone.utc
+            ).isoformat(),
+        }
+        try:
+            with zipfile.ZipFile(p, "r") as zf:
+                entry["file_count"] = sum(
+                    1 for n in zf.namelist() if not n.endswith("/")
+                )
+        except (zipfile.BadZipFile, OSError):
+            entry["file_count"] = None  # corrupt or unreadable — still show it
+        out.append(entry)
+    return {"archives": out, "total": len(out)}
+
+
+@router.get("/archives/{name}/download", dependencies=[Depends(require_auth)])
+def download_archive(name: str) -> FileResponse:
+    """Stream the named zip as a download.
+
+    The browser sees a ``Content-Disposition: attachment`` so it offers
+    a save dialog. Path traversal is blocked by ``_safe_archive_name``.
+    """
+    safe = _safe_archive_name(name)
+    path = _archives_dir() / safe
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"archive {safe!r} not found")
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=safe,
+    )
+
+
+@router.delete("/archives/{name}", dependencies=[Depends(require_auth)])
+def delete_archive(name: str) -> dict[str, Any]:
+    """Remove an archive from the archives directory.
+
+    Surfaced as a small action on the Quests-page list; the user
+    keeps control over disk usage without shelling into the container.
+    """
+    safe = _safe_archive_name(name)
+    path = _archives_dir() / safe
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"archive {safe!r} not found")
+    size = path.stat().st_size
+    path.unlink()
+    return {"deleted": safe, "size_bytes": size}

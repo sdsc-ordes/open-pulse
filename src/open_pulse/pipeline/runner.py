@@ -21,6 +21,7 @@ from open_pulse.services.container import ServiceContainer
 from open_pulse.tasks import FunctionTask
 
 from .apply_grimoire_projects import run_apply_grimoire_projects
+from .archive_outputs import run_archive_outputs
 from .config import QuestFileConfig, RetryConfig, StepConfig
 from .crawler import run_crawler
 from .frontier_extend import run_frontier_extend
@@ -32,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 StepFunc = Callable[[dict[str, object]], None]
 
+# Ordering matters: archive_outputs is last so it runs AFTER any step
+# that writes into the directory it archives (typically the
+# metadata_extractor + sparql_upload pair).
 STEP_REGISTRY: dict[str, StepFunc] = {
     "crawler": run_crawler,
     "frontier_extend": run_frontier_extend,
@@ -39,6 +43,7 @@ STEP_REGISTRY: dict[str, StepFunc] = {
     "metadata_extractor": run_metadata_extractor,
     "sparql_upload": run_sparql_upload,
     "apply_grimoire_projects": run_apply_grimoire_projects,
+    "archive_outputs": run_archive_outputs,
 }
 
 STEP_NAMES: tuple[str, ...] = tuple(STEP_REGISTRY)
@@ -131,6 +136,7 @@ def build_tasks(config: QuestFileConfig) -> tuple[FunctionTask, ...]:
         "metadata_extractor": quest.steps.metadata_extractor,
         "sparql_upload": quest.steps.sparql_upload,
         "apply_grimoire_projects": quest.steps.apply_grimoire_projects,
+        "archive_outputs": quest.steps.archive_outputs,
     }
 
     tasks: list[FunctionTask] = []
@@ -241,6 +247,7 @@ def run_single_step(
         "metadata_extractor": quest.steps.metadata_extractor,
         "sparql_upload": quest.steps.sparql_upload,
         "apply_grimoire_projects": quest.steps.apply_grimoire_projects,
+        "archive_outputs": quest.steps.archive_outputs,
     }
     services = ServiceContainer.from_quest_config(quest)
     func = STEP_REGISTRY[step_name]
