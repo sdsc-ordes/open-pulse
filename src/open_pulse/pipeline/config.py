@@ -155,6 +155,15 @@ class MetadataExtractorStepConfig(StepConfig):
     ``gme-internal:location``, ``gme-internal:keywords`` survive into the
     JSON-LD output and therefore into the RDF triples uploaded to SPARQL.
     Default False for ontology compliance."""
+    stream_to_sparql: bool = False
+    """Publish each successful extraction to the SPARQL store immediately,
+    instead of waiting for a downstream ``sparql_upload`` step. Triples
+    land in Oxigraph progressively so long runs become useful before they
+    finish. SPARQL Graph Store semantics are idempotent — a later
+    ``sparql_upload`` over the same files is a safe no-op or retry."""
+    stream_named_graph: str | None = None
+    """Target named graph URI for the streamed uploads. When ``None`` the
+    triples land in the default graph (same shape as ``sparql_upload``)."""
 
 
 class SparqlUploadStepConfig(StepConfig):
