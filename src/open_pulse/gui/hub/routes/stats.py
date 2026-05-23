@@ -289,9 +289,9 @@ async def _opensearch_counts(client: httpx.AsyncClient) -> dict[str, int | None]
         )
         orgs: int | None = None
         if r.status_code == 200:
-            buckets = (
-                (r.json().get("aggregations") or {}).get("by_origin") or {}
-            ).get("buckets") or []
+            buckets = ((r.json().get("aggregations") or {}).get("by_origin") or {}).get(
+                "buckets"
+            ) or []
             # https://github.com/{org}/{repo} -> {org}
             orgs_set: set[str] = set()
             for b in buckets:
@@ -459,9 +459,7 @@ def _history_db() -> sqlite3.Connection:
     )
     # Idempotent column add for deployments that pre-date the per-backend
     # chart work. ``PRAGMA table_info`` is the cheapest way to check.
-    existing = {
-        row[1] for row in conn.execute("PRAGMA table_info(metrics_history)")
-    }
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(metrics_history)")}
     for col_def in _HISTORY_ADDED_COLUMNS:
         col_name = col_def.split()[0]
         if col_name not in existing:
@@ -611,8 +609,7 @@ def history(
         else:
             cutoff = _RANGE_MAP[range_]
             rows = conn.execute(
-                _HISTORY_SELECT
-                + " WHERE ts > datetime('now', ?) ORDER BY ts ASC",
+                _HISTORY_SELECT + " WHERE ts > datetime('now', ?) ORDER BY ts ASC",
                 (cutoff,),
             ).fetchall()
     finally:
