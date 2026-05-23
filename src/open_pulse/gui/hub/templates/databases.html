@@ -336,10 +336,69 @@
         <span class="card-meta ml-2"
               x-text="graphStats.nodes + ' nodes · ' + graphStats.edges + ' edges'"></span>
         <div class="ml-auto" style="display: flex; gap: 6px;">
+          <!-- Configure panel: only relevant in scalar-mapping mode. The
+               button is hidden when the result has native Node objects
+               because there's nothing for the user to configure. -->
+          <button class="btn btn-ghost"
+                  x-show="graphMapping.length > 0"
+                  @click="graphConfigOpen = !graphConfigOpen"
+                  :title="graphConfigOpen ? 'Hide column mapping' : 'Show column mapping'">
+            <span x-text="graphConfigOpen ? '▼ columns' : '▸ columns'"></span>
+          </button>
           <button class="btn btn-ghost" @click="redrawGraph()" title="Re-run layout">↻ relayout</button>
           <button class="btn btn-ghost" @click="closeGraph()" title="Close (Esc)">✕</button>
         </div>
       </div>
+
+      <!-- Column-mapping panel: lets the user pick which columns are
+           nodes (and their kind) and which carry edge labels. Shown
+           collapsed by default once auto-detect succeeds; expanded
+           when the heuristic couldn't pick ≥2 node columns. -->
+      <div class="graph-config" x-show="graphConfigOpen && graphMapping.length > 0" x-cloak>
+        <div class="graph-config-head">
+          <span class="card-meta">
+            Map each column to a role. Auto-detected from the query —
+            edit if the heuristic missed.
+          </span>
+          <div class="ml-auto" style="display: flex; gap: 6px;">
+            <button class="btn btn-ghost" @click="resetMapping()" title="Re-run auto-detect from the query">
+              ↺ auto-detect
+            </button>
+            <button class="btn btn-primary" @click="redrawGraph()" title="Apply current mapping">
+              ▶ render
+            </button>
+          </div>
+        </div>
+        <div class="graph-config-grid">
+          <template x-for="(col, i) in columns" :key="col + '::' + i">
+            <div class="graph-config-row">
+              <span class="graph-config-col" :title="col" x-text="col"></span>
+              <select class="graph-config-role"
+                      @change="updateMapping(i, { role: $event.target.value })">
+                <option value="ignore"
+                        :selected="(graphMapping[i] && graphMapping[i].role) === 'ignore'">Ignore</option>
+                <option value="node"
+                        :selected="(graphMapping[i] && graphMapping[i].role) === 'node'">Node</option>
+                <option value="edge"
+                        :selected="(graphMapping[i] && graphMapping[i].role) === 'edge'">Edge label</option>
+              </select>
+              <input class="graph-config-kind"
+                     placeholder="Repo / User / Org / …"
+                     :disabled="!(graphMapping[i] && graphMapping[i].role === 'node')"
+                     :value="(graphMapping[i] && graphMapping[i].kind) || ''"
+                     @change="updateMapping(i, { kind: $event.target.value })" />
+              <!-- Always rendered so the per-row grid keeps four columns
+                   even when there's no binding hint to show. Empty
+                   string is invisible but holds the slot open. -->
+              <span class="card-meta graph-config-hint"
+                    x-text="(graphMapping[i] && graphMapping[i].binding)
+                            ? '(query var: ' + graphMapping[i].binding + ')'
+                            : ''"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
       <div id="cypher-graph-canvas" class="graph-canvas"></div>
       <div class="graph-modal-footer">
         <span class="card-meta">drag to pan · scroll to zoom · click a node for details</span>
@@ -853,6 +912,57 @@
     min-height: 0;
     background: var(--surface-sunk, #fafafa);
   }
+  /* Configure-columns panel inside the graph modal. Sits between the
+     header and the canvas; collapsible via the chevron button. */
+  .graph-config {
+    padding: 8px 14px 10px 14px;
+    border-bottom: 1px solid var(--border, #ddd);
+    background: var(--surface-soft, #f6f6f8);
+  }
+  .graph-config-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+  }
+  .graph-config-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .graph-config-row {
+    /* Each row is its own grid so the hint cell being hidden via
+       x-show (display: none) just leaves blank space in that row,
+       instead of pulling the NEXT row's cells into this one's slot. */
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) 110px minmax(160px, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+  }
+  .graph-config-col {
+    font-size: 12px;
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .graph-config-role,
+  .graph-config-kind {
+    font-size: 11px;
+    padding: 2px 6px;
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #ddd);
+    border-radius: 3px;
+    color: var(--fg, inherit);
+  }
+  .graph-config-kind:disabled {
+    opacity: 0.5;
+    background: var(--surface-sunk, #f0f0f0);
+  }
+  .graph-config-hint {
+    font-size: 10px;
+    font-style: italic;
+  }
   [x-cloak] { display: none !important; }
 </style>
 
@@ -1091,6 +1201,27 @@ function dbConsole() {
     graphNetwork: null,
     graphStats: { nodes: 0, edges: 0 },
     graphSelectedLabel: '',
+    // Query text that produced the current result set — captured at
+    // ``run()`` time so the graph view's cypher introspection sees the
+    // query a user actually executed, not whatever they have in the
+    // editor right now.
+    lastQueryRan: '',
+    // Per-column role mapping for the graph view's scalar-extraction
+    // mode. Built by auto-detection (introspection + column-name
+    // heuristics); the user can override via the modal's "Configure
+    // columns" panel. Shape: ``[{role: 'node'|'edge'|'ignore',
+    // kind: '<Label>', binding: '<cypher-var>' }, …]`` indexed by
+    // column position. Persisted per query in localStorage.
+    graphMapping: [],
+    // Cached cypher introspection of ``lastQueryRan``: bindings,
+    // their labels, and the edges between them. ``null`` when the
+    // result came back with native node objects (no introspection
+    // needed) or when the query couldn't be parsed.
+    graphIntrospection: null,
+    // Whether the modal's column-mapping panel is expanded. Auto-
+    // collapsed when auto-detect picked ≥2 node columns; auto-
+    // expanded otherwise so the user knows to map columns.
+    graphConfigOpen: false,
     // Per-column render override (set via the in-header dropdown). Keys
     // are column names; values are one of:
     //   auto    — primitive → text, object → tree, array → sub-table,
@@ -1489,6 +1620,14 @@ function dbConsole() {
         const j = await r.json();
         this.columns = j.columns || []; this.rows = j.rows || []; this.truncated = !!j.truncated;
         this.rawDump = j.raw ? JSON.stringify(j.raw, null, 2) : '';
+        // Remember what produced this row set — needed by the graph
+        // view's introspection pass (binding → label → edge type).
+        this.lastQueryRan = this.query || '';
+        // Reset graph mapping/introspection so it gets rebuilt for the
+        // new result; the user's overrides (if any) live in localStorage
+        // and get reloaded on the next openGraph().
+        this.graphMapping = [];
+        this.graphIntrospection = null;
         // Reset sort on a fresh result set so the user sees raw order first.
         this.sortColumn = null;
         this.sortDir = 'asc';
@@ -1658,6 +1797,18 @@ function dbConsole() {
     // we surface a "View as graph" button that renders a vis-network
     // canvas in a modal.
     _graphElementsFromRows() {
+      // Two paths into the same vis-network shape:
+      //  - native: result already carries Node/Rel objects (RETURN n, r).
+      //  - mapped: scalar-only result; pick node columns + reuse the
+      //    query introspection for edge labels.
+      // The button visibility check ensures we only get here on Cypher.
+      if (this._hasNativeNodes()) {
+        return this._graphElementsFromNative();
+      }
+      return this._graphElementsFromMapping();
+    },
+
+    _graphElementsFromNative() {
       const nodes = new Map();
       const edges = new Map();
       const visit = (v) => {
@@ -1698,6 +1849,329 @@ function dbConsole() {
       }
       return { nodes: [...nodes.values()], edges: final_edges };
     },
+
+    // Hard cap on nodes for the mapped-mode renderer. vis-network gets
+    // sluggish past a couple thousand; 500 keeps modal interactions
+    // snappy on a typical laptop. Bumpable via the "Configure" panel.
+    _GRAPH_NODE_CAP: 500,
+
+    _graphElementsFromMapping() {
+      const mapping = this.graphMapping || [];
+      // Pre-split the mapping by role so the per-row loop stays tight.
+      const nodeCols = [];   // [{idx, kind, binding}]
+      const edgeCols = [];   // [{idx}]
+      for (let i = 0; i < mapping.length; i++) {
+        const m = mapping[i] || { role: 'ignore' };
+        if (m.role === 'node') {
+          nodeCols.push({ idx: i, kind: (m.kind || 'node').trim() || 'node', binding: m.binding || null });
+        } else if (m.role === 'edge') {
+          edgeCols.push({ idx: i });
+        }
+      }
+      if (nodeCols.length < 2) {
+        return { nodes: [], edges: [] };
+      }
+
+      // Edge-label lookup keyed on (fromBinding, toBinding) — drawn
+      // from the query introspection so the user gets relationship
+      // types for free when the query named both ends.
+      const intro = this.graphIntrospection;
+      const edgeLabel = (fromB, toB) => {
+        if (!intro || !fromB || !toB) return '';
+        for (const e of intro.edges) {
+          if (e.from === fromB && e.to === toB) return e.type || '';
+          if (!e.directed && e.from === toB && e.to === fromB) return e.type || '';
+        }
+        return '';
+      };
+
+      const cap = this._GRAPH_NODE_CAP;
+      const nodes = new Map();
+      const edges = new Map();
+      for (const row of this.rows) {
+        // Materialise the row's node identities in left-to-right column
+        // order — that ordering also drives the edge path below.
+        const rowNodes = [];
+        for (const nc of nodeCols) {
+          const v = row[nc.idx];
+          if (v === null || v === undefined || v === '') continue;
+          const idStr = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+          // Namespace the id by kind so a Repo and a User with the same
+          // string value (e.g. an org login matching a repo full_name
+          // prefix) collapse to two separate nodes.
+          const id = nc.kind + '::' + idStr;
+          rowNodes.push({ id, label: idStr, kind: nc.kind, binding: nc.binding });
+        }
+        for (const n of rowNodes) {
+          if (nodes.has(n.id)) continue;
+          if (nodes.size >= cap) break;
+          nodes.set(n.id, { id: n.id, label: n.label, group: n.kind });
+        }
+
+        // Pull a per-row edge label from the first non-empty edge column,
+        // when the user mapped one explicitly. Falls back to the cypher
+        // introspection's relationship type for the (from, to) binding pair.
+        let explicitLabel = '';
+        for (const ec of edgeCols) {
+          const v = row[ec.idx];
+          if (v !== null && v !== undefined && v !== '') {
+            explicitLabel = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+            break;
+          }
+        }
+        // Wire edges as a path through node columns left-to-right —
+        // matches how the user reads the row. For "all pairs", swap the
+        // loop body, but the linear path is way cleaner visually.
+        for (let i = 0; i + 1 < rowNodes.length; i++) {
+          const a = rowNodes[i], b = rowNodes[i + 1];
+          if (!nodes.has(a.id) || !nodes.has(b.id)) continue;
+          const label = explicitLabel || edgeLabel(a.binding, b.binding) || '';
+          // Edge id keys collapse the same (from, to, label) triple
+          // across rows — keeps the graph reading clean when the same
+          // relationship recurs.
+          const key = a.id + '→' + b.id + '|' + label;
+          if (!edges.has(key)) {
+            edges.set(key, {
+              id: 'e-' + edges.size,
+              from: a.id, to: b.id,
+              label,
+              arrows: 'to',
+            });
+          }
+        }
+      }
+      return { nodes: [...nodes.values()], edges: [...edges.values()] };
+    },
+
+    // ── Cypher introspection ────────────────────────────────────────
+    // Two regex passes over the query text — cheap, no parser
+    // dependency. Returns:
+    //   bindingLabels:  { <var>: <Label> }
+    //   columnBindings: { <returned-col-name>: <var> }
+    //   edges:          [ { from, to, type, directed } ]
+    // ``null`` when the query isn't Cypher or doesn't parse.
+    _cypherIntrospect(query) {
+      if (!query || this.engine !== 'cypher') return null;
+      // Strip ``// line`` and ``/* block */`` comments before regexing.
+      const stripped = query
+        .replace(/\/\/[^\n]*/g, ' ')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ');
+
+      // Pass 1: binding → label from ``(var:Label)`` patterns. Ignores
+      // properties inside the parens (``{login: 'x'}``) and
+      // ``WHERE``-style clauses since we anchor on the var:Label start.
+      const bindingLabels = {};
+      const nodeRe = /\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*([A-Z][a-zA-Z0-9_]*)/g;
+      let m;
+      while ((m = nodeRe.exec(stripped))) {
+        // First seen wins — re-bindings via ``WITH`` typically reuse
+        // the same label, so this is robust enough for the common case.
+        if (!bindingLabels[m[1]]) bindingLabels[m[1]] = m[2];
+      }
+
+      // Pass 2: edges between bindings.
+      // Recognise ``(a)-[r:TYPE]->(b)``, ``(a)<-[:TYPE]-(b)``, and
+      // anonymous variants. ``[type=null]`` is preserved so we can
+      // still draw the edge without a label.
+      const edges = [];
+      const edgeRe = new RegExp(
+        // first node: anchor on identifier then skip rest of the parens
+        '\\(\\s*([a-zA-Z_][a-zA-Z0-9_]*)' +
+        '(?:\\s*:\\s*[A-Za-z][A-Za-z0-9_]*)?' +
+        '[^)]*\\)' +
+        // optional left arrow
+        '\\s*(<?-)' +
+        // optional ``[r:TYPE]`` chunk (var optional, type optional)
+        '\\s*(?:\\[' +
+        '\\s*(?:[a-zA-Z_][a-zA-Z0-9_]*)?' +
+        '\\s*(?::\\s*([A-Z_][A-Z0-9_]*))?' +
+        '[^\\]]*\\])?' +
+        // optional right arrow
+        '\\s*(-?>?)' +
+        // second node: anchor on identifier
+        '\\s*\\(\\s*([a-zA-Z_][a-zA-Z0-9_]*)',
+        'g',
+      );
+      while ((m = edgeRe.exec(stripped))) {
+        const from = m[1];
+        const leftArrow = m[2] === '<-';
+        const type = m[3] || null;
+        const rightArrow = m[4] === '->';
+        const to = m[5];
+        const directed = leftArrow || rightArrow;
+        edges.push({
+          from: leftArrow ? to : from,
+          to:   leftArrow ? from : to,
+          type,
+          directed,
+        });
+      }
+
+      // Pass 3: column → binding via ``RETURN <expr> AS <alias>``.
+      //
+      // The expression part can be a plain ``<binding>`` /
+      // ``<binding>.<prop>``, an aliased property (``r.full_name AS
+      // repo``), or wrapped in a function — the common case being
+      // ``coalesce(n.full_name, n.login) AS neighbor_id``. For wrapped
+      // expressions we scan the whole expression for any identifier
+      // that's a known binding and take the first match. That covers
+      // ``properties(r)``, ``coalesce(...)``, ``CASE WHEN startNode(rel)
+      //  …``, etc., without parsing the expression for real.
+      const columnBindings = {};
+      const retMatch = stripped.match(/\bRETURN\s+([\s\S]+?)(?:\s+(?:ORDER\s+BY|LIMIT|UNION|$))/i);
+      if (retMatch) {
+        const items = this._splitTopLevelCommas(retMatch[1]);
+        for (const raw of items) {
+          const item = raw.trim();
+          // Try to split ``<expr> AS <alias>`` from the right so a
+          // multi-arg ``coalesce(a, b) AS x`` keeps the alias
+          // separate from the expr's commas/parens.
+          const asMatch = item.match(/^([\s\S]+?)\s+AS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$/i);
+          let expr, alias;
+          if (asMatch) {
+            expr = asMatch[1].trim();
+            alias = asMatch[2];
+          } else {
+            expr = item;
+            // No alias → the bare binding name is also its column name.
+            // ``<binding>.<prop>`` without alias gets a weird Neo4j-side
+            // column name that's not worth predicting.
+            const bare = item.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*$/);
+            if (bare && bindingLabels[bare[1]]) {
+              columnBindings[bare[1]] = bare[1];
+            }
+            continue;
+          }
+
+          // Fast path: ``<binding>`` or ``<binding>.<prop>`` exactly.
+          const direct = expr.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?\s*$/);
+          if (direct && bindingLabels[direct[1]]) {
+            columnBindings[alias] = direct[1];
+            continue;
+          }
+
+          // Slow path: the expression is wrapped in a function call.
+          // We only want to tie the alias to a binding when the
+          // expression returns the BINDING'S IDENTITY (its full_name /
+          // login / name / id), not when it just *references* the
+          // binding to compute something else.
+          //
+          // Concrete examples we want to recognise as identity:
+          //   coalesce(n.full_name, n.login)   → n
+          //   trim(u.login)                    → u
+          //
+          // Examples we want to REJECT (they reference the binding
+          // but don't return its identity):
+          //   labels(r)[0]      → label string, not the Repo id
+          //   properties(r)     → property dict
+          //   count(DISTINCT r) → integer
+          //   type(rel)         → edge label
+          //   CASE WHEN startNode(rel) = r THEN 'out' ELSE 'in' END
+          //
+          // Heuristic: only match when the expression contains
+          // ``<binding>.<identity-prop>`` for an identity prop from
+          // the small whitelist below. The first such match wins.
+          const IDENTITY_PROPS = /(?:full_name|login|name|id|email|slug)\b/i;
+          const propRe = /\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
+          let pm;
+          while ((pm = propRe.exec(expr))) {
+            const binding = pm[1];
+            const prop = pm[2];
+            if (bindingLabels[binding] && IDENTITY_PROPS.test(prop)) {
+              columnBindings[alias] = binding;
+              break;
+            }
+          }
+        }
+      }
+
+      return { bindingLabels, columnBindings, edges };
+    },
+
+    _splitTopLevelCommas(text) {
+      // Walk char-by-char tracking bracket depth so commas inside a
+      // function call (``count(DISTINCT r)``) don't split the
+      // projection. Cheap and adequate for the regex-grade parsing
+      // we're doing here.
+      const out = [];
+      let depth = 0, start = 0;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '(' || c === '[' || c === '{') depth++;
+        else if (c === ')' || c === ']' || c === '}') depth--;
+        else if (c === ',' && depth === 0) {
+          out.push(text.slice(start, i));
+          start = i + 1;
+        }
+      }
+      out.push(text.slice(start));
+      return out;
+    },
+
+    // Build the default column → role mapping for the modal's
+    // configure panel. Combines the cypher introspection (most
+    // accurate) with column-name heuristics (last-ditch fallback so
+    // queries that don't parse cleanly still get reasonable defaults).
+    _autoDetectColumnMapping() {
+      const intro = this.graphIntrospection || { bindingLabels: {}, columnBindings: {}, edges: [] };
+      return this.columns.map((col) => {
+        // 1. Introspection pinned this column to a labeled binding.
+        const binding = intro.columnBindings[col];
+        if (binding && intro.bindingLabels[binding]) {
+          return { role: 'node', kind: intro.bindingLabels[binding], binding };
+        }
+        // 2. Name-based heuristics — case-insensitive, whole-word.
+        //
+        // Conservative on purpose: a plural like "repos" or
+        // "contributors" almost always means a COUNT in our chips
+        // (``count(DISTINCT r) AS repos``); flagging it as a node
+        // would create one node per integer value. The user can
+        // always upgrade ``ignore`` → ``node`` in the configure panel.
+        const low = col.toLowerCase();
+        const REPO_RE = /^(repo|repository|library|client|origin|seed|full_name|repo_id|repo_name)$/;
+        const USER_RE = /^(user|author|contributor|reviewer|commenter|member|login|user_login|user_name|neighbor_id)$/;
+        const ORG_RE  = /^(org|organization|owner|owner_login)$/;
+        const EDGE_RE = /^(type|rel|edge|kind|direction|relationship|edge_type)$/;
+        if (REPO_RE.test(low)) return { role: 'node', kind: 'Repo', binding: null };
+        if (USER_RE.test(low)) return { role: 'node', kind: 'User', binding: null };
+        if (ORG_RE.test(low))  return { role: 'node', kind: 'Org',  binding: null };
+        if (EDGE_RE.test(low)) return { role: 'edge', kind: '',     binding: null };
+        return { role: 'ignore', kind: '', binding: null };
+      });
+    },
+
+    // Stable hash of the query text — keys the per-query mapping in
+    // localStorage. Plain djb2; collisions are harmless (worst case
+    // the user re-configures the panel once).
+    _queryHash(text) {
+      let h = 5381;
+      const s = (text || '');
+      for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
+      return 'graph-map-' + (h >>> 0).toString(36);
+    },
+
+    _loadPersistedMapping() {
+      try {
+        const raw = localStorage.getItem(this._queryHash(this.lastQueryRan));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        // Guard against schema drift: keep only when the column count
+        // matches the current result. Mismatches usually mean a
+        // different query happened to hash the same way (extremely
+        // unlikely) or the result schema changed.
+        if (Array.isArray(parsed) && parsed.length === this.columns.length) return parsed;
+        return null;
+      } catch (_) { return null; }
+    },
+
+    _savePersistedMapping() {
+      try {
+        localStorage.setItem(
+          this._queryHash(this.lastQueryRan),
+          JSON.stringify(this.graphMapping),
+        );
+      } catch (_) { /* quota or private mode — drop silently */ }
+    },
     _htmlTooltip(labels, obj) {
       // vis-network supports an HTMLElement as title — that's what we'd
       // need for proper escaping. With a plain string the value is
@@ -1716,7 +2190,15 @@ function dbConsole() {
       return lines.join('<br>');
     },
     hasGraphData() {
+      // Show the "View as graph" button on any non-empty Cypher result
+      // that *could* render meaningfully — i.e. either the result
+      // already carries native Node objects (RETURN n, r) or we have
+      // ≥2 columns we can map to nodes via the configure panel.
       if (this.engine !== 'cypher' || !this.rows.length) return false;
+      if (this._hasNativeNodes()) return true;
+      return this.columns.length >= 2;
+    },
+    _hasNativeNodes() {
       for (const row of this.rows) {
         for (const cell of row) {
           if (cell && typeof cell === 'object' && cell._kind === 'node') return true;
@@ -1747,12 +2229,59 @@ function dbConsole() {
         this.error = String(e);
         return;
       }
+      // Scalar mode prep: build (or reload) the column → role mapping
+      // before mounting so the first frame already shows the right
+      // nodes/edges. When the result carries native Node objects this
+      // is a no-op — _graphElementsFromRows() takes the native path.
+      if (!this._hasNativeNodes()) {
+        this.graphIntrospection = this._cypherIntrospect(this.lastQueryRan);
+        const persisted = this._loadPersistedMapping();
+        if (persisted) {
+          this.graphMapping = persisted;
+          this.graphConfigOpen = false;
+        } else {
+          this.graphMapping = this._autoDetectColumnMapping();
+          // Force the configure panel open when auto-detect couldn't
+          // find ≥2 node columns — the user needs to map something
+          // before the graph is meaningful.
+          const nNodeCols = this.graphMapping.filter(m => m.role === 'node').length;
+          this.graphConfigOpen = nNodeCols < 2;
+        }
+      } else {
+        this.graphMapping = [];
+        this.graphIntrospection = null;
+        this.graphConfigOpen = false;
+      }
       const { nodes, edges } = this._graphElementsFromRows();
       this.graphStats = { nodes: nodes.length, edges: edges.length };
       this.graphSelectedLabel = '';
       this.graphOpen = true;
       // Defer the network construction until the modal DOM is mounted.
       this.$nextTick(() => this._mountGraph(nodes, edges));
+    },
+
+    // Called by the configure-panel controls (role dropdown, kind
+    // input, "Render" button). Saves the user's overrides to
+    // localStorage so the next openGraph() with the same query starts
+    // already configured.
+    updateMapping(i, patch) {
+      const m = { ...(this.graphMapping[i] || { role: 'ignore', kind: '', binding: null }), ...patch };
+      // If the user switches a column away from "node", clear the
+      // binding hint since the introspection-derived edge label is
+      // only meaningful between two binding-typed columns.
+      if (m.role !== 'node') m.binding = null;
+      this.graphMapping.splice(i, 1, m);
+      this._savePersistedMapping();
+    },
+
+    resetMapping() {
+      // Drop the persisted override and re-run auto-detection from the
+      // introspection. Handy when the heuristic was wrong and the user
+      // edited their way into a mess.
+      try { localStorage.removeItem(this._queryHash(this.lastQueryRan)); }
+      catch (_) {}
+      this.graphMapping = this._autoDetectColumnMapping();
+      this.redrawGraph();
     },
     _mountGraph(nodes, edges) {
       const el = document.getElementById('cypher-graph-canvas');
