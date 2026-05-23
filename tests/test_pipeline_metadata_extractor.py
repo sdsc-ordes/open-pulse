@@ -369,3 +369,127 @@ def test_run_metadata_extractor_unknown_mode_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unknown mode"):
         run_metadata_extractor(ctx)
+
+
+# -- parallel-mode tests -----------------------------------------------------
+
+
+def test_run_metadata_extractor_max_workers_runs_in_parallel(tmp_path: Path) -> None:
+    """``max_workers > 1`` should overlap v2 calls in time.
+
+    Stubs ``extract_repo_jsonld_v2`` so each call blocks for a fixed
+    interval, then asserts the wall-clock time was a small fraction of
+    what a sequential run would take.
+    """
+    import time
+
+    crawler_dir = tmp_path / "crawler-json"
+    output_dir = tmp_path / "metadata-json"
+    repos = [f"owner/repo-{i:02d}" for i in range(6)]
+    _seed_crawler_graph(crawler_dir, repos)
+
+    DELAY = 0.4  # seconds per repo
+
+    def _stub(full_name: str, **_kwargs: Any) -> dict[str, Any]:
+        time.sleep(DELAY)
+        return {"output": [{"@id": f"https://github.com/{full_name}"}]}
+
+    extractor = MagicMock(spec=MetadataExtractorService)
+    extractor.extract_repo_jsonld_v2.side_effect = _stub
+
+    services = _make_container(extractor)
+    ctx = {
+        "services": services,
+        "step_config": {
+            "input_dir": str(crawler_dir),
+            "output_dir": str(output_dir),
+            "mode": "v2",
+            "max_workers": 6,
+            "v2_poll_interval_seconds": 0.0,
+            "v2_timeout_seconds": 5.0,
+        },
+    }
+
+    started = time.monotonic()
+    run_metadata_extractor(ctx)
+    elapsed = time.monotonic() - started
+
+    # All 6 files written.
+    assert len(list(output_dir.glob("*.json"))) == 6
+    # 6 sequential calls would be ≥ 6×DELAY = 2.4s; in parallel it
+    # should be ≈ DELAY plus pool overhead. Give a generous ceiling
+    # so a slow CI box doesn't flake the test.
+    assert elapsed < DELAY * 3, (
+        f"parallel pool didn't overlap calls (elapsed={elapsed:.2f}s, "
+        f"would be ≥ {6 * DELAY:.2f}s sequential)"
+    )
+
+
+def test_run_metadata_extractor_max_workers_one_is_sequential(tmp_path: Path) -> None:
+    """``max_workers=1`` should preserve the old single-threaded behaviour:
+    extract_repo_jsonld_v2 is called once per non-skipped repo, no
+    counters get lost under contention."""
+    crawler_dir = tmp_path / "crawler-json"
+    output_dir = tmp_path / "metadata-json"
+    _seed_crawler_graph(crawler_dir, [f"o/r{i}" for i in range(4)])
+
+    extractor = MagicMock(spec=MetadataExtractorService)
+    extractor.extract_repo_jsonld_v2.side_effect = (
+        lambda full, **_kwargs: {"output": [{"@id": f"https://github.com/{full}"}]}
+    )
+
+    services = _make_container(extractor)
+    ctx = {
+        "services": services,
+        "step_config": {
+            "input_dir": str(crawler_dir),
+            "output_dir": str(output_dir),
+            "mode": "v2",
+            "max_workers": 1,
+            "v2_poll_interval_seconds": 0.0,
+            "v2_timeout_seconds": 5.0,
+        },
+    }
+
+    run_metadata_extractor(ctx)
+
+    assert extractor.extract_repo_jsonld_v2.call_count == 4
+    assert len(list(output_dir.glob("*.json"))) == 4
+
+
+def test_run_metadata_extractor_parallel_partial_failure_counted(tmp_path: Path) -> None:
+    """Under concurrency every failed repo must end up in the failed
+    list, and every success in the success counter — no races."""
+    crawler_dir = tmp_path / "crawler-json"
+    output_dir = tmp_path / "metadata-json"
+    repos = [f"o/r{i:02d}" for i in range(8)]
+    _seed_crawler_graph(crawler_dir, repos)
+
+    def _stub(full_name: str, **_kwargs: Any) -> dict[str, Any]:
+        # Half the repos raise; half succeed.
+        idx = int(full_name.rsplit("r", 1)[-1])
+        if idx % 2 == 0:
+            raise RuntimeError(f"boom on {full_name}")
+        return {"output": [{"@id": f"https://github.com/{full_name}"}]}
+
+    extractor = MagicMock(spec=MetadataExtractorService)
+    extractor.extract_repo_jsonld_v2.side_effect = _stub
+
+    services = _make_container(extractor)
+    ctx = {
+        "services": services,
+        "step_config": {
+            "input_dir": str(crawler_dir),
+            "output_dir": str(output_dir),
+            "mode": "v2",
+            "max_workers": 4,
+            "v2_poll_interval_seconds": 0.0,
+            "v2_timeout_seconds": 5.0,
+        },
+    }
+
+    run_metadata_extractor(ctx)
+
+    # 4 of 8 repos write files; the other 4 fail and don't.
+    written = sorted(p.stem for p in output_dir.glob("*.json"))
+    assert written == ["o_r01", "o_r03", "o_r05", "o_r07"]
