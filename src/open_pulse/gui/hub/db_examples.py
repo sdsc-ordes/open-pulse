@@ -227,13 +227,177 @@ SPARQL: list[dict[str, str]] = [
         "}\n"
         "ORDER BY ?repo",
     },
+    # ── pulse: ontology (project-specific facets) ─────────────────────────
+    {
+        "id": "sparql-org-type",
+        "name": "Orgs by type",
+        "summary": "pulse:OrganizationType histogram — University / ResearchInstitution / etc.",
+        "body": "# Counts the ORGS (distinct) under each pulse:OrganizationType.\n"
+        "# Switch to count(?repo) (no DISTINCT on org) for repos-per-type,\n"
+        "# the same figure shown in the Overview's 'Organization type' card.\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "SELECT ?type (COUNT(DISTINCT ?org) AS ?orgs) WHERE {\n"
+        "  ?org pulse:OrganizationType ?type .\n"
+        "}\n"
+        "GROUP BY ?type ORDER BY DESC(?orgs)",
+    },
+    {
+        "id": "sparql-repo-type",
+        "name": "Repos by artefact type",
+        "summary": "pulse:repositoryType — Software / Documentation / EducationalResource / Data.",
+        "body": "# rdf:type is always SoftwareSourceCode for repos; the real artefact\n"
+        "# kind lives on pulse:repositoryType. Useful when filtering a\n"
+        "# Project to one cohort (e.g. teaching materials only).\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "SELECT ?type (COUNT(DISTINCT ?repo) AS ?n) WHERE {\n"
+        "  ?repo a schema:SoftwareSourceCode ;\n"
+        "        pulse:repositoryType ?type .\n"
+        "}\n"
+        "GROUP BY ?type ORDER BY DESC(?n)",
+    },
+    {
+        "id": "sparql-discipline-pulse",
+        "name": "Top disciplines",
+        "summary": "pulse:discipline (Wikidata Q-IDs) — research areas across repos.",
+        "body": "# discipline targets are Wikidata IRIs (Q428691 = computer engineering, …)\n"
+        "# The Hub UI resolves them to English labels via wbgetentities;\n"
+        "# raw Q-IDs are what you see directly in the SPARQL result.\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "SELECT ?discipline (COUNT(DISTINCT ?repo) AS ?n) WHERE {\n"
+        "  ?repo a schema:SoftwareSourceCode ;\n"
+        "        pulse:discipline ?discipline .\n"
+        "}\n"
+        "GROUP BY ?discipline ORDER BY DESC(?n)",
+    },
+    {
+        "id": "sparql-org-type-x-license",
+        "name": "Org type × license",
+        "summary": "Cross-tab pulse:OrganizationType with schema:license — who picks what.",
+        "body": "# Useful question: do Universities pick GPL more often than\n"
+        "# PrivateCompanies? This pivot answers it. The pulse:ownedBy\n"
+        "# path connects a repo back to its owning org's type.\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "SELECT ?org_type ?license (COUNT(DISTINCT ?repo) AS ?n) WHERE {\n"
+        "  ?repo a schema:SoftwareSourceCode ;\n"
+        "        pulse:ownedBy/pulse:OrganizationType ?org_type ;\n"
+        "        schema:license ?license .\n"
+        "}\n"
+        "GROUP BY ?org_type ?license\n"
+        "ORDER BY DESC(?n) LIMIT 100",
+    },
+    {
+        "id": "sparql-people-by-location",
+        "name": "People by location",
+        "summary": "gme-internal:location histogram — raw location strings from GitHub bios.",
+        "body": "# Plain string straight from the GitHub profile, so expect free-form\n"
+        "# variants ('Lausanne' / 'Lausanne, CH' / 'EPFL Lausanne'). Useful\n"
+        "# as a top-of-funnel signal before any ROR/normalisation pass.\n"
+        "# (For org-level country rollups via ROR look at\n"
+        "# gme-internal:ror_country — but that points at a blank-node\n"
+        "# structure, not a flat literal.)\n"
+        "PREFIX gme-internal: <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?location (COUNT(DISTINCT ?s) AS ?n) WHERE {\n"
+        "  ?s gme-internal:location ?location .\n"
+        '  FILTER (STR(?location) != "")\n'
+        "}\n"
+        "GROUP BY ?location ORDER BY DESC(?n) LIMIT 50",
+    },
+    {
+        "id": "sparql-power-users",
+        "name": "Most-followed users (GH)",
+        "summary": "gme-internal:followers_count — global GitHub follower count, ranked.",
+        "body": "# Unlike the Neo4j FOLLOWS edge (followers *inside the crawl*),\n"
+        "# this is the raw GitHub follower number — useful to spot well-\n"
+        "# known names in the corpus.\n"
+        "PREFIX schema:       <http://schema.org/>\n"
+        "PREFIX gme-internal: <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?person ?followers ?location WHERE {\n"
+        "  ?person a schema:Person ;\n"
+        "          gme-internal:followers_count ?followers .\n"
+        "  OPTIONAL { ?person gme-internal:location ?location }\n"
+        "}\n"
+        "ORDER BY DESC(?followers) LIMIT 25",
+    },
+    {
+        "id": "sparql-people-by-company",
+        "name": "Contributors by company",
+        "summary": "gme-internal:company — declared affiliation on GitHub profile.",
+        "body": "# `company` is the raw string the user typed in their GitHub\n"
+        "# profile; expect typos / variants ('EPFL' vs '@EPFL' vs 'epfl.ch').\n"
+        "# Normalise downstream if you need a clean institutional rollup.\n"
+        "PREFIX schema:       <http://schema.org/>\n"
+        "PREFIX gme-internal: <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?company (COUNT(DISTINCT ?person) AS ?n) WHERE {\n"
+        "  ?person a schema:Person ;\n"
+        "          gme-internal:company ?company .\n"
+        "}\n"
+        "GROUP BY ?company ORDER BY DESC(?n) LIMIT 50",
+    },
+    {
+        "id": "sparql-archived-repos",
+        "name": "Archived repos",
+        "summary": "gme-internal:archived = true — cold storage in the corpus.",
+        "body": "# Quick way to spot inactive code. ``archived`` is a typed boolean\n"
+        "# (xsd:boolean), so the literal must carry the datatype; plain\n"
+        '# string "true" won\'t match.\n'
+        "# Useful for filtering a projects.json to active-only repos\n"
+        "# (negate the filter) or for picking historic snapshots to study.\n"
+        "PREFIX xsd:          <http://www.w3.org/2001/XMLSchema#>\n"
+        "PREFIX gme-internal: <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?repo WHERE {\n"
+        '  ?repo gme-internal:archived "true"^^xsd:boolean .\n'
+        "}\n"
+        "ORDER BY ?repo LIMIT 100",
+    },
+    {
+        "id": "sparql-keywords-internal",
+        "name": "Keywords (GME)",
+        "summary": "gme-internal:keywords histogram — GME-derived tags vs schema:keywords.",
+        "body": "# gme-internal:keywords is the GME's own extraction pass — broader\n"
+        "# coverage than schema:keywords (which comes from the repo's\n"
+        "# declared topics). Comparing the two surfaces inferred tags the\n"
+        "# repo owner didn't add themselves.\n"
+        "PREFIX gme-internal: <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?keyword (COUNT(DISTINCT ?subj) AS ?n) WHERE {\n"
+        "  ?subj gme-internal:keywords ?keyword .\n"
+        "}\n"
+        "GROUP BY ?keyword ORDER BY DESC(?n) LIMIT 50",
+    },
+    {
+        "id": "sparql-people-with-blog",
+        "name": "People with a blog",
+        "summary": "Persons whose GitHub profile lists a blog/website URL.",
+        "body": "# Useful for outreach: a non-empty blog URL is a strong signal that\n"
+        "# the person maintains a public web presence. The Hub entity page\n"
+        "# already links these directly.\n"
+        "PREFIX schema:       <http://schema.org/>\n"
+        "PREFIX gme-internal: <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?person ?blog ?company WHERE {\n"
+        "  ?person a schema:Person ;\n"
+        "          gme-internal:blog ?blog .\n"
+        '  FILTER (STR(?blog) != "")\n'
+        "  OPTIONAL { ?person gme-internal:company ?company }\n"
+        "}\n"
+        "ORDER BY ?person LIMIT 50",
+    },
 ]
 
 
 # ── Cypher (Neo4j) ───────────────────────────────────────────────────────
-# The crawler schema: ``Repo`` (full_name, owner, name), ``User``
-# (login, name), ``Org`` (login, name); relationships
-# ``CONTRIBUTES_TO``, ``OWNS``, ``FORK_OF``, ``MEMBER_OF``.
+# The crawler schema:
+#   Nodes: ``Repo`` (full_name, owner, name), ``User`` (login, name),
+#          ``Org`` (login, name).
+#   Edges (core, from the initial crawler): ``CONTRIBUTES_TO``, ``OWNS``,
+#          ``FORK_OF``, ``MEMBER_OF``, ``DEPENDS_ON``.
+#   Edges (PR-8 opt-ins, populated when ``crawl_issues`` / ``crawl_prs``
+#          are on at crawl time): ``FOLLOWS`` (User→User),
+#          ``STARRED`` / ``WATCHES`` (User→Repo), ``OPENED_ISSUE`` /
+#          ``OPENED_PR`` (User→Repo), ``COMMENTED_ON`` (User→Repo on
+#          issues + PRs), ``REVIEWED_PR`` (User→Repo).
 CYPHER: list[dict[str, str]] = [
     {
         "id": "cypher-labels",
@@ -391,6 +555,122 @@ CYPHER: list[dict[str, str]] = [
         "RETURN u.login AS login, u.name AS name, orgs\n"
         "ORDER BY size(orgs) DESC, login\n"
         "LIMIT 50",
+    },
+    # ── PR-8 edges: follows / stars / watches / issues / PRs ───────────────
+    {
+        "id": "cypher-top-followed",
+        "name": "Top followed users",
+        "summary": "Users with the most FOLLOWS edges pointing at them — social hubs.",
+        "body": "// FOLLOWS direction in the crawler: (follower)-[:FOLLOWS]->(followed).\n"
+        "// Counting incoming edges gives the followed user's audience size\n"
+        "// *within the crawl* — much smaller than GitHub's global follower\n"
+        "// count, but tells you who's central in this corpus.\n"
+        "MATCH (u:User)<-[:FOLLOWS]-(f:User)\n"
+        "RETURN u.login AS login, u.name AS name,\n"
+        "       count(DISTINCT f) AS followers_in_graph\n"
+        "ORDER BY followers_in_graph DESC, login\n"
+        "LIMIT 25",
+    },
+    {
+        "id": "cypher-most-starred",
+        "name": "Most-starred repos",
+        "summary": "Repos ranked by STARRED in-degree from crawled users.",
+        "body": "// STARRED is populated when round-N expands user profiles. The\n"
+        "// count below is stars *within our crawl* — a proxy for community\n"
+        "// attention restricted to the corpus, complementary to raw\n"
+        "// GitHub stars (which lives on the Repo node when crawl_issues\n"
+        "// is on).\n"
+        "MATCH (r:Repo)<-[:STARRED]-(u:User)\n"
+        "RETURN r.full_name AS repo, count(DISTINCT u) AS in_graph_stars\n"
+        "ORDER BY in_graph_stars DESC, repo\n"
+        "LIMIT 25",
+    },
+    {
+        "id": "cypher-stars-and-contributes",
+        "name": "Stars → contributors funnel",
+        "summary": "Users who STARRED a repo AND also CONTRIBUTES_TO it — engaged users.",
+        "body": "// Crossing STARRED with CONTRIBUTES_TO surfaces the strongest\n"
+        "// engagement signal: people who liked the repo enough to also\n"
+        "// commit to it. Useful for outreach / governance pitches.\n"
+        "MATCH (u:User)-[:STARRED]->(r:Repo)\n"
+        "MATCH (u)-[:CONTRIBUTES_TO]->(r)\n"
+        "RETURN r.full_name AS repo,\n"
+        "       count(DISTINCT u) AS engaged_users\n"
+        "ORDER BY engaged_users DESC, repo\n"
+        "LIMIT 25",
+    },
+    {
+        "id": "cypher-pr-openers",
+        "name": "Top PR openers",
+        "summary": "Users who opened the most pull requests across the crawl.",
+        "body": "// OPENED_PR edges are populated when crawl_prs=true at crawl\n"
+        "// time; with only contributors crawled, this count will be low.\n"
+        "// Combine with REVIEWED_PR for a full code-review picture.\n"
+        "MATCH (u:User)-[:OPENED_PR]->(r:Repo)\n"
+        "RETURN u.login AS login, u.name AS name,\n"
+        "       count(*) AS prs_opened,\n"
+        "       count(DISTINCT r) AS distinct_repos\n"
+        "ORDER BY prs_opened DESC, login\n"
+        "LIMIT 25",
+    },
+    {
+        "id": "cypher-code-reviewers",
+        "name": "Code reviewers leaderboard",
+        "summary": "Who reviews the most PRs (REVIEWED_PR) — different signal from authoring.",
+        "body": "// PR reviews are gating work; the people who do most of it are\n"
+        "// often invisible to commit-count leaderboards. This query lifts\n"
+        "// them out.\n"
+        "MATCH (u:User)-[:REVIEWED_PR]->(r:Repo)\n"
+        "RETURN u.login AS login, u.name AS name,\n"
+        "       count(*) AS reviews,\n"
+        "       count(DISTINCT r) AS distinct_repos\n"
+        "ORDER BY reviews DESC, login\n"
+        "LIMIT 25",
+    },
+    {
+        "id": "cypher-discussion-hubs",
+        "name": "Issue/PR discussion hubs",
+        "summary": "Repos with the most COMMENTED_ON activity — high-discussion projects.",
+        "body": "// COMMENTED_ON is unified across issues + PRs in the crawler.\n"
+        "// A repo with many distinct commenters but few contributors is\n"
+        "// a discussion-heavy / governance-heavy project rather than a\n"
+        "// commit-heavy one.\n"
+        "MATCH (r:Repo)<-[:COMMENTED_ON]-(u:User)\n"
+        "WITH r, count(DISTINCT u) AS commenters\n"
+        "OPTIONAL MATCH (r)<-[:CONTRIBUTES_TO]-(c:User)\n"
+        "WITH r, commenters, count(DISTINCT c) AS contributors\n"
+        "RETURN r.full_name AS repo, commenters, contributors,\n"
+        "       round(1.0 * commenters / CASE WHEN contributors=0 THEN 1 ELSE contributors END, 2) AS commenter_to_contrib_ratio\n"
+        "ORDER BY commenters DESC, repo\n"
+        "LIMIT 25",
+    },
+    {
+        "id": "cypher-dependency-hot",
+        "name": "Most-depended-on repos",
+        "summary": "Repos with the most DEPENDS_ON edges pointing at them — corpus libraries.",
+        "body": "// DEPENDS_ON is populated when crawl_dependencies=true. Inbound\n"
+        "// degree = how many other crawled repos pull this one in as a\n"
+        "// dependency. Surfaces the foundational libraries of the corpus.\n"
+        "MATCH (lib:Repo)<-[:DEPENDS_ON]-(client:Repo)\n"
+        "RETURN lib.full_name AS library,\n"
+        "       count(DISTINCT client) AS reverse_deps\n"
+        "ORDER BY reverse_deps DESC, library\n"
+        "LIMIT 25",
+    },
+    {
+        "id": "cypher-watch-no-contrib",
+        "name": "Watchers who never contributed",
+        "summary": "Users with WATCHES but no CONTRIBUTES_TO — passive followers worth pinging.",
+        "body": "// A repo's lurker set: people receiving notifications but never\n"
+        "// pushing code. Useful for picking outreach targets when bootstrapping\n"
+        "// a new contributor cohort.\n"
+        "MATCH (u:User)-[:WATCHES]->(r:Repo)\n"
+        "WHERE NOT (u)-[:CONTRIBUTES_TO]->(r)\n"
+        "RETURN r.full_name AS repo,\n"
+        "       count(DISTINCT u) AS passive_watchers,\n"
+        "       collect(DISTINCT u.login)[0..5] AS sample_logins\n"
+        "ORDER BY passive_watchers DESC, repo\n"
+        "LIMIT 25",
     },
 ]
 
