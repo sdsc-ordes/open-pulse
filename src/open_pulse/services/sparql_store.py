@@ -18,6 +18,7 @@ rdflib and serialize to N-Triples, which is universally supported.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
@@ -32,6 +33,49 @@ logger = logging.getLogger(__name__)
 _CONNECT_TIMEOUT = 5
 _UPLOAD_TIMEOUT = 120.0
 _DEFAULT_AUTH_ENV = "SPARQL_AUTH"
+# Canonical base URI for auto-derived monthly snapshot graphs. Anything
+# under this stem is owned by open-pulse; user-provided ``named_graph``
+# overrides are otherwise unconstrained.
+DEFAULT_GRAPH_BASE_URI = "https://open-pulse.epfl.ch/graph"
+
+
+def derive_monthly_graph_uri(
+    runtime: str,
+    *,
+    base_uri: str = DEFAULT_GRAPH_BASE_URI,
+    now: dt.datetime | None = None,
+) -> str:
+    """Build the canonical named-graph URI for a monthly snapshot.
+
+    The URI shape is ``{base_uri}/{YYYY-MM}/{runtime}`` — the date segment
+    is an ISO 8601 year-month so snapshots sort lexically and are stable
+    across centuries. Same month + same runtime → same URI, so multiple
+    runs accumulate idempotently into one graph (entity URIs are global,
+    so re-running over the same data is a set-merge no-op).
+
+    Examples:
+        derive_monthly_graph_uri("hybrid") →
+            "https://open-pulse.epfl.ch/graph/2026-05/hybrid"
+        derive_monthly_graph_uri("llm-inference") →
+            "https://open-pulse.epfl.ch/graph/2026-05/llm-inference"
+
+    ``now`` is injectable so tests can pin the month deterministically.
+    """
+    runtime_slug = (runtime or "").strip()
+    if not runtime_slug:
+        raise ValueError(
+            "derive_monthly_graph_uri: runtime is required (e.g. 'hybrid')."
+        )
+    base = base_uri.rstrip("/")
+    now = now or dt.datetime.now(dt.timezone.utc)
+    return f"{base}/{now.strftime('%Y-%m')}/{runtime_slug}"
+
+
+# Runtimes whose monthly snapshot we treat as the canonical "current
+# view" — auto-publishing them to the default graph after a run. Anything
+# else (rule_based, llm, llm-inference, …) stays in its named graph
+# unless the quest explicitly opts in via ``publish_to_default: true``.
+DEFAULT_RUNTIME_PUBLISHES_TO_DEFAULT = {"hybrid"}
 
 
 class SparqlStoreService:
@@ -122,6 +166,45 @@ class SparqlStoreService:
             f" (graph={named_graph})" if named_graph else " (default)",
         )
         return triple_count
+
+    # -- Snapshot publishing ----------------------------------------------
+
+    def copy_to_default(self, source_graph: str) -> None:
+        """Atomically replace the default graph with ``source_graph``.
+
+        Uses SPARQL 1.1 Update's ``COPY <iri> TO DEFAULT`` — the store-side
+        atomic swap that snapshot-promotion needs. The default graph is
+        cleared and then refilled with every triple in ``source_graph``;
+        ``source_graph`` itself is left untouched.
+
+        Use case: keep ``default`` always pointing at the most-recent
+        canonical snapshot (typically the latest hybrid extraction) so
+        clients that don't specify a GRAPH still see the current view.
+        Older monthly snapshots stay queryable via their named graph.
+        """
+        if not source_graph:
+            raise ValueError("copy_to_default: source_graph is required")
+        auth = self._resolved_auth()
+        if auth is None:
+            raise RuntimeError(
+                f"{self.auth_env} is not set or malformed; expected "
+                "'username/password' for SPARQL updates."
+            )
+
+        url = f"{self.endpoint}/update"
+        update = f"COPY <{source_graph}> TO DEFAULT"
+        resp = self._get_client().post(
+            url,
+            content=update.encode("utf-8"),
+            headers={"Content-Type": "application/sparql-update"},
+            auth=httpx.BasicAuth(*auth),
+        )
+        if resp.status_code not in (200, 201, 204):
+            raise RuntimeError(
+                f"sparql_store copy_to_default: HTTP {resp.status_code} on {url} — "
+                f"{resp.text[:200]}"
+            )
+        logger.info("sparql_store copy_to_default: <%s> -> DEFAULT", source_graph)
 
     # -- Health probe ------------------------------------------------------
 
