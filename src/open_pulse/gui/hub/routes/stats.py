@@ -366,7 +366,6 @@ def _duckdb_counts() -> dict[str, int | None]:
 
 
 async def _gather() -> dict[str, Any]:
-    settings = get_settings()
     services = list_services()
     running = sum(1 for s in services if s["status"] == "running")
     healthy = sum(
