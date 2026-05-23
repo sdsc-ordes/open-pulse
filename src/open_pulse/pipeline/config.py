@@ -150,10 +150,11 @@ class MetadataExtractorStepConfig(StepConfig):
     YAML when you've tuned the server. Set to ``1`` to revert to the old
     fully-sequential behaviour."""
     include_internal_fields: bool = False
-    """Keep `_`-prefixed internal fields (``_bio``, ``_avatar_url``,
-    ``_orcid_keywords``, ``_company``) in the response. The GME's strict
-    SHACL validation still runs identically — this just controls what the
-    consumer sees. Default False for ontology compliance."""
+    """Keep GME-internal fields (now under ``gme-internal:`` namespace) in
+    the response. When True, properties like ``gme-internal:bio``,
+    ``gme-internal:location``, ``gme-internal:keywords`` survive into the
+    JSON-LD output and therefore into the RDF triples uploaded to SPARQL.
+    Default False for ontology compliance."""
 
 
 class SparqlUploadStepConfig(StepConfig):
