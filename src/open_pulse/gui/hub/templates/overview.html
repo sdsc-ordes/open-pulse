@@ -38,39 +38,59 @@
     <button class="btn btn-ghost" @click="reload()">↻</button>
   </div>
 
-  <!-- ── Big-number row (current values) ──────────────────────────── -->
+  <!-- ── Big-number row: one tile per chart below ─────────────────── -->
+  <!-- Each tile mirrors the chart underneath: the big number is the
+       chart's dominant filled series (repos / GitHub repos); the
+       subtitle line carries the other two series so the tile + chart
+       legends agree at a glance. Delta is over the visible window. -->
   <section class="grid-stats">
     <div class="card tone-info">
-      <div class="card-title">Services healthy</div>
+      <div class="card-title">Neo4j · repos</div>
       <div class="flex items-baseline gap-2 mt-1">
-        <div class="stat-value" x-text="latest.services_healthy + '/' + latest.services_total"></div>
-        <span class="stat-trend" x-show="delta('services_healthy') !== null"
-              x-text="formatDelta(delta('services_healthy')) + ' over window'"></span>
+        <div class="stat-value" x-text="formatVal(latest.neo4j_repos)"></div>
+        <span class="stat-trend" x-show="delta('neo4j_repos') !== null"
+              x-text="formatDelta(delta('neo4j_repos')) + ' over window'"></span>
       </div>
+      <div class="stat-sub" x-text="
+        formatVal(latest.neo4j_users) + ' users · ' +
+        formatVal(latest.neo4j_orgs)  + ' orgs'
+      "></div>
     </div>
     <div class="card tone-info">
-      <div class="card-title">SPARQL repos</div>
+      <div class="card-title">SPARQL · repos</div>
       <div class="flex items-baseline gap-2 mt-1">
         <div class="stat-value" x-text="formatVal(latest.sparql_repos)"></div>
         <span class="stat-trend" x-show="delta('sparql_repos') !== null"
-              x-text="formatDelta(delta('sparql_repos'))"></span>
+              x-text="formatDelta(delta('sparql_repos')) + ' over window'"></span>
       </div>
+      <div class="stat-sub" x-text="
+        formatVal(latest.sparql_users) + ' users · ' +
+        formatVal(latest.sparql_orgs)  + ' orgs'
+      "></div>
     </div>
     <div class="card tone-info">
-      <div class="card-title">Neo4j nodes</div>
+      <div class="card-title">OpenSearch · repos</div>
       <div class="flex items-baseline gap-2 mt-1">
-        <div class="stat-value" x-text="formatVal(latest.neo4j_nodes)"></div>
-        <span class="stat-trend" x-show="delta('neo4j_nodes') !== null"
-              x-text="formatDelta(delta('neo4j_nodes'))"></span>
+        <div class="stat-value" x-text="formatVal(latest.opensearch_repos)"></div>
+        <span class="stat-trend" x-show="delta('opensearch_repos') !== null"
+              x-text="formatDelta(delta('opensearch_repos')) + ' over window'"></span>
       </div>
+      <div class="stat-sub" x-text="
+        formatVal(latest.opensearch_users) + ' users · ' +
+        formatVal(latest.opensearch_orgs)  + ' orgs'
+      "></div>
     </div>
     <div class="card tone-info">
-      <div class="card-title">Neo4j relationships</div>
+      <div class="card-title">DuckDB · GitHub repos</div>
       <div class="flex items-baseline gap-2 mt-1">
-        <div class="stat-value" x-text="formatVal(latest.neo4j_rels)"></div>
-        <span class="stat-trend" x-show="delta('neo4j_rels') !== null"
-              x-text="formatDelta(delta('neo4j_rels'))"></span>
+        <div class="stat-value" x-text="formatVal(latest.duckdb_github_repos)"></div>
+        <span class="stat-trend" x-show="delta('duckdb_github_repos') !== null"
+              x-text="formatDelta(delta('duckdb_github_repos')) + ' over window'"></span>
       </div>
+      <div class="stat-sub" x-text="
+        formatVal(latest.duckdb_zenodo_records)    + ' Zenodo · ' +
+        formatVal(latest.duckdb_huggingface_items) + ' HF'
+      "></div>
     </div>
   </section>
 
@@ -173,6 +193,15 @@
   .chart-card { padding: 16px; }
   .chart-wrap { height: 240px; margin-top: 8px; position: relative; }
 
+  /* Subtitle under each big-number tile — shows the chart's secondary
+     series (e.g. users / orgs) so a glance gives the full triple. */
+  .stat-sub {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* ── Top-N facet cards ─────────────────────────────────────────── */
   .grid-tops {
     display: grid;
@@ -233,9 +262,22 @@ function overview() {
     samples: [],
     loading: false,
     metaLine: '',
-    latest: { services_healthy: 0, services_running: 0, services_total: 0,
-              sparql_repos: 0, neo4j_nodes: 0, neo4j_rels: 0,
-              uptime_max_seconds: 0 },
+    // Default state shown until the first ``/api/stats/history`` call
+    // returns. Keys mirror every column the tile row + charts read so
+    // there's no template-time ``undefined`` while loading.
+    latest: {
+      // Services (still surfaced on the Status page; charts dropped from
+      // Overview but the marquee + tile row in main.py read these too).
+      services_healthy: 0, services_running: 0, services_total: 0,
+      uptime_max_seconds: 0,
+      // Per-backend chart series.
+      neo4j_repos: null, neo4j_users: null, neo4j_orgs: null,
+      neo4j_nodes: null, neo4j_rels: null,
+      sparql_repos: null, sparql_users: null, sparql_orgs: null,
+      opensearch_repos: null, opensearch_users: null, opensearch_orgs: null,
+      duckdb_github_repos: null, duckdb_zenodo_records: null,
+      duckdb_huggingface_items: null,
+    },
     charts: {},
     // Track which range the charts were last rendered with — if the
     // user switches ranges, Chart.js can leave its time-scale state
@@ -464,10 +506,27 @@ function overview() {
     },
 
     delta(key) {
-      if (this.samples.length < 2) return null;
-      const first = this.samples[0][key];
-      const last  = this.samples[this.samples.length - 1][key];
-      if (first === null || last === null || first === undefined || last === undefined) return null;
+      // Window-aware delta: take the first and last NON-NULL samples for
+      // ``key`` in the visible window. Without this a brand-new metric
+      // would show a null trend on every range > "when the column was
+      // added" — the chart's series is visibly growing but the tile says
+      // nothing. Picking the first non-null moves the start of the
+      // measurement to when the column began being populated.
+      if (!this.samples.length) return null;
+      let first = null, last = null;
+      for (const s of this.samples) {
+        const v = s[key];
+        if (v === null || v === undefined) continue;
+        if (first === null) first = v;
+        last = v;
+      }
+      if (first === null || last === null || first === last) {
+        // ``first === last`` covers both the "one non-null sample" case
+        // (no delta to compute) and the legitimate "no change" case.
+        // The chart still draws the flat series; the trend pill stays
+        // empty rather than reporting a misleading 0.
+        return first === last && first !== null ? 0 : null;
+      }
       return last - first;
     },
 
