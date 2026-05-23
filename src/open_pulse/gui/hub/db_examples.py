@@ -384,6 +384,59 @@ SPARQL: list[dict[str, str]] = [
         "}\n"
         "ORDER BY ?person LIMIT 50",
     },
+    {
+        "id": "sparql-repo-1hop",
+        "name": "Repo 1-hop neighborhood",
+        "summary": "All direct neighbors of a repo (out + in) with their properties.",
+        "body": "# Every triple where the target repo is subject OR object, plus the\n"
+        "# properties of each neighbor. Swap the IRI to pivot the view.\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX gi:     <https://openpulse.science/git-metadata-extractor#>\n"
+        "PREFIX org:    <http://www.w3.org/ns/org#>\n"
+        "PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\n"
+        "SELECT ?direction ?p ?neighbor ?neighbor_pred ?neighbor_value WHERE {\n"
+        "  VALUES ?repo { <https://github.com/sdsc-ordes/gimie> }\n"
+        "  {\n"
+        "    ?repo ?p ?neighbor .\n"
+        '    BIND(\"out\" AS ?direction)\n'
+        "    OPTIONAL { ?neighbor ?neighbor_pred ?neighbor_value }\n"
+        "  } UNION {\n"
+        "    ?neighbor ?p ?repo .\n"
+        '    BIND(\"in\" AS ?direction)\n'
+        "    OPTIONAL { ?neighbor ?neighbor_pred ?neighbor_value }\n"
+        "  }\n"
+        "}\n"
+        "ORDER BY ?direction ?p ?neighbor\n"
+        "LIMIT 300",
+    },
+    {
+        "id": "sparql-repo-construct",
+        "name": "Repo subgraph (CONSTRUCT)",
+        "summary": "Materialize the repo's 1-hop subgraph as triples — load into a viewer.",
+        "body": "# CONSTRUCT a self-contained subgraph around one repo: its own\n"
+        "# outgoing triples, its incoming triples, and the properties of\n"
+        "# every neighbor. Result is N-Triples — paste into WebVOWL / gephi /\n"
+        "# another store. Swap the IRI to re-anchor.\n"
+        "PREFIX schema: <http://schema.org/>\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX gi:     <https://openpulse.science/git-metadata-extractor#>\n"
+        "CONSTRUCT {\n"
+        "  ?repo ?p1 ?neighbor .\n"
+        "  ?neighbor ?p2 ?o2 .\n"
+        "  ?inbound ?p3 ?repo .\n"
+        "  ?inbound ?p4 ?o4 .\n"
+        "} WHERE {\n"
+        "  VALUES ?repo { <https://github.com/sdsc-ordes/gimie> }\n"
+        "  {\n"
+        "    ?repo ?p1 ?neighbor .\n"
+        "    OPTIONAL { ?neighbor ?p2 ?o2 }\n"
+        "  } UNION {\n"
+        "    ?inbound ?p3 ?repo .\n"
+        "    OPTIONAL { ?inbound ?p4 ?o4 }\n"
+        "  }\n"
+        "}",
+    },
 ]
 
 
@@ -671,6 +724,27 @@ CYPHER: list[dict[str, str]] = [
         "       collect(DISTINCT u.login)[0..5] AS sample_logins\n"
         "ORDER BY passive_watchers DESC, repo\n"
         "LIMIT 25",
+    },
+    {
+        "id": "cypher-repo-1hop",
+        "name": "Repo 1-hop neighborhood",
+        "summary": "All direct nodes connected to a repo, with edge type + direction.",
+        "body": "// Center on one Repo and emit every 1-hop neighbor with full props.\n"
+        "// Swap full_name to pivot the inspection — works as-is for the\n"
+        "// crawler-backfilled owner field.\n"
+        "WITH 'sdsc-ordes/gimie' AS target\n"
+        "MATCH (r:Repo {full_name: target})\n"
+        "OPTIONAL MATCH (r)-[rel]-(n)\n"
+        "RETURN labels(r)[0]              AS center_label,\n"
+        "       r.full_name               AS center,\n"
+        "       properties(r)             AS center_props,\n"
+        "       type(rel)                 AS edge_type,\n"
+        "       CASE WHEN startNode(rel) = r THEN 'out' ELSE 'in' END AS direction,\n"
+        "       labels(n)[0]              AS neighbor_label,\n"
+        "       coalesce(n.full_name, n.login) AS neighbor_id,\n"
+        "       properties(n)             AS neighbor_props\n"
+        "ORDER BY edge_type, direction, neighbor_id\n"
+        "LIMIT 200",
     },
 ]
 
