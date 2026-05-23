@@ -73,6 +73,15 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     max_workers = int(step_cfg.get("max_workers", 6))
     if max_workers < 1:
         max_workers = 1
+    # When True, each successful extraction is pushed to the SPARQL store
+    # right after the local file is written, instead of waiting for a
+    # separate ``sparql_upload`` step at the end. Reads land in Oxigraph
+    # progressively, so long runs become useful before they finish. SPARQL
+    # Graph Store semantics are idempotent (POST same triples = no-op),
+    # so a downstream ``sparql_upload`` still works as a safety net.
+    stream_to_sparql = bool(step_cfg.get("stream_to_sparql", False))
+    stream_named_graph_raw = step_cfg.get("stream_named_graph")
+    stream_named_graph = str(stream_named_graph_raw) if stream_named_graph_raw else None
     if mode not in ("v1_gimie", "v2"):
         raise ValueError(
             f"metadata_extractor: unknown mode {mode!r}; expected 'v1_gimie' or 'v2'."
@@ -103,6 +112,12 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     success = 0
     skipped = 0
     failed: list[str] = []
+    # ``streamed`` / ``stream_failed`` track the SPARQL side of the
+    # streaming upload separately from the file write — a SPARQL outage
+    # shouldn't make a repo look "lost" when its JSON is on disk and a
+    # later ``sparql_upload`` can re-publish it idempotently.
+    streamed = 0
+    stream_failed = 0
     # Worker threads update ``success`` / ``failed`` so the writes need to
     # be serialised. ``_atomic_write_json`` already targets a unique
     # per-repo path so concurrent writes don't clash on disk.
@@ -128,7 +143,7 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
         candidates.append(full_name)
 
     def _process(full_name: str) -> None:
-        nonlocal success
+        nonlocal success, streamed, stream_failed
         out_path = output_dir / _safe_filename(full_name)
         try:
             if mode == "v2":
@@ -156,6 +171,33 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
             logger.warning("metadata_extractor: %s failed (%s)", full_name, exc)
             with counters_lock:
                 failed.append(full_name)
+            return
+
+        if stream_to_sparql:
+            # Push to the SPARQL store right after the local write. We log
+            # but don't propagate failures: the file is still on disk, so
+            # a downstream ``sparql_upload`` step (or a manual re-run) can
+            # finish the job. Same store=idempotent contract applies.
+            try:
+                n = services.sparql_store.upload(
+                    payload, named_graph=stream_named_graph
+                )
+                with counters_lock:
+                    streamed += 1
+                logger.info(
+                    "metadata_extractor stream: %s -> %d triples (graph=%s)",
+                    full_name,
+                    n,
+                    stream_named_graph or "default",
+                )
+            except Exception as exc:  # noqa: BLE001
+                with counters_lock:
+                    stream_failed += 1
+                logger.warning(
+                    "metadata_extractor stream: %s SPARQL upload failed (%s)",
+                    full_name,
+                    exc,
+                )
 
     if candidates:
         # ``as_completed`` drains the futures eagerly so any per-worker
@@ -166,13 +208,26 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             list(as_completed(pool.submit(_process, fn) for fn in candidates))
 
-    logger.info(
-        "metadata_extractor: success=%d skipped=%d failed=%d (output_dir=%s)",
-        success,
-        skipped,
-        len(failed),
-        output_dir,
-    )
+    if stream_to_sparql:
+        logger.info(
+            "metadata_extractor: success=%d skipped=%d failed=%d "
+            "streamed=%d stream_failed=%d (output_dir=%s graph=%s)",
+            success,
+            skipped,
+            len(failed),
+            streamed,
+            stream_failed,
+            output_dir,
+            stream_named_graph or "default",
+        )
+    else:
+        logger.info(
+            "metadata_extractor: success=%d skipped=%d failed=%d (output_dir=%s)",
+            success,
+            skipped,
+            len(failed),
+            output_dir,
+        )
     if success == 0 and not skipped and failed:
         # All attempted repos failed — fail the step so the runner can retry.
         raise RuntimeError(
