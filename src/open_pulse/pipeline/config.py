@@ -184,6 +184,37 @@ class ApplyGrimoireProjectsStepConfig(StepConfig):
     applier_auth_env: str = "APPLIER_AUTH"
 
 
+class ArchiveOutputsStepConfig(StepConfig):
+    """``archive_outputs`` step configuration.
+
+    Zips a directory (by default ``metadata_extractor.output_dir``) into
+    a single ``.zip`` under ``archive_dir``, verifies the zip's CRC and
+    file count, then optionally deletes the source. Off by default so
+    existing quests don't suddenly start consuming their own outputs.
+
+    The default ``archive_dir`` lives under ``data/hub/archives/`` so
+    the hub can list + serve the resulting zips directly from its
+    ``/data/hub`` bind mount, without docker-exec.
+    """
+
+    enabled: bool = False
+    input_dir: str = ".quest-artifacts/metadata-json"
+    """Directory to archive. Match ``metadata_extractor.output_dir`` for
+    the canonical "package up this quest's JSON-LD" flow."""
+    archive_dir: str = "data/hub/archives"
+    """Where the resulting ``.zip`` is written. Defaults under
+    ``data/hub/`` because that path is mounted into the hub container at
+    ``/data/hub/`` — the Quests page reads from there."""
+    archive_name: str | None = None
+    """Override the zip filename (without ``.zip``). When ``None``,
+    derived from the input dir name plus a ``YYYYMMDDHHMMSS`` UTC
+    timestamp, e.g. ``metadata-json-foo-20260523074200.zip``."""
+    delete_source: bool = True
+    """Drop the source directory once the zip is written and verified.
+    The whole point of the step — set to ``False`` only for a "copy
+    out" pattern where you also want the source kept."""
+
+
 class StepsConfig(BaseModel):
     """Ordered collection of all pipeline step configs."""
 
@@ -200,6 +231,9 @@ class StepsConfig(BaseModel):
     )
     apply_grimoire_projects: ApplyGrimoireProjectsStepConfig = Field(
         default_factory=ApplyGrimoireProjectsStepConfig,
+    )
+    archive_outputs: ArchiveOutputsStepConfig = Field(
+        default_factory=ArchiveOutputsStepConfig,
     )
 
 
