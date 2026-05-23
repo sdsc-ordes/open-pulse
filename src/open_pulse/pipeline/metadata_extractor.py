@@ -21,6 +21,10 @@ from pathlib import Path
 from typing import Any
 
 from open_pulse.services.container import ServiceContainer
+from open_pulse.services.sparql_store import (
+    DEFAULT_RUNTIME_PUBLISHES_TO_DEFAULT,
+    derive_monthly_graph_uri,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +86,21 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     stream_to_sparql = bool(step_cfg.get("stream_to_sparql", False))
     stream_named_graph_raw = step_cfg.get("stream_named_graph")
     stream_named_graph = str(stream_named_graph_raw) if stream_named_graph_raw else None
+    # Auto-derive a monthly URI from ``v2_agent_runtime`` unless the user
+    # supplied an explicit ``stream_named_graph`` literal (explicit wins).
+    if (
+        stream_to_sparql
+        and stream_named_graph is None
+        and bool(step_cfg.get("auto_named_graph", False))
+    ):
+        stream_named_graph = derive_monthly_graph_uri(v2_agent_runtime)
+    # ``publish_to_default`` tri-state: True / False is honored verbatim;
+    # None means "auto" — publish to default only for canonical runtimes.
+    publish_to_default_raw = step_cfg.get("publish_to_default")
+    if isinstance(publish_to_default_raw, bool):
+        publish_to_default = publish_to_default_raw
+    else:
+        publish_to_default = v2_agent_runtime in DEFAULT_RUNTIME_PUBLISHES_TO_DEFAULT
     if mode not in ("v1_gimie", "v2"):
         raise ValueError(
             f"metadata_extractor: unknown mode {mode!r}; expected 'v1_gimie' or 'v2'."
@@ -207,6 +226,24 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
         # values are None, so we don't keep them.
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             list(as_completed(pool.submit(_process, fn) for fn in candidates))
+
+    if stream_to_sparql and stream_named_graph and streamed > 0 and publish_to_default:
+        # Atomic snapshot promotion at the end of the run. We do this once,
+        # after the pool drains, so default-graph clients see a consistent
+        # view across all of this run's writes rather than a partial.
+        try:
+            services.sparql_store.copy_to_default(stream_named_graph)
+            logger.info(
+                "metadata_extractor: published <%s> to default graph",
+                stream_named_graph,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "metadata_extractor: publish_to_default failed (%s); the "
+                "named graph is up to date, only the default-graph mirror "
+                "lags behind.",
+                exc,
+            )
 
     if stream_to_sparql:
         logger.info(
