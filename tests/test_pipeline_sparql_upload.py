@@ -203,6 +203,128 @@ def test_run_sparql_upload_passes_named_graph(tmp_path: Path) -> None:
     assert kwargs["named_graph"] == "https://example.org/g"
 
 
+def test_run_sparql_upload_auto_named_graph_derives_monthly_uri(
+    tmp_path: Path,
+) -> None:
+    metadata_dir = tmp_path / "metadata-json"
+    _seed_metadata_dir(metadata_dir, {"a_b": _gimie_payload()})
+
+    sparql_store = MagicMock(spec=SparqlStoreService)
+    sparql_store.upload.return_value = 1
+    services = _make_container(sparql_store)
+    ctx = {
+        "services": services,
+        "step_config": {
+            "input_dir": str(metadata_dir),
+            "auto_named_graph": True,
+            "runtime": "hybrid",
+        },
+    }
+
+    run_sparql_upload(ctx)
+
+    _, kwargs = sparql_store.upload.call_args
+    # 2026-MM style suffix; we just sanity-check the shape rather than
+    # pinning the calendar.
+    assert kwargs["named_graph"].startswith("https://open-pulse.epfl.ch/graph/")
+    assert kwargs["named_graph"].endswith("/hybrid")
+
+
+def test_run_sparql_upload_explicit_named_graph_overrides_auto(
+    tmp_path: Path,
+) -> None:
+    metadata_dir = tmp_path / "metadata-json"
+    _seed_metadata_dir(metadata_dir, {"a_b": _gimie_payload()})
+
+    sparql_store = MagicMock(spec=SparqlStoreService)
+    sparql_store.upload.return_value = 1
+    services = _make_container(sparql_store)
+    ctx = {
+        "services": services,
+        "step_config": {
+            "input_dir": str(metadata_dir),
+            "named_graph": "https://example.org/literal",
+            "auto_named_graph": True,
+            "runtime": "hybrid",
+        },
+    }
+
+    run_sparql_upload(ctx)
+
+    _, kwargs = sparql_store.upload.call_args
+    assert kwargs["named_graph"] == "https://example.org/literal"
+
+
+def test_run_sparql_upload_publishes_hybrid_to_default(tmp_path: Path) -> None:
+    metadata_dir = tmp_path / "metadata-json"
+    _seed_metadata_dir(metadata_dir, {"a_b": _gimie_payload()})
+
+    sparql_store = MagicMock(spec=SparqlStoreService)
+    sparql_store.upload.return_value = 1
+    services = _make_container(sparql_store)
+    ctx = {
+        "services": services,
+        "step_config": {
+            "input_dir": str(metadata_dir),
+            "auto_named_graph": True,
+            "runtime": "hybrid",
+        },
+    }
+
+    run_sparql_upload(ctx)
+
+    # hybrid is in DEFAULT_RUNTIME_PUBLISHES_TO_DEFAULT, so the named
+    # graph should be COPYd to the default after upload.
+    sparql_store.copy_to_default.assert_called_once()
+    (called_graph,), _ = sparql_store.copy_to_default.call_args
+    assert called_graph.endswith("/hybrid")
+
+
+def test_run_sparql_upload_skips_publish_for_non_hybrid(tmp_path: Path) -> None:
+    metadata_dir = tmp_path / "metadata-json"
+    _seed_metadata_dir(metadata_dir, {"a_b": _gimie_payload()})
+
+    sparql_store = MagicMock(spec=SparqlStoreService)
+    sparql_store.upload.return_value = 1
+    services = _make_container(sparql_store)
+    ctx = {
+        "services": services,
+        "step_config": {
+            "input_dir": str(metadata_dir),
+            "auto_named_graph": True,
+            "runtime": "rule_based",
+        },
+    }
+
+    run_sparql_upload(ctx)
+
+    sparql_store.copy_to_default.assert_not_called()
+
+
+def test_run_sparql_upload_publish_to_default_explicit_override(
+    tmp_path: Path,
+) -> None:
+    metadata_dir = tmp_path / "metadata-json"
+    _seed_metadata_dir(metadata_dir, {"a_b": _gimie_payload()})
+
+    sparql_store = MagicMock(spec=SparqlStoreService)
+    sparql_store.upload.return_value = 1
+    services = _make_container(sparql_store)
+    ctx = {
+        "services": services,
+        "step_config": {
+            "input_dir": str(metadata_dir),
+            "auto_named_graph": True,
+            "runtime": "rule_based",
+            "publish_to_default": True,  # override the auto-no
+        },
+    }
+
+    run_sparql_upload(ctx)
+
+    sparql_store.copy_to_default.assert_called_once()
+
+
 def test_run_sparql_upload_continues_past_individual_failures(
     tmp_path: Path,
 ) -> None:

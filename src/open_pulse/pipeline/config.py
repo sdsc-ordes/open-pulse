@@ -164,6 +164,18 @@ class MetadataExtractorStepConfig(StepConfig):
     stream_named_graph: str | None = None
     """Target named graph URI for the streamed uploads. When ``None`` the
     triples land in the default graph (same shape as ``sparql_upload``)."""
+    auto_named_graph: bool = False
+    """Derive the target named-graph URI from the current month and
+    ``v2_agent_runtime``: ``{base}/{YYYY-MM}/{runtime}`` (ISO 8601
+    year-month). Multiple runs in the same month accumulate into one
+    graph idempotently. Ignored when ``stream_named_graph`` is set
+    explicitly (literal URI wins over derivation)."""
+    publish_to_default: bool | None = None
+    """At the end of the step, ``COPY`` the named graph contents to the
+    default graph. Use this to keep ``default`` pointing at the most
+    recent canonical snapshot. ``None`` (default) means the step picks
+    based on ``v2_agent_runtime`` — ``hybrid`` publishes, anything else
+    doesn't. ``True`` / ``False`` is an explicit override."""
 
 
 class SparqlUploadStepConfig(StepConfig):
@@ -175,6 +187,21 @@ class SparqlUploadStepConfig(StepConfig):
 
     input_dir: str = ".quest-artifacts/metadata-json"
     named_graph: str | None = None
+    """Literal target named graph URI. Highest precedence — overrides
+    ``auto_named_graph`` if both are set."""
+    auto_named_graph: bool = False
+    """Derive the target named-graph URI from the current month and
+    ``runtime``: ``{base}/{YYYY-MM}/{runtime}``. Requires ``runtime``
+    to be set (the step doesn't read JSON-LD payloads to guess what
+    extractor produced them)."""
+    runtime: str | None = None
+    """Token used by ``auto_named_graph`` to build the URI (e.g.
+    ``"hybrid"``, ``"rule_based"``, ``"llm-inference"``). Ignored when
+    ``named_graph`` is set."""
+    publish_to_default: bool | None = None
+    """After upload, ``COPY`` the named graph contents to the default
+    graph. ``None`` means "auto" — publishes when ``runtime`` is
+    ``hybrid``; explicit ``True`` / ``False`` overrides."""
 
 
 class ApplyGrimoireProjectsStepConfig(StepConfig):
