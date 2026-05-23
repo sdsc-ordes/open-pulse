@@ -74,23 +74,43 @@
     </div>
   </section>
 
-  <!-- ── Charts ───────────────────────────────────────────────────── -->
+  <!-- ── Charts: one panel per backend, three series each ─────────── -->
   <div class="grid-charts">
     <div class="card chart-card">
-      <div class="card-title">Services (healthy / running / total)</div>
-      <div class="chart-wrap"><canvas x-ref="cServices"></canvas></div>
+      <div class="card-title">Neo4j · repos / users / orgs</div>
+      <p class="card-meta" style="margin-top: 2px;">
+        Node-label counts from the crawler graph (``Repo`` / ``User`` / ``Org``).
+      </p>
+      <div class="chart-wrap"><canvas x-ref="cNeo4j"></canvas></div>
     </div>
     <div class="card chart-card">
-      <div class="card-title">SPARQL repos</div>
+      <div class="card-title">SPARQL · repos / users / orgs</div>
+      <p class="card-meta" style="margin-top: 2px;">
+        Distinct subjects per type:
+        <code>schema:SoftwareSourceCode</code>,
+        <code>schema:Person</code>,
+        <code>org:Organization</code>.
+      </p>
       <div class="chart-wrap"><canvas x-ref="cSparql"></canvas></div>
     </div>
     <div class="card chart-card">
-      <div class="card-title">Neo4j nodes</div>
-      <div class="chart-wrap"><canvas x-ref="cNodes"></canvas></div>
+      <div class="card-title">OpenSearch · repos / users / orgs</div>
+      <p class="card-meta" style="margin-top: 2px;">
+        Cardinality on <code>origin</code> + <code>author_uuid</code> across the
+        <code>git_*_enriched</code> indices; orgs derived from the first
+        path segment of each origin URL.
+      </p>
+      <div class="chart-wrap"><canvas x-ref="cOpensearch"></canvas></div>
     </div>
     <div class="card chart-card">
-      <div class="card-title">Neo4j relationships</div>
-      <div class="chart-wrap"><canvas x-ref="cRels"></canvas></div>
+      <div class="card-title">DuckDB · GitHub / Zenodo / HuggingFace</div>
+      <p class="card-meta" style="margin-top: 2px;">
+        Row counts from the GME's per-provider DuckDB catalogs
+        (<code>github.duckdb · repos</code>,
+        <code>zenodo.duckdb · records</code>,
+        <code>huggingface.duckdb · datasets + models + spaces</code>).
+      </p>
+      <div class="chart-wrap"><canvas x-ref="cDuckdb"></canvas></div>
     </div>
   </div>
 
@@ -369,28 +389,39 @@ function overview() {
         },
       };
 
+      // Per-backend palette: each chart uses the same three colours
+      // (accent / ok / warn) so a reader can scan the legend in one
+      // panel and the next one feels familiar. Filled dataset only on
+      // the dominant series (repos) to keep the chart legible — three
+      // overlapping fills make a muddy blob.
       const datasets = {
-        services: [
-          { label: 'healthy', data: this.samples.map(s => s.services_healthy ?? null), ...baseline(ok, true) },
-          { label: 'running', data: this.samples.map(s => s.services_running ?? null), ...baseline(accent) },
-          { label: 'total',   data: this.samples.map(s => s.services_total   ?? null), ...baseline(warn) },
+        neo4j: [
+          { label: 'repos', data: this.samples.map(s => s.neo4j_repos ?? null), ...baseline(accent, true) },
+          { label: 'users', data: this.samples.map(s => s.neo4j_users ?? null), ...baseline(ok) },
+          { label: 'orgs',  data: this.samples.map(s => s.neo4j_orgs  ?? null), ...baseline(warn) },
         ],
         sparql: [
           { label: 'repos', data: this.samples.map(s => s.sparql_repos ?? null), ...baseline(accent, true) },
+          { label: 'users', data: this.samples.map(s => s.sparql_users ?? null), ...baseline(ok) },
+          { label: 'orgs',  data: this.samples.map(s => s.sparql_orgs  ?? null), ...baseline(warn) },
         ],
-        nodes: [
-          { label: 'nodes', data: this.samples.map(s => s.neo4j_nodes ?? null), ...baseline(accent, true) },
+        opensearch: [
+          { label: 'repos', data: this.samples.map(s => s.opensearch_repos ?? null), ...baseline(accent, true) },
+          { label: 'users', data: this.samples.map(s => s.opensearch_users ?? null), ...baseline(ok) },
+          { label: 'orgs',  data: this.samples.map(s => s.opensearch_orgs  ?? null), ...baseline(warn) },
         ],
-        rels: [
-          { label: 'relationships', data: this.samples.map(s => s.neo4j_rels ?? null), ...baseline(accent, true) },
+        duckdb: [
+          { label: 'GitHub repos',    data: this.samples.map(s => s.duckdb_github_repos       ?? null), ...baseline(accent, true) },
+          { label: 'Zenodo records',  data: this.samples.map(s => s.duckdb_zenodo_records     ?? null), ...baseline(ok) },
+          { label: 'HuggingFace',     data: this.samples.map(s => s.duckdb_huggingface_items  ?? null), ...baseline(warn) },
         ],
       };
 
       const refs = {
-        services: this.$refs.cServices,
-        sparql:   this.$refs.cSparql,
-        nodes:    this.$refs.cNodes,
-        rels:     this.$refs.cRels,
+        neo4j:      this.$refs.cNeo4j,
+        sparql:     this.$refs.cSparql,
+        opensearch: this.$refs.cOpensearch,
+        duckdb:     this.$refs.cDuckdb,
       };
       // Range changed since the last render? Tear every chart down
       // so the next constructor sees a clean canvas. Chart.js can't
