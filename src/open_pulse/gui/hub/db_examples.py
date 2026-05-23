@@ -399,11 +399,11 @@ SPARQL: list[dict[str, str]] = [
         "  VALUES ?repo { <https://github.com/sdsc-ordes/gimie> }\n"
         "  {\n"
         "    ?repo ?p ?neighbor .\n"
-        '    BIND(\"out\" AS ?direction)\n'
+        '    BIND("out" AS ?direction)\n'
         "    OPTIONAL { ?neighbor ?neighbor_pred ?neighbor_value }\n"
         "  } UNION {\n"
         "    ?neighbor ?p ?repo .\n"
-        '    BIND(\"in\" AS ?direction)\n'
+        '    BIND("in" AS ?direction)\n'
         "    OPTIONAL { ?neighbor ?neighbor_pred ?neighbor_value }\n"
         "  }\n"
         "}\n"
