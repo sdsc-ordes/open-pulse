@@ -291,6 +291,15 @@
         <button class="btn btn-ghost" x-show="sortColumn" @click="clearSort()"
                 title="Clear column sort">↕ reset sort</button>
         <span class="card-meta" x-show="sortColumn" style="margin: 0 6px;">·</span>
+        <!-- Graph viz: only when current result actually carries node/rel
+             objects from Neo4j (see _normalize() in routes/databases.py). -->
+        <button class="btn btn-primary"
+                x-show="engine === 'cypher' && hasGraphData()"
+                @click="openGraph()"
+                title="Render nodes + relationships from this result">
+          ⬡ View as graph
+        </button>
+        <span class="card-meta" x-show="engine === 'cypher' && hasGraphData()" style="margin: 0 6px;">·</span>
         <span class="card-meta" style="margin-right: 4px;">download</span>
         <button class="btn"        @click="download('csv')"      title="CSV (RFC 4180)">CSV</button>
         <button class="btn"        @click="download('md')"       title="Markdown table">MD</button>
@@ -313,6 +322,31 @@
 
     <p x-show="!rows.length && !busy" class="card-meta" style="font-style: italic; margin-top: 12px;">No rows yet — pick an example above or run a query.</p>
     <pre x-show="rawDump" class="console mt-3" x-text="rawDump"></pre>
+  </div>
+
+  <!-- Graph modal: opens when the user clicks "View as graph" on a Cypher
+       result that contains node/relationship objects. vis-network is
+       lazy-loaded from a CDN the first time openGraph() fires. -->
+  <div class="graph-modal" x-show="graphOpen" x-cloak
+       @click.self="closeGraph()"
+       @keydown.escape.window="closeGraph()">
+    <div class="graph-modal-inner">
+      <div class="graph-modal-header">
+        <div class="card-title">Graph view</div>
+        <span class="card-meta ml-2"
+              x-text="graphStats.nodes + ' nodes · ' + graphStats.edges + ' edges'"></span>
+        <div class="ml-auto" style="display: flex; gap: 6px;">
+          <button class="btn btn-ghost" @click="redrawGraph()" title="Re-run layout">↻ relayout</button>
+          <button class="btn btn-ghost" @click="closeGraph()" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div id="cypher-graph-canvas" class="graph-canvas"></div>
+      <div class="graph-modal-footer">
+        <span class="card-meta">drag to pan · scroll to zoom · click a node for details</span>
+        <span class="card-meta ml-auto" x-show="graphSelectedLabel"
+              x-text="graphSelectedLabel"></span>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -779,6 +813,47 @@
     background: var(--surface-sunk);
     border-color: var(--border);
   }
+
+  /* ── Graph modal (Cypher view-as-graph) ───────────────────────── */
+  .graph-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  }
+  .graph-modal-inner {
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #ddd);
+    border-radius: 8px;
+    width: min(96vw, 1400px);
+    height: min(92vh, 900px);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+  }
+  .graph-modal-header,
+  .graph-modal-footer {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border, #ddd);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .graph-modal-footer {
+    border-bottom: none;
+    border-top: 1px solid var(--border, #ddd);
+    font-size: 12px;
+  }
+  .graph-canvas {
+    flex: 1;
+    min-height: 0;
+    background: var(--surface-sunk, #fafafa);
+  }
+  [x-cloak] { display: none !important; }
 </style>
 
 <script>
@@ -1011,6 +1086,11 @@ function dbConsole() {
     columns: [], rows: [], truncated: false, rawDump: '',
     sortColumn: null,
     sortDir: 'asc',          // 'asc' | 'desc'
+    // Graph viz modal state (Cypher only; vis-network lazy-loaded).
+    graphOpen: false,
+    graphNetwork: null,
+    graphStats: { nodes: 0, edges: 0 },
+    graphSelectedLabel: '',
     // Per-column render override (set via the in-header dropdown). Keys
     // are column names; values are one of:
     //   auto    — primitive → text, object → tree, array → sub-table,
@@ -1568,6 +1648,164 @@ function dbConsole() {
       a.download = `${tabName}-${stamp}.${m.ext}`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
+    },
+
+    // ── Graph view (Cypher only) ────────────────────────────────────
+    // Cypher results may carry nodes (`{_kind:'node',_id,...}`) and
+    // relationships (`{_kind:'rel',_id,_start,_end,_type,...}`) — the
+    // server emits those fields when the query returns full graph
+    // objects (see _normalize() in routes/databases.py). When present,
+    // we surface a "View as graph" button that renders a vis-network
+    // canvas in a modal.
+    _graphElementsFromRows() {
+      const nodes = new Map();
+      const edges = new Map();
+      const visit = (v) => {
+        if (v === null || v === undefined) return;
+        if (Array.isArray(v)) { v.forEach(visit); return; }
+        if (typeof v !== 'object') return;
+        if (v._kind === 'node' && v._id) {
+          if (!nodes.has(v._id)) {
+            const labels = v._labels || [];
+            const display = v.full_name || v.login || v.name || (labels[0] || 'node') + ':' + v._id;
+            nodes.set(v._id, {
+              id: v._id,
+              label: display,
+              title: this._htmlTooltip(labels, v),
+              group: labels[0] || 'node',
+            });
+          }
+        } else if (v._kind === 'rel' && v._id) {
+          edges.set(v._id, {
+            id: v._id,
+            from: v._start,
+            to: v._end,
+            label: v._type,
+            arrows: 'to',
+            title: this._htmlTooltip([v._type], v),
+          });
+        } else {
+          // Plain dict — descend in case nested values carry graph objects.
+          for (const k in v) visit(v[k]);
+        }
+      };
+      for (const row of this.rows) row.forEach(visit);
+      // Drop edges whose endpoints aren't in the node set (defensive — a
+      // partial result may reference nodes Neo4j didn't return).
+      const final_edges = [];
+      for (const e of edges.values()) {
+        if (nodes.has(e.from) && nodes.has(e.to)) final_edges.push(e);
+      }
+      return { nodes: [...nodes.values()], edges: final_edges };
+    },
+    _htmlTooltip(labels, obj) {
+      // vis-network supports an HTMLElement as title — that's what we'd
+      // need for proper escaping. With a plain string the value is
+      // injected as innerHTML, so we escape manually. Keep it small.
+      const esc = (s) => String(s).replace(/[&<>"]/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+      const lines = [];
+      if (labels && labels.length) lines.push('<b>' + esc(labels.join(', ')) + '</b>');
+      for (const k in obj) {
+        if (k.startsWith('_')) continue;
+        const v = obj[k];
+        if (v === null || v === undefined || v === '') continue;
+        const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        lines.push(esc(k) + ': ' + esc(s.length > 80 ? s.slice(0, 77) + '…' : s));
+      }
+      return lines.join('<br>');
+    },
+    hasGraphData() {
+      if (this.engine !== 'cypher' || !this.rows.length) return false;
+      for (const row of this.rows) {
+        for (const cell of row) {
+          if (cell && typeof cell === 'object' && cell._kind === 'node') return true;
+        }
+      }
+      return false;
+    },
+    async _ensureVisNetwork() {
+      if (window.vis && window.vis.Network) return;
+      // Lazy-load vis-network from CDN. Keeps the page cheap when the
+      // user never opens the graph modal.
+      await new Promise((resolve, reject) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/vis-network@9.1.9/styles/vis-network.css';
+        document.head.appendChild(link);
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('failed to load vis-network'));
+        document.head.appendChild(s);
+      });
+    },
+    async openGraph() {
+      try {
+        await this._ensureVisNetwork();
+      } catch (e) {
+        this.error = String(e);
+        return;
+      }
+      const { nodes, edges } = this._graphElementsFromRows();
+      this.graphStats = { nodes: nodes.length, edges: edges.length };
+      this.graphSelectedLabel = '';
+      this.graphOpen = true;
+      // Defer the network construction until the modal DOM is mounted.
+      this.$nextTick(() => this._mountGraph(nodes, edges));
+    },
+    _mountGraph(nodes, edges) {
+      const el = document.getElementById('cypher-graph-canvas');
+      if (!el) return;
+      if (this.graphNetwork) {
+        try { this.graphNetwork.destroy(); } catch (_) {}
+        this.graphNetwork = null;
+      }
+      const data = {
+        nodes: new vis.DataSet(nodes),
+        edges: new vis.DataSet(edges),
+      };
+      const options = {
+        nodes: {
+          shape: 'dot',
+          size: 14,
+          font: { size: 12 },
+        },
+        edges: {
+          font: { size: 10, align: 'middle' },
+          smooth: { type: 'dynamic' },
+        },
+        physics: {
+          stabilization: { iterations: 200 },
+          barnesHut: { gravitationalConstant: -8000, springLength: 140 },
+        },
+        interaction: { hover: true, tooltipDelay: 120 },
+        groups: {
+          Repo: { color: '#4f8eef' },
+          User: { color: '#54c27c' },
+          Org:  { color: '#e5a83f' },
+        },
+      };
+      this.graphNetwork = new vis.Network(el, data, options);
+      this.graphNetwork.on('selectNode', (params) => {
+        const id = params.nodes[0];
+        const n = data.nodes.get(id);
+        if (n) this.graphSelectedLabel = (n.group || 'node') + ' · ' + n.label;
+      });
+      this.graphNetwork.on('deselectNode', () => { this.graphSelectedLabel = ''; });
+    },
+    redrawGraph() {
+      if (!this.graphNetwork) return;
+      const { nodes, edges } = this._graphElementsFromRows();
+      this.graphStats = { nodes: nodes.length, edges: edges.length };
+      this._mountGraph(nodes, edges);
+    },
+    closeGraph() {
+      this.graphOpen = false;
+      if (this.graphNetwork) {
+        try { this.graphNetwork.destroy(); } catch (_) {}
+        this.graphNetwork = null;
+      }
     },
 
     resultMeta() {

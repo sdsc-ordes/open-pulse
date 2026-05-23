@@ -222,12 +222,19 @@ def _org_row(login: str, o: dict[str, Any]) -> dict[str, Any]:
 
 
 def _repo_row(full_name: str, r: dict[str, Any]) -> dict[str, Any]:
+    # Fall back to the owner segment of ``full_name`` when the crawler didn't
+    # write an explicit ``owner`` field — this is the case for repos that were
+    # only referenced (as a dependent/dependency) without ever being explored.
+    # Keeps every Repo node queryable by owner without forcing a re-crawl.
+    owner = r.get("owner", "") or ""
+    if not owner and "/" in full_name:
+        owner = full_name.split("/", 1)[0]
     return {
         "full_name": full_name,
         "name": r.get("name", "") or "",
         "id": r.get("id", 0) or 0,
         "type": r.get("type", "Repository"),
-        "owner": r.get("owner", "") or "",
+        "owner": owner,
         "is_explored": bool(r.get("is_explored", False)),
         "exploration_timestamp": r.get("exploration_timestamp"),
     }
