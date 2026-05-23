@@ -144,6 +144,11 @@ class MetadataExtractorStepConfig(StepConfig):
     v2_agent_runtime: str = "rule_based"
     v2_poll_interval_seconds: float = 2.0
     v2_timeout_seconds: float = 600.0
+    max_workers: int = 6
+    """Concurrent ``v2_extract`` submits the step runs at once. Matches the
+    GME's ``V2_MAX_CONCURRENT_AGENTS`` default; raise/lower in the quest
+    YAML when you've tuned the server. Set to ``1`` to revert to the old
+    fully-sequential behaviour."""
     include_internal_fields: bool = False
     """Keep `_`-prefixed internal fields (``_bio``, ``_avatar_url``,
     ``_orcid_keywords``, ``_company``) in the response. The GME's strict
