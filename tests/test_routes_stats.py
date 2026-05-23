@@ -21,6 +21,15 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
+# ``open_pulse.gui.hub.routes.stats`` imports ``fastapi`` (and through the
+# routes package, ``docker``). These live under the optional ``hub`` extra,
+# not the base ``test`` group CI installs. Skip cleanly when they aren't
+# available so the test still runs in any dev env that opts into the hub.
+pytest.importorskip("fastapi")
+pytest.importorskip("docker")
+
 
 def _make_legacy_db(path: Path) -> None:
     """Reproduce the pre-PR metrics_history schema, with one row of data
@@ -71,11 +80,12 @@ def test_history_schema_adds_missing_columns_idempotently(tmp_path: Path) -> Non
     from open_pulse.gui.hub.routes import stats as stats_module
 
     with patch.object(stats_module, "get_settings", return_value=fake_settings):
-
         # First call migrates.
         conn = stats_module._history_db()
         try:
-            cols = {row[1] for row in conn.execute("PRAGMA table_info(metrics_history)")}
+            cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(metrics_history)")
+            }
         finally:
             conn.close()
 
@@ -150,7 +160,6 @@ def test_persist_and_history_roundtrip(tmp_path: Path) -> None:
     from open_pulse.gui.hub.routes import stats as stats_module
 
     with patch.object(stats_module, "get_settings", return_value=fake_settings):
-
         stats_module._persist_sample(sample)
         # ``history()`` is a FastAPI handler; call it directly with
         # defaults — it returns the same shape the chart consumes.
@@ -193,7 +202,12 @@ def test_persist_tolerates_partial_sample(tmp_path: Path) -> None:
     object.__setattr__(fake_settings, "data_dir", tmp_path)
 
     partial: dict[str, Any] = {
-        "services": {"total": 18, "running": 16, "healthy": 15, "uptime_max_seconds": 0},
+        "services": {
+            "total": 18,
+            "running": 16,
+            "healthy": 15,
+            "uptime_max_seconds": 0,
+        },
         # opensearch + duckdb missing entirely (e.g. services down).
         "sparql": {"repos": 100, "users": None, "orgs": None},
         "neo4j": {
@@ -208,7 +222,6 @@ def test_persist_tolerates_partial_sample(tmp_path: Path) -> None:
     from open_pulse.gui.hub.routes import stats as stats_module
 
     with patch.object(stats_module, "get_settings", return_value=fake_settings):
-
         stats_module._persist_sample(partial)
         payload = stats_module.history(range_="6h")
 
