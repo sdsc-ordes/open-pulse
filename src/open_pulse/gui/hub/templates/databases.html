@@ -1891,17 +1891,35 @@ function dbConsole() {
       for (const row of this.rows) {
         // Materialise the row's node identities in left-to-right column
         // order — that ordering also drives the edge path below.
-        const rowNodes = [];
+        // Per-column entries may carry one node OR a list of nodes
+        // (when the column is a Cypher ``collect()`` projection).
+        const rowSlots = [];
         for (const nc of nodeCols) {
           const v = row[nc.idx];
-          if (v === null || v === undefined || v === '') continue;
-          const idStr = (typeof v === 'object') ? JSON.stringify(v) : String(v);
-          // Namespace the id by kind so a Repo and a User with the same
-          // string value (e.g. an org login matching a repo full_name
-          // prefix) collapse to two separate nodes.
-          const id = nc.kind + '::' + idStr;
-          rowNodes.push({ id, label: idStr, kind: nc.kind, binding: nc.binding });
+          if (v === null || v === undefined || v === '') {
+            rowSlots.push([]);
+            continue;
+          }
+          // Array-aware: a ``collect(...)`` column emits one node per
+          // element so a row carrying ``['alice', 'bob']`` produces
+          // two User nodes instead of one node labeled ``["alice", "bob"]``.
+          // The edge-drawing pass below treats the slot's array as
+          // ``edges from the previous slot's nodes to each element here``.
+          const items = Array.isArray(v) ? v : [v];
+          const slot = [];
+          for (const item of items) {
+            if (item === null || item === undefined || item === '') continue;
+            const idStr = (typeof item === 'object') ? JSON.stringify(item) : String(item);
+            const id = nc.kind + '::' + idStr;
+            slot.push({ id, label: idStr, kind: nc.kind, binding: nc.binding });
+          }
+          rowSlots.push(slot);
         }
+        // Flatten for the node-registration step. The order of slots
+        // is preserved so the per-row edge path below still goes
+        // left-to-right (slot[0] → slot[1] → …).
+        const rowNodes = [];
+        for (const s of rowSlots) for (const n of s) rowNodes.push(n);
         for (const n of rowNodes) {
           if (nodes.has(n.id)) continue;
           if (nodes.size >= cap) break;
@@ -1919,24 +1937,31 @@ function dbConsole() {
             break;
           }
         }
-        // Wire edges as a path through node columns left-to-right —
-        // matches how the user reads the row. For "all pairs", swap the
-        // loop body, but the linear path is way cleaner visually.
-        for (let i = 0; i + 1 < rowNodes.length; i++) {
-          const a = rowNodes[i], b = rowNodes[i + 1];
-          if (!nodes.has(a.id) || !nodes.has(b.id)) continue;
-          const label = explicitLabel || edgeLabel(a.binding, b.binding) || '';
-          // Edge id keys collapse the same (from, to, label) triple
-          // across rows — keeps the graph reading clean when the same
-          // relationship recurs.
-          const key = a.id + '→' + b.id + '|' + label;
-          if (!edges.has(key)) {
-            edges.set(key, {
-              id: 'e-' + edges.size,
-              from: a.id, to: b.id,
-              label,
-              arrows: 'to',
-            });
+        // Wire edges as a path through node *slots* left-to-right: for
+        // each adjacent slot pair, draw the cross-product of edges
+        // between every left-node and every right-node. With one item
+        // per slot this collapses to the simple linear path; with a
+        // ``collect()`` column on either side it fans out so each
+        // element gets its own edge.
+        for (let i = 0; i + 1 < rowSlots.length; i++) {
+          const left = rowSlots[i], right = rowSlots[i + 1];
+          for (const a of left) {
+            for (const b of right) {
+              if (!nodes.has(a.id) || !nodes.has(b.id)) continue;
+              const label = explicitLabel || edgeLabel(a.binding, b.binding) || '';
+              // Edge id keys collapse the same (from, to, label) triple
+              // across rows so a recurring relationship reads as one
+              // edge in the canvas instead of N stacked ones.
+              const key = a.id + '→' + b.id + '|' + label;
+              if (!edges.has(key)) {
+                edges.set(key, {
+                  id: 'e-' + edges.size,
+                  from: a.id, to: b.id,
+                  label,
+                  arrows: 'to',
+                });
+              }
+            }
           }
         }
       }
@@ -2038,15 +2063,19 @@ function dbConsole() {
             // column name that's not worth predicting.
             const bare = item.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*$/);
             if (bare && bindingLabels[bare[1]]) {
-              columnBindings[bare[1]] = bare[1];
+              // Bare binding ref → the node itself; no specific prop.
+              columnBindings[bare[1]] = { binding: bare[1], prop: null };
             }
             continue;
           }
 
           // Fast path: ``<binding>`` or ``<binding>.<prop>`` exactly.
-          const direct = expr.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?\s*$/);
+          const direct = expr.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?\s*$/);
           if (direct && bindingLabels[direct[1]]) {
-            columnBindings[alias] = direct[1];
+            // Store the prop name too (or null for bare bindings) so
+            // the same-binding dedup pass below can rank by identity
+            // priority (``full_name`` beats ``name``, etc.).
+            columnBindings[alias] = { binding: direct[1], prop: direct[2] || null };
             continue;
           }
 
@@ -2071,14 +2100,14 @@ function dbConsole() {
           // Heuristic: only match when the expression contains
           // ``<binding>.<identity-prop>`` for an identity prop from
           // the small whitelist below. The first such match wins.
-          const IDENTITY_PROPS = /(?:full_name|login|name|id|email|slug)\b/i;
+          const IDENTITY_PROPS = /^(?:full_name|login|name|id|email|slug)$/i;
           const propRe = /\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
           let pm;
           while ((pm = propRe.exec(expr))) {
             const binding = pm[1];
             const prop = pm[2];
             if (bindingLabels[binding] && IDENTITY_PROPS.test(prop)) {
-              columnBindings[alias] = binding;
+              columnBindings[alias] = { binding, prop };
               break;
             }
           }
@@ -2114,30 +2143,74 @@ function dbConsole() {
     // queries that don't parse cleanly still get reasonable defaults).
     _autoDetectColumnMapping() {
       const intro = this.graphIntrospection || { bindingLabels: {}, columnBindings: {}, edges: [] };
-      return this.columns.map((col) => {
-        // 1. Introspection pinned this column to a labeled binding.
-        const binding = intro.columnBindings[col];
-        if (binding && intro.bindingLabels[binding]) {
-          return { role: 'node', kind: intro.bindingLabels[binding], binding };
+      const REPO_RE = /^(repo|repository|library|client|origin|seed|full_name|repo_id|repo_name)$/;
+      const USER_RE = /^(user|author|contributor|reviewer|commenter|member|login|user_login|user_name|neighbor|neighbour|neighbor_id|neighbour_id|node|target)$/;
+      const ORG_RE  = /^(org|organization|owner|owner_login)$/;
+      const EDGE_RE = /^(type|rel|edge|kind|direction|relationship|edge_type)$/;
+
+      // Pass 1: per-column initial role using introspection then
+      // column-name heuristics. ``binding`` is filled when
+      // introspection tied the column to a specific cypher var; that
+      // info drives the same-binding dedup below.
+      const draft = this.columns.map((col) => {
+        const cb = intro.columnBindings[col];
+        if (cb && intro.bindingLabels[cb.binding]) {
+          return {
+            role: 'node',
+            kind: intro.bindingLabels[cb.binding],
+            binding: cb.binding,
+            prop: cb.prop,
+          };
         }
-        // 2. Name-based heuristics — case-insensitive, whole-word.
-        //
-        // Conservative on purpose: a plural like "repos" or
-        // "contributors" almost always means a COUNT in our chips
-        // (``count(DISTINCT r) AS repos``); flagging it as a node
-        // would create one node per integer value. The user can
-        // always upgrade ``ignore`` → ``node`` in the configure panel.
         const low = col.toLowerCase();
-        const REPO_RE = /^(repo|repository|library|client|origin|seed|full_name|repo_id|repo_name)$/;
-        const USER_RE = /^(user|author|contributor|reviewer|commenter|member|login|user_login|user_name|neighbor_id)$/;
-        const ORG_RE  = /^(org|organization|owner|owner_login)$/;
-        const EDGE_RE = /^(type|rel|edge|kind|direction|relationship|edge_type)$/;
-        if (REPO_RE.test(low)) return { role: 'node', kind: 'Repo', binding: null };
-        if (USER_RE.test(low)) return { role: 'node', kind: 'User', binding: null };
-        if (ORG_RE.test(low))  return { role: 'node', kind: 'Org',  binding: null };
-        if (EDGE_RE.test(low)) return { role: 'edge', kind: '',     binding: null };
-        return { role: 'ignore', kind: '', binding: null };
+        if (REPO_RE.test(low)) return { role: 'node', kind: 'Repo', binding: null, prop: null };
+        if (USER_RE.test(low)) return { role: 'node', kind: 'User', binding: null, prop: null };
+        if (ORG_RE.test(low))  return { role: 'node', kind: 'Org',  binding: null, prop: null };
+        if (EDGE_RE.test(low)) return { role: 'edge', kind: '',     binding: null, prop: null };
+        return { role: 'ignore', kind: '', binding: null, prop: null };
       });
+
+      // Pass 2: dedup columns that point at the same cypher binding.
+      //
+      // ``RETURN u.login AS login, u.name AS name`` ties both columns
+      // to ``u`` — drawing both as separate User nodes would create
+      // bogus login↔name edges per row. Keep the one with the
+      // highest-priority identity prop; mark the rest as ``ignore``
+      // (still visible in the configure panel for the user to flip).
+      const IDENTITY_PRIORITY = ['full_name', 'login', 'id', 'name', 'email', 'slug'];
+      const propRank = (p) => {
+        if (!p) return IDENTITY_PRIORITY.length; // bare binding ref — lowest priority
+        const i = IDENTITY_PRIORITY.indexOf(p.toLowerCase());
+        return i >= 0 ? i : IDENTITY_PRIORITY.length + 1;
+      };
+      const byBinding = new Map();
+      draft.forEach((m, i) => {
+        if (m.role !== 'node' || !m.binding) return;
+        const list = byBinding.get(m.binding) || [];
+        list.push(i);
+        byBinding.set(m.binding, list);
+      });
+      for (const indices of byBinding.values()) {
+        if (indices.length < 2) continue;
+        // Lower rank number = higher priority. Tiebreak on column order
+        // (first occurrence wins) — matches how users usually write the
+        // identifier column first.
+        indices.sort((a, b) => {
+          const ra = propRank(draft[a].prop), rb = propRank(draft[b].prop);
+          if (ra !== rb) return ra - rb;
+          return a - b;
+        });
+        const keep = indices[0];
+        for (const idx of indices) {
+          if (idx === keep) continue;
+          draft[idx] = { role: 'ignore', kind: '', binding: null, prop: null };
+        }
+      }
+
+      // Strip the internal ``prop`` field — the mapping persisted to
+      // localStorage and consumed by the renderer only needs role,
+      // kind, and binding.
+      return draft.map(({ role, kind, binding }) => ({ role, kind, binding }));
     },
 
     // Stable hash of the query text — keys the per-query mapping in
