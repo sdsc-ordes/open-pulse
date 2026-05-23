@@ -68,8 +68,9 @@ def test_history_schema_adds_missing_columns_idempotently(tmp_path: Path) -> Non
     fake_settings = Settings.__new__(Settings)
     object.__setattr__(fake_settings, "data_dir", tmp_path)
 
-    with patch("open_pulse.gui.hub.routes.stats.get_settings", return_value=fake_settings):
-        from open_pulse.gui.hub.routes import stats as stats_module
+    from open_pulse.gui.hub.routes import stats as stats_module
+
+    with patch.object(stats_module, "get_settings", return_value=fake_settings):
 
         # First call migrates.
         conn = stats_module._history_db()
@@ -146,8 +147,9 @@ def test_persist_and_history_roundtrip(tmp_path: Path) -> None:
         },
     }
 
-    with patch("open_pulse.gui.hub.routes.stats.get_settings", return_value=fake_settings):
-        from open_pulse.gui.hub.routes import stats as stats_module
+    from open_pulse.gui.hub.routes import stats as stats_module
+
+    with patch.object(stats_module, "get_settings", return_value=fake_settings):
 
         stats_module._persist_sample(sample)
         # ``history()`` is a FastAPI handler; call it directly with
@@ -203,8 +205,9 @@ def test_persist_tolerates_partial_sample(tmp_path: Path) -> None:
         },
     }
 
-    with patch("open_pulse.gui.hub.routes.stats.get_settings", return_value=fake_settings):
-        from open_pulse.gui.hub.routes import stats as stats_module
+    from open_pulse.gui.hub.routes import stats as stats_module
+
+    with patch.object(stats_module, "get_settings", return_value=fake_settings):
 
         stats_module._persist_sample(partial)
         payload = stats_module.history(range_="6h")
