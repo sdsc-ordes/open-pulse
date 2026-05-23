@@ -302,7 +302,7 @@ SPARQL: list[dict[str, str]] = [
         "PREFIX gme-internal: <https://openpulse.science/git-metadata-extractor#>\n"
         "SELECT ?location (COUNT(DISTINCT ?s) AS ?n) WHERE {\n"
         "  ?s gme-internal:location ?location .\n"
-        "  FILTER (STR(?location) != \"\")\n"
+        '  FILTER (STR(?location) != "")\n'
         "}\n"
         "GROUP BY ?location ORDER BY DESC(?n) LIMIT 50",
     },
@@ -343,7 +343,7 @@ SPARQL: list[dict[str, str]] = [
         "summary": "gme-internal:archived = true — cold storage in the corpus.",
         "body": "# Quick way to spot inactive code. ``archived`` is a typed boolean\n"
         "# (xsd:boolean), so the literal must carry the datatype; plain\n"
-        "# string \"true\" won't match.\n"
+        '# string "true" won\'t match.\n'
         "# Useful for filtering a projects.json to active-only repos\n"
         "# (negate the filter) or for picking historic snapshots to study.\n"
         "PREFIX xsd:          <http://www.w3.org/2001/XMLSchema#>\n"
@@ -379,7 +379,7 @@ SPARQL: list[dict[str, str]] = [
         "SELECT ?person ?blog ?company WHERE {\n"
         "  ?person a schema:Person ;\n"
         "          gme-internal:blog ?blog .\n"
-        "  FILTER (STR(?blog) != \"\")\n"
+        '  FILTER (STR(?blog) != "")\n'
         "  OPTIONAL { ?person gme-internal:company ?company }\n"
         "}\n"
         "ORDER BY ?person LIMIT 50",
