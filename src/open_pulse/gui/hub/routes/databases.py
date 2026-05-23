@@ -268,13 +268,19 @@ def _normalize(value: Any) -> Any:
     """
     # Relationship has _type and start/end_node ids — must be checked before
     # the generic Node branch because relationships also expose properties.
-    if hasattr(value, "type") and hasattr(value, "start_node") and hasattr(value, "end_node"):
+    if (
+        hasattr(value, "type")
+        and hasattr(value, "start_node")
+        and hasattr(value, "end_node")
+    ):
         return {
             "_kind": "rel",
             "_id": str(getattr(value, "element_id", getattr(value, "id", ""))),
             "_type": value.type,
             "_start": str(
-                getattr(value.start_node, "element_id", getattr(value.start_node, "id", ""))
+                getattr(
+                    value.start_node, "element_id", getattr(value.start_node, "id", "")
+                )
             ),
             "_end": str(
                 getattr(value.end_node, "element_id", getattr(value.end_node, "id", ""))
