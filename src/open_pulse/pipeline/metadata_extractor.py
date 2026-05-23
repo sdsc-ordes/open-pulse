@@ -81,9 +81,7 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     # so a downstream ``sparql_upload`` still works as a safety net.
     stream_to_sparql = bool(step_cfg.get("stream_to_sparql", False))
     stream_named_graph_raw = step_cfg.get("stream_named_graph")
-    stream_named_graph = (
-        str(stream_named_graph_raw) if stream_named_graph_raw else None
-    )
+    stream_named_graph = str(stream_named_graph_raw) if stream_named_graph_raw else None
     if mode not in ("v1_gimie", "v2"):
         raise ValueError(
             f"metadata_extractor: unknown mode {mode!r}; expected 'v1_gimie' or 'v2'."
