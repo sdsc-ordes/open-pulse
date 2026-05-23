@@ -154,9 +154,9 @@ class MetadataExtractorService:
         ``agent_runtime`` defaults to ``"rule_based"`` so the GME server
         doesn't need an LLM provider token (e.g. ``RCP_TOKEN``).
 
-        ``include_internal_fields`` keeps the ``_``-prefixed internal
-        fields (``_bio``, ``_avatar_url``, ``_orcid_keywords``, …) in the
-        response — by default the GME strips them for ontology compliance.
+        ``include_internal_fields`` keeps GME-internal data (now exposed
+        under the ``gme-internal:`` namespace) in the response — bios,
+        locations, GitHub flags, etc.
         """
         url = self.endpoint + _V2_EXTRACT_PATH
         body: dict[str, Any] = {
