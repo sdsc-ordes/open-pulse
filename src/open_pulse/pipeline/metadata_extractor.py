@@ -68,7 +68,14 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     mode = str(step_cfg.get("mode", "v2"))
     v2_agent_runtime = str(step_cfg.get("v2_agent_runtime", "rule_based"))
     v2_poll = float(step_cfg.get("v2_poll_interval_seconds", 2.0))
-    v2_timeout = float(step_cfg.get("v2_timeout_seconds", 600.0))
+    v2_timeout_raw = step_cfg.get("v2_timeout_seconds", 600.0)
+    # ``None`` or ``<= 0`` waits indefinitely. Useful for long LLM runs
+    # where a single hybrid extraction can sit on the GME for minutes.
+    v2_timeout: float | None = (
+        None
+        if v2_timeout_raw is None or float(v2_timeout_raw) <= 0
+        else float(v2_timeout_raw)
+    )
     include_internal_fields = bool(step_cfg.get("include_internal_fields", False))
     # How many v2 submits run in flight at once. Mirrors the GME's
     # V2_MAX_CONCURRENT_AGENTS default of 6 — going higher than that
