@@ -266,44 +266,142 @@
       </div>
     </div>
 
-    <!-- ── Session query log (right, 1fr) ──────────────────────────
-         Recent runs in this browser. Replaces the always-visible
-         Library card; the library now lives behind a modal opened
-         from the editor toolbar. -->
-    <div class="card">
-      <div class="db-sesslog-head">
-        <div class="card-title" style="margin: 0;">Session log</div>
-        <button class="btn btn-ghost btn-tiny"
+    <!-- ── Right rail (1fr): tabbed sidekick — Session log + Assistant
+         Replaces the standalone Session-log card and the floating
+         bottom-right Assistant. Tabs are persisted in localStorage so
+         the user lands back on whichever side they used last. -->
+    <div class="card right-rail">
+      <div class="right-rail-tabs">
+        <button class="right-rail-tab"
+                :class="rightTab === 'session' ? 'is-active' : ''"
+                @click="setRightTab('session')">
+          Session log
+          <span class="right-rail-badge" x-show="sessionLog.length"
+                x-text="sessionLog.length"></span>
+        </button>
+        <button class="right-rail-tab"
+                :class="rightTab === 'assistant' ? 'is-active' : ''"
+                @click="setRightTab('assistant')">
+          ✨ Assistant
+          <span class="right-rail-badge" x-show="aiMessages.length"
+                x-text="aiMessages.length"></span>
+        </button>
+        <button class="btn btn-ghost btn-tiny ml-auto"
+                x-show="rightTab === 'session' && sessionLog.length"
                 @click="clearSessionLog()"
-                x-show="sessionLog.length"
                 title="Clear all session-log entries">clear</button>
+        <select class="ai-model"
+                x-show="rightTab === 'assistant'"
+                x-model="aiModel"
+                :disabled="!aiModels.length"
+                title="Model — comes from the configured LLM endpoint."
+                style="margin-left: auto; max-width: 160px;">
+          <template x-for="m in aiModels" :key="m.id">
+            <option :value="m.id" x-text="m.id"></option>
+          </template>
+        </select>
+        <button class="btn btn-ghost btn-tiny"
+                x-show="rightTab === 'assistant' && aiMessages.length"
+                @click="aiMessages = []; persistAiMessages()"
+                title="Clear chat history (kept per-browser).">⌫</button>
       </div>
-      <p class="card-meta" style="margin-top: 4px;">
-        Last <span x-text="sessionLog.length"></span> runs in this browser
-        (cap 100). Click an entry to re-open it as a new tab.
-      </p>
-      <div class="db-sesslog-list">
-        <template x-for="e in sessionLog" :key="e.id">
-          <button @click="loadFromLog(e)" class="db-sesslog-entry">
-            <div class="db-sesslog-line1">
-              <span class="db-sesslog-engine"
-                    :class="'tag-' + e.engine"
-                    x-text="e.engine + (e.os_mode ? ' · ' + e.os_mode : '')"></span>
-              <span class="db-sesslog-meta" x-text="formatLogTime(e.ts)"></span>
+
+      <!-- Session-log pane -->
+      <div x-show="rightTab === 'session'" class="right-rail-pane">
+        <p class="card-meta" style="margin-top: 4px;">
+          Last <span x-text="sessionLog.length"></span> runs in this browser
+          (cap 100). Click an entry to re-open it as a new tab.
+        </p>
+        <div class="db-sesslog-list">
+          <template x-for="e in sessionLog" :key="e.id">
+            <button @click="loadFromLog(e)" class="db-sesslog-entry">
+              <div class="db-sesslog-line1">
+                <span class="db-sesslog-engine"
+                      :class="'tag-' + e.engine"
+                      x-text="e.engine + (e.os_mode ? ' · ' + e.os_mode : '')"></span>
+                <span class="db-sesslog-meta" x-text="formatLogTime(e.ts)"></span>
+              </div>
+              <div class="db-sesslog-line2" x-text="e.tab_name || 'untitled'"></div>
+              <div class="db-sesslog-line3">
+                <span x-text="(e.row_count || 0).toLocaleString() + ' rows'"></span>
+                <span> · </span>
+                <span x-text="(e.runtime_ms || 0) + ' ms'"></span>
+              </div>
+            </button>
+          </template>
+          <template x-if="!sessionLog.length">
+            <p class="card-meta" style="font-style: italic; margin-top: 8px;">
+              no runs yet — hit ⌘↵ (or click <strong>Run</strong>) to execute the current tab.
+            </p>
+          </template>
+        </div>
+      </div>
+
+      <!-- Assistant pane (replaces the old floating panel) -->
+      <div x-show="rightTab === 'assistant'" class="right-rail-pane right-rail-pane-chat">
+        <div class="ai-panel-body" x-ref="aiBody">
+          <template x-if="!aiMessages.length">
+            <div class="ai-empty">
+              <p style="margin-bottom: 6px;">Ask me to write or refine a query.</p>
+              <p class="card-meta" style="font-size: 11px;">
+                I see your current engine, the editor's query, the
+                available named graphs, and any result-table rows you
+                attach. Click <code>Use as query</code> on my replies
+                to drop a code block into the editor.
+              </p>
             </div>
-            <div class="db-sesslog-line2" x-text="e.tab_name || 'untitled'"></div>
-            <div class="db-sesslog-line3">
-              <span x-text="(e.row_count || 0).toLocaleString() + ' rows'"></span>
-              <span> · </span>
-              <span x-text="(e.runtime_ms || 0) + ' ms'"></span>
+          </template>
+          <template x-for="(m, i) in aiMessages" :key="i">
+            <div class="ai-msg" :class="'ai-msg-' + m.role">
+              <div class="ai-msg-role" x-text="m.role"></div>
+              <div class="ai-msg-body" x-html="renderAiMessage(m.content)"></div>
+              <div class="ai-msg-actions" x-show="m.role === 'assistant' && extractCodeBlock(m.content)">
+                <button class="btn btn-ghost"
+                        @click="useAiBlockAsQuery(extractCodeBlock(m.content))"
+                        title="Replace the editor's query with this code block.">
+                  ⤴ Use as query
+                </button>
+              </div>
             </div>
+          </template>
+          <div x-show="aiBusy" class="ai-msg ai-msg-assistant">
+            <div class="ai-msg-role">assistant</div>
+            <div class="ai-msg-body" x-html="renderAiMessage(aiPartial || '…')"></div>
+          </div>
+        </div>
+
+        <div class="ai-attach-rail" x-show="rows.length" x-cloak>
+          <span class="card-meta" style="font-size: 11px;">Attach rows:</span>
+          <input type="number" min="1" max="50" x-model.number="aiAttachN"
+                 style="width: 50px; padding: 2px 4px; font-size: 11px;
+                        background: var(--surface-sunk); border: 1px solid var(--border);
+                        border-radius: 4px; color: var(--fg);" />
+          <button class="btn btn-ghost"
+                  @click="attachRowsToChat('head')"
+                  :disabled="!rows.length"
+                  title="Add the first N rows of the current result table to the chat.">
+            + head
           </button>
-        </template>
-        <template x-if="!sessionLog.length">
-          <p class="card-meta" style="font-style: italic; margin-top: 8px;">
-            no runs yet — hit ⌘↵ (or click <strong>Run</strong>) to execute the current tab.
-          </p>
-        </template>
+          <button class="btn btn-ghost"
+                  @click="attachRowsToChat('tail')"
+                  :disabled="!rows.length"
+                  title="Add the last N rows of the current result table to the chat.">
+            + tail
+          </button>
+          <span class="card-meta ml-auto" style="font-size: 11px;"
+                x-text="rows.length + ' total'"></span>
+        </div>
+
+        <div class="ai-composer">
+          <textarea x-model="aiInput"
+                    @keydown="aiComposerKey($event)"
+                    :disabled="aiBusy"
+                    placeholder="Enter (or ⌘/Ctrl+Enter) to send · Shift+Enter for newline."
+                    rows="3"></textarea>
+          <button class="btn btn-primary"
+                  @click="sendAi()"
+                  :disabled="aiBusy || !aiInput.trim()">Send</button>
+        </div>
       </div>
     </div>
 
@@ -472,103 +570,6 @@
     </div>
   </div>
 
-  <!-- ── AI assistant: floating bottom-right chat ────────────────────
-       Always present; collapsed to a button until the user opens it.
-       Posts to ``/api/ai/chat`` which proxies to the configured LLM
-       endpoint (RCP by default). The composer attaches the current
-       engine + query + named-graph list + an optional head/tail of
-       the result table so the model has page context without the
-       user having to repaste anything.
-  -->
-  <button class="ai-launcher"
-          x-show="!aiOpen"
-          @click="openAi()"
-          title="Ask the AI assistant — has the page context already.">
-    <span style="font-size: 16px;">✨</span>
-    <span>Assistant</span>
-  </button>
-
-  <div class="ai-panel" x-show="aiOpen" x-cloak
-       @keydown.escape.window="aiOpen = false">
-    <div class="ai-panel-head">
-      <span class="card-title">Assistant</span>
-      <select class="ai-model" x-model="aiModel"
-              :disabled="!aiModels.length"
-              title="Model — comes from the configured LLM endpoint.">
-        <template x-for="m in aiModels" :key="m.id">
-          <option :value="m.id" x-text="m.id"></option>
-        </template>
-      </select>
-      <button class="btn btn-ghost"
-              @click="aiMessages = []; persistAiMessages()"
-              title="Clear chat history (kept per-browser).">⌫</button>
-      <button class="btn btn-ghost" @click="aiOpen = false" title="Close">✕</button>
-    </div>
-
-    <div class="ai-panel-body" x-ref="aiBody">
-      <template x-if="!aiMessages.length">
-        <div class="ai-empty">
-          <p style="margin-bottom: 6px;">Ask me to write or refine a query.</p>
-          <p class="card-meta" style="font-size: 11px;">
-            I see your current engine, the editor's query, the
-            available named graphs, and any result-table rows you
-            attach.  Click <code>Use as query</code> on my replies to
-            drop a code block into the editor.
-          </p>
-        </div>
-      </template>
-      <template x-for="(m, i) in aiMessages" :key="i">
-        <div class="ai-msg" :class="'ai-msg-' + m.role">
-          <div class="ai-msg-role" x-text="m.role"></div>
-          <div class="ai-msg-body" x-html="renderAiMessage(m.content)"></div>
-          <div class="ai-msg-actions" x-show="m.role === 'assistant' && extractCodeBlock(m.content)">
-            <button class="btn btn-ghost"
-                    @click="useAiBlockAsQuery(extractCodeBlock(m.content))"
-                    title="Replace the editor's query with this code block.">
-              ⤴ Use as query
-            </button>
-          </div>
-        </div>
-      </template>
-      <div x-show="aiBusy" class="ai-msg ai-msg-assistant">
-        <div class="ai-msg-role">assistant</div>
-        <div class="ai-msg-body" x-text="aiPartial || '…'"></div>
-      </div>
-    </div>
-
-    <div class="ai-attach-rail" x-show="rows.length" x-cloak>
-      <span class="card-meta" style="font-size: 11px;">Attach result rows:</span>
-      <input type="number" min="1" max="50" x-model.number="aiAttachN"
-             style="width: 50px; padding: 2px 4px; font-size: 11px;
-                    background: var(--surface-sunk); border: 1px solid var(--border);
-                    border-radius: 4px; color: var(--fg);" />
-      <button class="btn btn-ghost"
-              @click="attachRowsToChat('head')"
-              :disabled="!rows.length"
-              title="Add the first N rows of the current result table to the chat as context.">
-        + head
-      </button>
-      <button class="btn btn-ghost"
-              @click="attachRowsToChat('tail')"
-              :disabled="!rows.length"
-              title="Add the last N rows of the current result table to the chat as context.">
-        + tail
-      </button>
-      <span class="card-meta ml-auto" style="font-size: 11px;"
-            x-text="rows.length + ' total'"></span>
-    </div>
-
-    <div class="ai-composer">
-      <textarea x-model="aiInput"
-                @keydown="aiComposerKey($event)"
-                :disabled="aiBusy"
-                placeholder="Describe what you want — e.g. 'orgs with most archived repos, scoped to 2026-05/hybrid'.   Enter (or ⌘/Ctrl+Enter) to send, Shift+Enter for newline."
-                rows="3"></textarea>
-      <button class="btn btn-primary"
-              @click="sendAi()"
-              :disabled="aiBusy || !aiInput.trim()">Send</button>
-    </div>
-  </div>
 
 </div>
 
@@ -1138,37 +1139,54 @@
   }
   [x-cloak] { display: none !important; }
 
-  /* ── AI assistant (floating bottom-right) ───────────────────────── */
-  .ai-launcher {
-    position: fixed; bottom: 20px; right: 20px; z-index: 9000;
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 10px 14px; border-radius: 999px;
-    background: var(--accent, #335bff); color: white;
-    border: 0; cursor: pointer;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-    font-size: 13px; font-weight: 500;
-  }
-  .ai-launcher:hover { filter: brightness(1.1); }
-  .ai-panel {
-    position: fixed; bottom: 20px; right: 20px; z-index: 9000;
-    width: 420px; max-width: calc(100vw - 32px);
-    height: min(640px, calc(100vh - 80px));
+  /* ── Right rail (tabbed: Session log / Assistant) ──────────────── */
+  .right-rail {
     display: flex; flex-direction: column;
-    background: var(--surface, #fff);
-    border: 1px solid var(--border, #ddd);
-    border-radius: 12px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+    padding: 0;
+    min-height: 0;
+    /* Keep the rail roughly the height of the editor side so the
+       chat-body scroll feels anchored. The exact value is a balance
+       between "tall enough to be useful" and "doesn't push the
+       result table off-screen". */
+    max-height: calc(100vh - 200px);
   }
-  .ai-panel-head {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 14px; border-bottom: 1px solid var(--border);
+  .right-rail-tabs {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+  }
+  .right-rail-tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent; border: 0; cursor: pointer;
+    padding: 4px 10px; border-radius: 6px;
+    font-size: 12px; color: var(--fg-muted);
+  }
+  .right-rail-tab:hover { background: var(--surface-soft); color: var(--fg); }
+  .right-rail-tab.is-active {
+    background: var(--surface-soft); color: var(--fg); font-weight: 500;
+  }
+  .right-rail-badge {
+    background: var(--surface-sunk); color: var(--fg-muted);
+    padding: 1px 6px; border-radius: 999px; font-size: 10px;
+    border: 1px solid var(--border);
+  }
+  .right-rail-tab.is-active .right-rail-badge {
+    background: var(--surface); color: var(--fg);
+  }
+  .right-rail-pane {
+    flex: 1; min-height: 0;
+    padding: 10px 14px; overflow: auto;
+  }
+  .right-rail-pane-chat {
+    /* Chat needs the composer pinned at the bottom — split into a
+       scrollable body + fixed footer (attach rail + composer). */
+    padding: 0;
+    display: flex; flex-direction: column;
   }
   .ai-model {
     font-size: 11px; padding: 3px 6px;
     background: var(--surface-sunk); border: 1px solid var(--border);
     border-radius: 4px; color: var(--fg);
-    margin-right: auto; max-width: 200px;
   }
   .ai-panel-body {
     flex: 1; min-height: 0; overflow: auto;
@@ -1570,8 +1588,13 @@ function dbConsole() {
     snapshotsLoading: false,
     activeGraphFromUri: null,      // currently-injected ``FROM <iri>`` (null = default)
 
-    // ── AI assistant (floating chat) ─────────────────────────────
-    aiOpen: false,
+    // ── Right rail (tabbed: session log + assistant) ─────────────
+    // ``rightTab`` persists in localStorage so the user lands back on
+    // whichever side they used last.
+    rightTab: localStorage.getItem('op:hub:db-right-tab') || 'session',
+
+    // ── AI assistant (lives inside the right rail) ───────────────
+    aiOpen: false,                 // legacy: kept so older bookmarks don't crash
     aiModels: [],                  // [{id}, …] from /api/ai/models
     aiModel: '',                   // selected model id
     aiMessages: [],                // conversation history (OpenAI shape)
@@ -1602,6 +1625,7 @@ function dbConsole() {
       this.$watch('query', () => {
         this.recomputeGutter();
         this.rehighlightEditor();
+        this.autoResizeEditor();
       });
       this.$watch('engine', () => {
         this.error = ''; this.rows = []; this.columns = []; this.rawDump = '';
@@ -1613,9 +1637,14 @@ function dbConsole() {
       await Promise.all([this.loadExamples(), this.loadSaved()]);
       this.recomputeGutter();
       this.rehighlightEditor();
+      this.autoResizeEditor();
       // Probe the SPARQL store for named graphs if SPARQL is the initial
       // engine — same lazy-load pattern setEngine() uses on tab switch.
       if (this.engine === 'sparql') this.refreshSnapshots();
+      // If the user left the page on the assistant tab last time,
+      // restore the chat state now so the panel isn't blank on first
+      // open.
+      if (this.rightTab === 'assistant') this.openAi();
 
       // Deep-link handler: if the page was opened with a fragment
       // like ``#engine=cypher&q=…&os_mode=dsl`` (e.g. from a "Open
@@ -1718,9 +1747,26 @@ function dbConsole() {
       this.tabIsDirty = true;
       this.recomputeGutter();
       this.rehighlightEditor();
+      this.autoResizeEditor();
       // Debounced auto-persist; saves on every keystroke after a short pause.
       if (this._saveTimer) clearTimeout(this._saveTimer);
       this._saveTimer = setTimeout(() => this.persistActive(), 350);
+    },
+    autoResizeEditor() {
+      // Grow / shrink the textarea to fit its content. We clamp the
+      // upper bound to ~60% of viewport so a paste of 10 000 lines
+      // doesn't push everything else off-screen — past that, the
+      // textarea's own scrollbar takes over.
+      const ta = this.$refs.textarea;
+      if (!ta) return;
+      ta.style.height = 'auto';
+      const min = 220;  // matches the previous ``rows="14"`` baseline
+      const max = Math.max(min, Math.floor(window.innerHeight * 0.6));
+      ta.style.height = Math.min(max, Math.max(min, ta.scrollHeight)) + 'px';
+      // The overlay <pre> needs to match for the highlight + gutter to
+      // line up; the existing scroll sync handles the rest.
+      const hl = this.$refs.highlight;
+      if (hl) hl.parentElement.style.height = ta.style.height;
     },
 
     // ── syntax highlight overlay ─────────────────────────────────
@@ -2009,9 +2055,14 @@ function dbConsole() {
 
     // ── AI assistant ─────────────────────────────────────────────
     // Chat state is browser-local (localStorage) so a refresh
-    // doesn't drop the conversation.  Messages follow the OpenAI
+    // doesn't drop the conversation. Messages follow the OpenAI
     // ``{role, content}`` shape — same the proxy forwards upstream.
     AI_STORAGE_KEY: 'op:hub:db-ai:v1',
+    setRightTab(tab) {
+      this.rightTab = tab;
+      try { localStorage.setItem('op:hub:db-right-tab', tab); } catch (_) {}
+      if (tab === 'assistant') this.openAi();
+    },
     async openAi() {
       this.aiOpen = true;
       if (!this.aiModels.length) await this.loadAiModels();
