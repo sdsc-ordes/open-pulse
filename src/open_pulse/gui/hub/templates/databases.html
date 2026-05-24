@@ -313,6 +313,12 @@
                 attach. Click <code>Use as query</code> on my replies
                 to drop a code block into the editor.
               </p>
+              <p class="card-meta" style="font-size: 11px; margin-top: 6px;"
+                 x-show="aiSchema"
+                 :title="aiSchemaTooltip()">
+                ⚙ Live schema attached — <span x-text="aiSchemaSummary()"></span>
+                <a href="#" @click.prevent="loadAiSchema()" style="margin-left: 4px;">refresh</a>
+              </p>
             </div>
           </template>
           <template x-for="(m, i) in aiMessages" :key="i">
@@ -1576,6 +1582,7 @@ function dbConsole() {
     aiBusy: false,                 // a request is in flight
     aiPartial: '',                 // streaming accumulator until the message lands
     aiAttachN: 10,                 // head/tail row count to attach
+    aiSchema: null,                // {sparql:{…}, neo4j:{…}} from /api/ai/schema-context
 
     async init() {
       this.tabs = loadTabs();
@@ -1953,12 +1960,40 @@ function dbConsole() {
     async openAi() {
       this.aiOpen = true;
       if (!this.aiModels.length) await this.loadAiModels();
+      // Schema introspection: pull once per tab session so the very
+      // first prompt has actual predicates/labels in context.  The
+      // backend caches for 10min so a quick close/reopen costs nothing.
+      if (!this.aiSchema) this.loadAiSchema();
       this.loadAiMessages();
       // Auto-scroll the body to the bottom after Alpine renders.
       this.$nextTick(() => {
         const el = this.$refs.aiBody;
         if (el) el.scrollTop = el.scrollHeight;
       });
+    },
+    async loadAiSchema() {
+      try {
+        const r = await fetch('/api/ai/schema-context');
+        if (!r.ok) return;
+        this.aiSchema = await r.json();
+      } catch (_) { /* fail-soft — chat still works without schema */ }
+    },
+    aiSchemaSummary() {
+      const s = this.aiSchema || {};
+      const parts = [];
+      const sp = s.sparql || {};
+      if (sp.top_predicates) parts.push(`${sp.top_predicates.length} predicates`);
+      if (sp.top_types)      parts.push(`${sp.top_types.length} types`);
+      const neo = s.neo4j || {};
+      if (neo.label_counts)        parts.push(`${neo.label_counts.length} labels`);
+      if (neo.relationship_counts) parts.push(`${neo.relationship_counts.length} rel types`);
+      return parts.join(' · ');
+    },
+    aiSchemaTooltip() {
+      const s = this.aiSchema || {};
+      if (!s.generated_at) return 'Live schema not yet loaded.';
+      const ageSec = Math.max(0, Math.round(Date.now() / 1000 - s.generated_at));
+      return `Probed ${ageSec}s ago. Refreshes every 10 min server-side, on demand here.`;
     },
     async loadAiModels() {
       try {
@@ -2007,6 +2042,10 @@ function dbConsole() {
       if (Array.isArray(this.sparqlNamedGraphs) && this.sparqlNamedGraphs.length) {
         ctx.named_graphs = this.sparqlNamedGraphs;
       }
+      // Live schema introspection — top predicates, types, labels,
+      // rel types, property keys. Lets the model recognise predicates
+      // the static system prompt may not have documented.
+      if (this.aiSchema) ctx.schema = this.aiSchema;
       return ctx;
     },
     async sendAi() {
