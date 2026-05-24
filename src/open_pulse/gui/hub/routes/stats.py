@@ -107,6 +107,59 @@ async def _sparql_query_count(
         return None
 
 
+async def _sparql_named_graphs(
+    client: httpx.AsyncClient, timeout: float = 8.0
+) -> list[dict[str, object]] | None:
+    """Enumerate named graphs in the SPARQL store with per-graph triple counts.
+
+    Returns a list of ``{"uri": str, "triples": int}`` sorted by triple
+    count descending, or ``None`` on any failure (the Overview/Databases
+    UIs gracefully skip the snapshots panel when this returns ``None``).
+
+    The query is more expensive than the per-class counts above because
+    it has to enumerate every named graph — fine for the Overview's
+    periodic refresh, not for sub-second hot paths.
+    """
+    settings = get_settings()
+    base = settings.sparql_url
+    url = base.rstrip("/")
+    if not url.endswith("/query"):
+        url += "/query"
+    query = (
+        "SELECT ?g (COUNT(*) AS ?n) "
+        "WHERE { GRAPH ?g { ?s ?p ?o } } "
+        "GROUP BY ?g ORDER BY DESC(?n)"
+    )
+    auth: tuple[str, str] | None = None
+    if settings.sparql_user and settings.sparql_password:
+        auth = (settings.sparql_user, settings.sparql_password)
+    try:
+        r = await client.get(
+            url,
+            params={"query": query},
+            headers={"Accept": "application/sparql-results+json"},
+            auth=auth,
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            return None
+        b = r.json()
+        binds = (b.get("results") or {}).get("bindings") or []
+        out: list[dict[str, object]] = []
+        for row in binds:
+            uri = (row.get("g") or {}).get("value")
+            count_raw = (row.get("n") or {}).get("value")
+            if not uri or count_raw is None:
+                continue
+            try:
+                out.append({"uri": uri, "triples": int(count_raw)})
+            except ValueError:
+                continue
+        return out
+    except (httpx.HTTPError, ValueError, KeyError):
+        return None
+
+
 async def _sparql_counts(client: httpx.AsyncClient) -> dict[str, int | None]:
     """Per-class counts the Overview's SPARQL chart consumes.
 
@@ -381,13 +434,17 @@ async def _gather() -> dict[str, Any]:
     )
 
     async with httpx.AsyncClient(verify=_os_verify()) as client:
-        sparql, neo, opensearch, duck = await asyncio.gather(
+        sparql, named_graphs, neo, opensearch, duck = await asyncio.gather(
             _sparql_counts(client),
+            _sparql_named_graphs(client),
             _neo4j_counts(),
             _opensearch_counts(client),
             asyncio.to_thread(_duckdb_counts),
         )
 
+    sparql_payload: dict[str, Any] = dict(sparql)
+    if named_graphs is not None:
+        sparql_payload["named_graphs"] = named_graphs
     return {
         "services": {
             "total": total,
@@ -396,7 +453,7 @@ async def _gather() -> dict[str, Any]:
             "uptime_max_seconds": longest_uptime,
             "uptime_max_human": _humanize(longest_uptime) if longest_uptime else "—",
         },
-        "sparql": sparql,
+        "sparql": sparql_payload,
         "neo4j": neo,
         "opensearch": opensearch,
         "duckdb": duck,
