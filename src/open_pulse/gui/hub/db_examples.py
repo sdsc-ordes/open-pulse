@@ -120,25 +120,35 @@ SPARQL: list[dict[str, str]] = [
     {
         "id": "sparql-recent",
         "name": "Recently modified",
-        "summary": "Repos with schema:dateModified after a given ISO date.",
-        "body": "# Edit the SINCE date below to slice by recency.\n"
+        "summary": "Repos pushed after a given ISO date — uses gme-internal:pushed_at.",
+        "body": "# Edit the SINCE date below to slice by recency. The v3 hybrid\n"
+        "# extractor doesn't emit ``schema:dateModified``; the closest\n"
+        "# equivalents are ``gme-internal:pushed_at`` (most recent commit\n"
+        "# timestamp from GitHub) and ``schema:dateCreated`` (repo creation).\n"
         "PREFIX schema: <http://schema.org/>\n"
-        "SELECT ?repo ?modified WHERE {\n"
+        "PREFIX gi:     <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?repo ?pushed ?created WHERE {\n"
         "  ?repo a schema:SoftwareSourceCode ;\n"
-        "        schema:dateModified ?modified .\n"
-        '  FILTER(STR(?modified) >= "2025-01-01")\n'
+        "        gi:pushed_at ?pushed .\n"
+        "  OPTIONAL { ?repo schema:dateCreated ?created }\n"
+        '  FILTER(STR(?pushed) >= "2025-01-01")\n'
         "}\n"
-        "ORDER BY DESC(?modified)",
+        "ORDER BY DESC(?pushed)\n"
+        "LIMIT 50",
     },
     {
         "id": "sparql-keywords-top",
         "name": "Top keywords",
-        "summary": "Most-tagged schema:keywords across the repo set.",
-        "body": "# What topics dominate the crawled software corpus.\n"
+        "summary": "Most-tagged GitHub topics across the repo set.",
+        "body": "# What topics dominate the crawled software corpus. The v3\n"
+        "# hybrid extractor writes GitHub repository topics as\n"
+        "# ``gme-internal:keywords`` (not ``schema:keywords`` — that was\n"
+        "# the v1 emitter's predicate and is unused in v3).\n"
         "PREFIX schema: <http://schema.org/>\n"
+        "PREFIX gi:     <https://openpulse.science/git-metadata-extractor#>\n"
         "SELECT ?keyword (COUNT(DISTINCT ?repo) AS ?n) WHERE {\n"
         "  ?repo a schema:SoftwareSourceCode ;\n"
-        "        schema:keywords ?keyword .\n"
+        "        gi:keywords ?keyword .\n"
         "}\n"
         "GROUP BY ?keyword\n"
         "ORDER BY DESC(?n) ?keyword\n"
@@ -213,12 +223,17 @@ SPARQL: list[dict[str, str]] = [
     {
         "id": "sparql-discipline-language",
         "name": "Language × discipline",
-        "summary": "Cross-tab schema:programmingLanguage and schema:applicationCategory.",
+        "summary": "Cross-tab schema:programmingLanguage and pulse:discipline (Wikidata Q-codes).",
         "body": "# Useful to spot e.g. how much Rust appears in life sciences.\n"
+        "# Disciplines are Wikidata Q-codes (e.g. Q428691 = computer\n"
+        "# engineering) emitted as ``pulse:discipline`` — not\n"
+        "# ``schema:applicationCategory`` (that was a v1 emitter quirk,\n"
+        "# unused in v3 hybrid).\n"
         "PREFIX schema: <http://schema.org/>\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
         "SELECT ?discipline ?lang (COUNT(DISTINCT ?repo) AS ?n) WHERE {\n"
         "  ?repo a schema:SoftwareSourceCode ;\n"
-        "        schema:applicationCategory ?discipline ;\n"
+        "        pulse:discipline ?discipline ;\n"
         "        schema:programmingLanguage ?lang .\n"
         "}\n"
         "GROUP BY ?discipline ?lang\n"
