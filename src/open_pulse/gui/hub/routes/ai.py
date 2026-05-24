@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -31,6 +32,8 @@ log = logging.getLogger(__name__)
 
 _MODELS_TIMEOUT = 10.0
 _CHAT_TIMEOUT = 600.0
+_SCHEMA_CACHE_TTL = 600.0  # 10 min — store schema changes on quest runs, not minutes
+_SCHEMA_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def _headers() -> dict[str, str]:
@@ -83,6 +86,183 @@ def list_models() -> dict[str, Any]:
     # Pass through verbatim — the UI handles both ``{"data":[…]}``
     # (OpenAI-style) and bare lists (some self-hosted servers).
     return body
+
+
+# ── Schema introspection ──────────────────────────────────────────────
+# The static system prompt describes the v3 schema in prose. That's
+# the right baseline (it doesn't change with the data) but it can drift
+# from reality when the extractor adds predicates, a new month creates
+# a snapshot graph, etc. This block introspects the live SPARQL +
+# Neo4j stores so the assistant's first turn always sees today's
+# actual shape — predicates that exist, type counts, named graphs,
+# labels, relationship types, property keys.
+
+
+def _sparql_run_query(
+    query: str, *, timeout: float = 8.0
+) -> list[dict[str, Any]] | None:
+    """Run a SPARQL SELECT and return the binding list, or None on failure.
+
+    Used only for read-only introspection probes; intentionally
+    fail-soft so a slow / unreachable store skips that section of
+    the schema dump rather than 500-ing the endpoint.
+    """
+    settings = get_settings()
+    base = settings.sparql_url.rstrip("/")
+    if not base.endswith("/query"):
+        base += "/query"
+    auth = None
+    if settings.sparql_user and settings.sparql_password:
+        auth = httpx.BasicAuth(settings.sparql_user, settings.sparql_password)
+    try:
+        resp = httpx.get(
+            base,
+            params={"query": query},
+            headers={"Accept": "application/sparql-results+json"},
+            auth=auth,
+            timeout=timeout,
+        )
+    except httpx.HTTPError as exc:
+        log.info("schema sparql probe: %s", exc)
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        return (resp.json().get("results") or {}).get("bindings") or []
+    except ValueError:
+        return None
+
+
+def _sparql_schema() -> dict[str, Any]:
+    """Snapshot the SPARQL store's shape: named graphs + top predicates + types.
+
+    All probes are independent + fail-soft. We cap result sizes so the
+    payload stays small (each section ≲ 1 KB) — the system message has
+    a token budget too.
+    """
+    out: dict[str, Any] = {}
+
+    graphs = _sparql_run_query(
+        "SELECT ?g (COUNT(*) AS ?n) "
+        "WHERE { GRAPH ?g { ?s ?p ?o } } "
+        "GROUP BY ?g ORDER BY DESC(?n)",
+    )
+    if graphs is not None:
+        out["named_graphs"] = [
+            {
+                "uri": (g.get("g") or {}).get("value"),
+                "triples": int((g.get("n") or {}).get("value", 0) or 0),
+            }
+            for g in graphs[:20]
+            if (g.get("g") or {}).get("value")
+        ]
+
+    preds = _sparql_run_query(
+        "SELECT ?p (COUNT(*) AS ?n) WHERE { ?s ?p ?o } "
+        "GROUP BY ?p ORDER BY DESC(?n) LIMIT 40",
+    )
+    if preds is not None:
+        out["top_predicates"] = [
+            {
+                "predicate": (p.get("p") or {}).get("value"),
+                "count": int((p.get("n") or {}).get("value", 0) or 0),
+            }
+            for p in preds
+            if (p.get("p") or {}).get("value")
+        ]
+
+    types = _sparql_run_query(
+        "SELECT ?t (COUNT(DISTINCT ?s) AS ?n) WHERE { ?s a ?t } "
+        "GROUP BY ?t ORDER BY DESC(?n) LIMIT 20",
+    )
+    if types is not None:
+        out["top_types"] = [
+            {
+                "type": (t.get("t") or {}).get("value"),
+                "count": int((t.get("n") or {}).get("value", 0) or 0),
+            }
+            for t in types
+            if (t.get("t") or {}).get("value")
+        ]
+
+    return out
+
+
+def _neo4j_schema() -> dict[str, Any]:
+    """Snapshot Neo4j's labels + rel types + property keys + per-label counts.
+
+    Three SHOW commands give us the names; one ``MATCH`` per label
+    gives the histogram. Same fail-soft contract: any failure short-
+    circuits the section.
+    """
+    settings = get_settings()
+    if not settings.neo4j_password:
+        return {}
+    try:
+        from neo4j import GraphDatabase
+    except ImportError:
+        return {}
+    out: dict[str, Any] = {}
+    try:
+        driver = GraphDatabase.driver(
+            settings.neo4j_url,
+            auth=(settings.neo4j_user or "neo4j", settings.neo4j_password),
+        )
+        try:
+            with driver.session() as session:
+                # Counts per label in one round-trip.
+                rows = list(
+                    session.run(
+                        "MATCH (n) RETURN labels(n)[0] AS label, count(*) AS n "
+                        "ORDER BY n DESC"
+                    )
+                )
+                out["label_counts"] = [
+                    {"label": r["label"], "count": int(r["n"])}
+                    for r in rows
+                    if r["label"] is not None
+                ]
+                rel_rows = list(
+                    session.run(
+                        "MATCH ()-[r]->() RETURN type(r) AS rel, count(*) AS n "
+                        "ORDER BY n DESC"
+                    )
+                )
+                out["relationship_counts"] = [
+                    {"type": r["rel"], "count": int(r["n"])} for r in rel_rows
+                ]
+                prop_rows = list(
+                    session.run("CALL db.propertyKeys() YIELD propertyKey")
+                )
+                out["property_keys"] = sorted(r["propertyKey"] for r in prop_rows)
+        finally:
+            driver.close()
+    except Exception as exc:  # noqa: BLE001 — fail-soft schema probe
+        log.info("schema neo4j probe: %s", exc)
+        return {}
+    return out
+
+
+@router.get("/schema-context", dependencies=[Depends(require_auth)])
+def schema_context() -> dict[str, Any]:
+    """Return live introspection of the SPARQL + Neo4j stores.
+
+    Cached for ``_SCHEMA_CACHE_TTL`` seconds so opening the chat panel
+    isn't gated on a fresh round-trip every time. The cache is keyed
+    by ``"all"`` today (we only expose one snapshot); future expansion
+    could split per-engine when probes diverge in cost.
+    """
+    now = time.monotonic()
+    cached = _SCHEMA_CACHE.get("all")
+    if cached and now - cached[0] < _SCHEMA_CACHE_TTL:
+        return cached[1]
+    payload: dict[str, Any] = {
+        "sparql": _sparql_schema(),
+        "neo4j": _neo4j_schema(),
+        "generated_at": time.time(),
+    }
+    _SCHEMA_CACHE["all"] = (now, payload)
+    return payload
 
 
 _SYSTEM_PROMPT = (
@@ -154,6 +334,9 @@ def _build_messages(
                     uri = g.get("uri", "")
                     n = g.get("triples")
                     parts.append(f"- `{uri}` ({n} triples)")
+        schema = context.get("schema") or {}
+        if schema:
+            parts.append(_format_schema_block(schema))
         rows = context.get("preview_rows") or []
         if rows:
             parts.append("Sample rows from the current result table (truncated):")
@@ -163,6 +346,49 @@ def _build_messages(
         out.append({"role": "system", "content": "\n\n".join(parts)})
     out.extend(user_messages)
     return out
+
+
+def _format_schema_block(schema: dict[str, Any]) -> str:
+    """Render the schema dict as a compact Markdown block.
+
+    Kept terse — every line ends up in the LLM's context window so
+    we trade verbosity for hit-rate on actual decisions. Predicate /
+    type / label lists are bounded by the introspection probe; we just
+    layout them here.
+    """
+    out: list[str] = ["## Live schema (probed at chat-open, cached 10 min)"]
+    sparql = schema.get("sparql") or {}
+    if sparql:
+        out.append("### SPARQL store")
+        preds = sparql.get("top_predicates") or []
+        if preds:
+            out.append("Top predicates (by triple count):")
+            for p in preds[:25]:
+                out.append(f"- `{p['predicate']}` ({p['count']})")
+        types = sparql.get("top_types") or []
+        if types:
+            out.append("Top RDF types (by distinct subject count):")
+            for t in types[:15]:
+                out.append(f"- `{t['type']}` ({t['count']})")
+    neo = schema.get("neo4j") or {}
+    if neo:
+        out.append("### Neo4j store")
+        labels = neo.get("label_counts") or []
+        if labels:
+            out.append(
+                "Node labels: "
+                + ", ".join(f"`{lbl['label']}` ({lbl['count']})" for lbl in labels[:12])
+            )
+        rels = neo.get("relationship_counts") or []
+        if rels:
+            out.append(
+                "Relationship types: "
+                + ", ".join(f"`{r['type']}` ({r['count']})" for r in rels[:20])
+            )
+        keys = neo.get("property_keys") or []
+        if keys:
+            out.append("Property keys: " + ", ".join(f"`{k}`" for k in keys[:40]))
+    return "\n".join(out)
 
 
 @router.post("/chat", dependencies=[Depends(require_auth)])
