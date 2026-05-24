@@ -496,10 +496,9 @@
 
     <div class="ai-composer">
       <textarea x-model="aiInput"
-                @keydown.enter.exact.prevent="sendAi()"
-                @keydown.enter.shift.exact="aiInput += '\n'"
+                @keydown="aiComposerKey($event)"
                 :disabled="aiBusy"
-                placeholder="Describe what you want — e.g. 'orgs with most archived repos, scoped to 2026-05/hybrid'."
+                placeholder="Describe what you want — e.g. 'orgs with most archived repos, scoped to 2026-05/hybrid'.   Enter (or ⌘/Ctrl+Enter) to send, Shift+Enter for newline."
                 rows="3"></textarea>
       <button class="btn btn-primary"
               @click="sendAi()"
@@ -1112,14 +1111,26 @@
     font-size: 10px; text-transform: uppercase;
     letter-spacing: 0.08em; color: var(--fg-muted); margin-bottom: 4px;
   }
-  .ai-msg-body { line-height: 1.45; }
+  .ai-msg-body { line-height: 1.45; color: var(--fg); }
+  /* Code blocks inherit the theme's foreground (dark text on light
+     theme, light text on dark) instead of forcing a high-contrast
+     palette that washes out under the wrong theme. */
   .ai-msg-body pre {
-    background: var(--bg, #1e1e1e); color: #e6e6e6;
+    background: var(--surface, #fff);
+    color: var(--fg, inherit);
+    border: 1px solid var(--border, #ddd);
     padding: 8px 10px; border-radius: 6px;
     overflow-x: auto; font-size: 11px;
     margin: 6px 0; white-space: pre;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  .ai-msg-body code { font-family: monospace; font-size: 12px; }
+  .ai-msg-body code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    background: var(--surface);
+    color: var(--fg);
+    padding: 1px 4px; border-radius: 3px;
+  }
   .ai-msg-body p { margin: 4px 0; }
   .ai-msg-actions { margin-top: 6px; }
   .ai-msg-actions .btn { font-size: 11px; padding: 3px 8px; }
@@ -1849,6 +1860,20 @@ function dbConsole() {
       this.aiInput = '';
       this.persistAiMessages();
       await this._aiCompletion();
+    },
+    aiComposerKey(e) {
+      // Keyboard contract:
+      //   - Enter (no modifiers)     → send
+      //   - ⌘/Ctrl + Enter           → send  (matches the Run shortcut elsewhere on the page)
+      //   - Shift + Enter            → newline (default textarea behaviour, let through)
+      //   - anything else            → default
+      // We handle this in one handler instead of Alpine's modifier
+      // chaining because ``.exact`` competes with the IME composition
+      // events some browsers (and screen readers) emit for Enter.
+      if (e.key !== 'Enter') return;
+      if (e.shiftKey) return;          // newline
+      e.preventDefault();
+      this.sendAi();
     },
     async _aiCompletion() {
       this.aiBusy = true;
