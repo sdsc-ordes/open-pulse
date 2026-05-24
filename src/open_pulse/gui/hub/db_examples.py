@@ -168,13 +168,25 @@ SPARQL: list[dict[str, str]] = [
     {
         "id": "sparql-with-doi",
         "name": "Repos with a DOI",
-        "summary": "Software with a registered DOI via schema:identifier or sameAs.",
-        "body": "# A repo is 'citable' when it has a DOI — pull those out.\n"
+        "summary": "Citable software via schema:citation (direct DOI URL or via ScholarlyArticle).",
+        "body": "# DOIs live in two places in the GME v3 hybrid output:\n"
+        "#   - directly on the repo as a literal DOI URL: ?repo schema:citation <doi>\n"
+        "#   - on a linked ScholarlyArticle node: ?repo schema:citation ?article ; ?article schema:identifier <doi>\n"
+        "# The pre-v3 chip used ``schema:identifier`` / ``schema:sameAs`` on the\n"
+        "# repo itself — those predicates are unused in v3, so it returned 0.\n"
         "PREFIX schema: <http://schema.org/>\n"
-        "SELECT ?repo ?doi WHERE {\n"
+        "SELECT DISTINCT ?repo ?doi WHERE {\n"
         "  ?repo a schema:SoftwareSourceCode .\n"
-        "  { ?repo schema:identifier ?doi } UNION { ?repo schema:sameAs ?doi }\n"
-        '  FILTER(REGEX(STR(?doi), "doi.org|10\\\\.\\\\d{4,}", "i"))\n'
+        "  {\n"
+        "    # Direct: repo cites a DOI URL\n"
+        "    ?repo schema:citation ?doi .\n"
+        '    FILTER(REGEX(STR(?doi), "doi\\\\.org|10\\\\.\\\\d{4,}", "i"))\n'
+        "  } UNION {\n"
+        "    # Indirect: repo cites a ScholarlyArticle whose identifier is the DOI\n"
+        "    ?repo schema:citation ?article .\n"
+        "    ?article schema:identifier ?doi .\n"
+        '    FILTER(REGEX(STR(?doi), "doi\\\\.org|10\\\\.\\\\d{4,}", "i"))\n'
+        "  }\n"
         "}\n"
         "ORDER BY ?repo\n"
         "LIMIT 50",
