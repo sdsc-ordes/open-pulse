@@ -74,7 +74,11 @@ class CrawlerStepConfig(StepConfig):
     output_dir: str = ".quest-artifacts/crawler-json"
     output_filename: str = "crawler-graph.json"
     poll_interval_seconds: float = 5.0
-    timeout_seconds: float = 3600.0
+    timeout_seconds: float | None = 3600.0
+    """Client-side polling deadline in seconds. Set to ``null`` or ``0`` to
+    wait indefinitely — useful for heavy multi-hop crawls where the
+    runtime can't be predicted. The crawler keeps running regardless of
+    this value; only the open-pulse polling loop is affected."""
 
 
 class FrontierExtendStepConfig(StepConfig):
@@ -111,7 +115,8 @@ class FrontierExtendStepConfig(StepConfig):
     # uses the same endpoint convention as the parent crawl.
     use_graphql: bool = True
     poll_interval_seconds: float = 5.0
-    timeout_seconds: float = 3600.0
+    timeout_seconds: float | None = 3600.0
+    """Client-side polling deadline. ``null`` / ``0`` waits indefinitely."""
 
 
 class Neo4jUploadStepConfig(StepConfig):
@@ -143,7 +148,10 @@ class MetadataExtractorStepConfig(StepConfig):
     mode: str = "v2"
     v2_agent_runtime: str = "rule_based"
     v2_poll_interval_seconds: float = 2.0
-    v2_timeout_seconds: float = 600.0
+    v2_timeout_seconds: float | None = 600.0
+    """Per-repo extraction deadline (client-side). ``null`` / ``0`` waits
+    indefinitely — handy when the LLM-heavy runtimes (``hybrid``, ``llm``)
+    can sit on a single repo for several minutes."""
     max_workers: int = 6
     """Concurrent ``v2_extract`` submits the step runs at once. Matches the
     GME's ``V2_MAX_CONCURRENT_AGENTS`` default; raise/lower in the quest

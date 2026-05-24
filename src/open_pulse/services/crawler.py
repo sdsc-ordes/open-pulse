@@ -130,15 +130,22 @@ class CrawlerService:
         job_id: str,
         *,
         poll_interval: float = _DEFAULT_POLL_INTERVAL,
-        timeout: float = _DEFAULT_TIMEOUT,
+        timeout: float | None = _DEFAULT_TIMEOUT,
     ) -> dict[str, object]:
         """Poll ``get_status`` until the job leaves a non-terminal state.
 
         Returns the final status dict on ``COMPLETED``.  Raises
-        :class:`CrawlerJobFailedError` on ``FAILED`` and
-        :class:`CrawlerJobTimeoutError` if the deadline elapses first.
+        :class:`CrawlerJobFailedError` on ``FAILED``.
+
+        ``timeout`` is the polling deadline (this is the *client* side
+        budget — the crawler itself keeps running regardless). Set to
+        ``None`` or ``<= 0`` to wait indefinitely; long crawls (heavy
+        BFS with PR/issue scanning, multiple hops) can't easily predict
+        their runtime, so opting out of the timeout altogether is the
+        right call when "estará cuando esté" is the acceptance criterion.
         """
-        deadline = time.monotonic() + timeout
+        no_timeout = timeout is None or timeout <= 0
+        deadline = float("inf") if no_timeout else time.monotonic() + timeout
         consecutive_failures = 0
         while True:
             try:

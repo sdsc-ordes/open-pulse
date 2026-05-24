@@ -209,15 +209,19 @@ class MetadataExtractorService:
         job_id: str,
         *,
         poll_interval: float = _DEFAULT_V2_POLL_INTERVAL,
-        timeout: float = _DEFAULT_V2_TIMEOUT,
+        timeout: float | None = _DEFAULT_V2_TIMEOUT,
     ) -> dict[str, Any]:
         """Poll until job leaves ``pending`` / ``running``.
 
         Returns the final job dict on ``completed``. Raises
         :class:`ExtractJobFailedError` on ``failed`` and
-        :class:`ExtractJobTimeoutError` on deadline.
+        :class:`ExtractJobTimeoutError` on deadline. Pass ``None`` or
+        ``<= 0`` to opt out of the client-side timeout — the GME job
+        keeps running regardless of our polling budget, so this is the
+        right call for long-running runtimes (``llm``, heavy ``hybrid``).
         """
-        deadline = time.monotonic() + timeout
+        no_timeout = timeout is None or timeout <= 0
+        deadline = float("inf") if no_timeout else time.monotonic() + timeout
         consecutive_failures = 0
         while True:
             try:
