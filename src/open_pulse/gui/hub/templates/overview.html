@@ -70,30 +70,24 @@
     </div>
     <!-- Snapshots tile: shows the named graphs currently in the SPARQL
          store (typically ``YYYY-MM/{runtime}`` monthly buckets). The
-         top-most graph by triple count is highlighted as the "active"
-         snapshot; clicking the tile jumps to the Databases console. -->
+         default graph is auto-synced to the latest hybrid snapshot via
+         ``COPY TO DEFAULT`` (see PR #73), so a client without a GRAPH
+         clause always sees "the current view". -->
     <div class="card tone-info">
       <div class="card-title">SPARQL · snapshots</div>
       <template x-if="(latest.sparql_named_graphs || []).length">
-        <div>
-          <div class="flex items-baseline gap-2 mt-1">
-            <div class="stat-value" x-text="latest.sparql_named_graphs.length"></div>
-            <span class="stat-trend"
-                  x-text="'graphs · ' + formatVal(latest.sparql_named_graphs.reduce((a,g) => a + (g.triples || 0), 0)) + ' triples'"></span>
-          </div>
-          <div class="stat-sub" style="font-family: monospace; font-size: 11px; line-height: 1.6; max-height: 70px; overflow: auto;">
-            <template x-for="g in latest.sparql_named_graphs.slice(0, 4)" :key="g.uri">
-              <div class="flex items-baseline gap-2">
-                <span x-text="g.uri.replace('https://open-pulse.epfl.ch/graph/','')"
-                      :title="g.uri"></span>
-                <span style="color: var(--fg-muted); margin-left: auto;"
-                      x-text="formatVal(g.triples)"></span>
-              </div>
-            </template>
-            <div x-show="latest.sparql_named_graphs.length > 4"
-                 style="color: var(--fg-muted);"
-                 x-text="'+ ' + (latest.sparql_named_graphs.length - 4) + ' more'"></div>
-          </div>
+        <div class="stat-sub" style="font-family: monospace; font-size: 11px; line-height: 1.6; max-height: 90px; overflow: auto; margin-top: 4px;">
+          <template x-for="g in latest.sparql_named_graphs.slice(0, 5)" :key="g.uri">
+            <div class="flex items-baseline gap-2">
+              <span x-text="g.uri.replace('https://open-pulse.epfl.ch/graph/','')"
+                    :title="g.uri"></span>
+              <span style="color: var(--fg-muted); margin-left: auto;"
+                    x-text="formatVal(g.triples)"></span>
+            </div>
+          </template>
+          <div x-show="latest.sparql_named_graphs.length > 5"
+               style="color: var(--fg-muted);"
+               x-text="'+ ' + (latest.sparql_named_graphs.length - 5) + ' more'"></div>
         </div>
       </template>
       <template x-if="!(latest.sparql_named_graphs || []).length">
