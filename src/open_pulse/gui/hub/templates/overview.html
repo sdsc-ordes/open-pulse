@@ -68,6 +68,40 @@
         formatVal(latest.sparql_orgs)  + ' orgs'
       "></div>
     </div>
+    <!-- Snapshots tile: shows the named graphs currently in the SPARQL
+         store (typically ``YYYY-MM/{runtime}`` monthly buckets). The
+         top-most graph by triple count is highlighted as the "active"
+         snapshot; clicking the tile jumps to the Databases console. -->
+    <div class="card tone-info">
+      <div class="card-title">SPARQL · snapshots</div>
+      <template x-if="(latest.sparql_named_graphs || []).length">
+        <div>
+          <div class="flex items-baseline gap-2 mt-1">
+            <div class="stat-value" x-text="latest.sparql_named_graphs.length"></div>
+            <span class="stat-trend"
+                  x-text="'graphs · ' + formatVal(latest.sparql_named_graphs.reduce((a,g) => a + (g.triples || 0), 0)) + ' triples'"></span>
+          </div>
+          <div class="stat-sub" style="font-family: monospace; font-size: 11px; line-height: 1.6; max-height: 70px; overflow: auto;">
+            <template x-for="g in latest.sparql_named_graphs.slice(0, 4)" :key="g.uri">
+              <div class="flex items-baseline gap-2">
+                <span x-text="g.uri.replace('https://open-pulse.epfl.ch/graph/','')"
+                      :title="g.uri"></span>
+                <span style="color: var(--fg-muted); margin-left: auto;"
+                      x-text="formatVal(g.triples)"></span>
+              </div>
+            </template>
+            <div x-show="latest.sparql_named_graphs.length > 4"
+                 style="color: var(--fg-muted);"
+                 x-text="'+ ' + (latest.sparql_named_graphs.length - 4) + ' more'"></div>
+          </div>
+        </div>
+      </template>
+      <template x-if="!(latest.sparql_named_graphs || []).length">
+        <div class="stat-sub" style="font-style: italic; color: var(--fg-muted);">
+          no named graphs — everything in default
+        </div>
+      </template>
+    </div>
     <div class="card tone-info">
       <div class="card-title">OpenSearch · repos</div>
       <div class="flex items-baseline gap-2 mt-1">
@@ -274,6 +308,10 @@ function overview() {
       neo4j_repos: null, neo4j_users: null, neo4j_orgs: null,
       neo4j_nodes: null, neo4j_rels: null,
       sparql_repos: null, sparql_users: null, sparql_orgs: null,
+      // ``named_graphs`` is a list of {uri, triples} from the SPARQL
+      // store. Surfaced in the "Snapshots" tile so users see which
+      // monthly/runtime snapshots are live without having to query.
+      sparql_named_graphs: [],
       opensearch_repos: null, opensearch_users: null, opensearch_orgs: null,
       duckdb_github_repos: null, duckdb_zenodo_records: null,
       duckdb_huggingface_items: null,
@@ -382,10 +420,31 @@ function overview() {
         this.metaLine = (j.count || 0) + ' point' + (j.count === 1 ? '' : 's')
                       + ' · last sample '
                       + (last.ts ? new Date(last.ts).toLocaleTimeString() : '—');
+        // Named graphs aren't part of the time-series — they're a
+        // point-in-time list of what's currently in the SPARQL store.
+        // Fetch separately so a slow probe (the COUNT-by-GRAPH query
+        // scans the whole store) doesn't block the rest of the page.
+        this._refreshNamedGraphs();
         this._renderCharts();
       } catch (e) {
         this.metaLine = '⚠ ' + e.message;
       } finally { this.loading = false; }
+    },
+
+    async _refreshNamedGraphs() {
+      // Pull the current named-graph inventory from /api/stats/. The
+      // probe is intentionally tolerant: if the SPARQL store is slow or
+      // unreachable the Snapshots tile renders empty (handled in the
+      // template) without blocking the rest of the Overview.
+      try {
+        const r = await fetch('/api/stats/');
+        if (!r.ok) return;
+        const j = await r.json();
+        const graphs = (j.sparql || {}).named_graphs;
+        if (Array.isArray(graphs)) {
+          this.latest.sparql_named_graphs = graphs;
+        }
+      } catch (_) { /* swallow — non-essential */ }
     },
 
     _renderCharts() {
