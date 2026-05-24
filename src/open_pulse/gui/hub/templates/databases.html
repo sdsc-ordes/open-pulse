@@ -1591,26 +1591,37 @@ function dbConsole() {
       this.recomputeGutter();
     },
     _rewriteFromClause(query, graphUri) {
-      // Strip any existing managed FROM line first (marked with a tag
-      // comment so we don't touch the user's own FROM clauses), then
-      // re-insert. ``graphUri == null`` means leave the query without a
-      // scope (default graph).
+      // SPARQL grammar (per W3C 1.1 §4.1.1):
+      //
+      //   SelectQuery ::= SelectClause DatasetClause* WhereClause SolutionModifier
+      //
+      // → ``FROM`` lives between ``SELECT ?vars`` and ``WHERE { … }``,
+      // not after the PREFIX prologue. We strip any prior managed FROM
+      // line (tag-comment makes it unambiguous so the user's own FROMs
+      // aren't touched), then re-insert immediately before the first
+      // ``WHERE`` keyword — works for both ``SELECT ?x WHERE { … }``
+      // (single line) and the multi-line equivalent.
       const cleaned = (query || '').replace(
-        /^FROM <[^>]+>\s*#\s*managed by snapshots rail\s*\r?\n?/gim,
+        /^\s*FROM <[^>]+>\s*#\s*managed by snapshots rail\s*\r?\n?/gim,
         '',
       );
       if (!graphUri) return cleaned;
-      const fromLine = `FROM <${graphUri}>  # managed by snapshots rail\n`;
-      // Insert after the last PREFIX line, or at the very start otherwise,
-      // so it sits where SPARQL grammar expects (between prologue + WHERE).
-      const lines = cleaned.split('\n');
-      let lastPrefix = -1;
-      for (let i = 0; i < lines.length; i++) {
-        if (/^\s*PREFIX\b/i.test(lines[i])) lastPrefix = i;
+      const fromLine = `FROM <${graphUri}>  # managed by snapshots rail`;
+      // Insert before the first standalone ``WHERE`` keyword. We use
+      // \b boundaries so ``WHEREVER`` (hypothetical user variable name)
+      // doesn't false-positive. CONSTRUCT/ASK/DESCRIBE queries also use
+      // WHERE; queries without one (rare) fall through to the append
+      // branch below.
+      const whereRe = /\bWHERE\b/i;
+      const idx = cleaned.search(whereRe);
+      if (idx >= 0) {
+        const before = cleaned.slice(0, idx).replace(/\s+$/, '');
+        const after = cleaned.slice(idx);
+        return before + '\n' + fromLine + '\n' + after;
       }
-      const insertAt = lastPrefix + 1;
-      lines.splice(insertAt, 0, fromLine.trimEnd());
-      return lines.join('\n');
+      // No WHERE: append at the end. This is rare (DESCRIBE without a
+      // body, custom forms) but better than dropping the user's intent.
+      return cleaned.replace(/\s+$/, '') + '\n' + fromLine + '\n';
     },
     formatGraphCount(n) {
       if (n === null || n === undefined) return '';
