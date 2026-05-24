@@ -16,6 +16,7 @@ from .auth import _COOKIE_NAME, clear_session, get_settings, require_auth
 from .chaoss import routes as chaoss_routes
 from .routes import (
     admin,
+    ai,
     canvas,
     crawler,
     databases,
@@ -134,6 +135,7 @@ app.include_router(stack.router)
 app.include_router(stats.router)
 app.include_router(crawler.router)
 app.include_router(extractor.router)
+app.include_router(ai.router)
 app.include_router(admin.router)
 app.include_router(hub.router)
 app.include_router(hub.api)
