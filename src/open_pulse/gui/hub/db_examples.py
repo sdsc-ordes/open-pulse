@@ -146,17 +146,23 @@ SPARQL: list[dict[str, str]] = [
     },
     {
         "id": "sparql-distinct-orgs",
-        "name": "Distinct authors / publishers",
-        "summary": "Organisations attached to crawled repos via schema:author / schema:publisher.",
-        "body": "# Crawls the schema:author/schema:publisher object's schema:name —\n"
-        "# typically the GitHub owner or institutional handle.\n"
+        "name": "Distinct owning orgs",
+        "summary": "Orgs ranked by how many repos they own, via pulse:ownedBy.",
+        "body": "# Repos are linked to their owning Org via ``pulse:ownedBy`` (the\n"
+        "# canonical handle-based edge). The Org's GitHub handle lives in\n"
+        "# ``pulse:githubOrganizationHandle``; ``schema:name`` is the formal\n"
+        "# Infoscience/ROR-resolved name, not the GitHub login. Pulling both\n"
+        "# here lets you spot when the formal name differs from the handle.\n"
         "PREFIX schema: <http://schema.org/>\n"
-        "SELECT ?org (COUNT(DISTINCT ?repo) AS ?n) WHERE {\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "SELECT ?org_handle ?org_name (COUNT(DISTINCT ?repo) AS ?n) WHERE {\n"
         "  ?repo a schema:SoftwareSourceCode ;\n"
-        "        (schema:author|schema:publisher)/schema:name ?org .\n"
+        "        pulse:ownedBy ?org .\n"
+        "  OPTIONAL { ?org pulse:githubOrganizationHandle ?org_handle }\n"
+        "  OPTIONAL { ?org schema:name ?org_name }\n"
         "}\n"
-        "GROUP BY ?org\n"
-        "ORDER BY DESC(?n) ?org\n"
+        "GROUP BY ?org_handle ?org_name\n"
+        "ORDER BY DESC(?n)\n"
         "LIMIT 25",
     },
     {
@@ -176,12 +182,17 @@ SPARQL: list[dict[str, str]] = [
     {
         "id": "sparql-org-license",
         "name": "Licenses inside one org",
-        "summary": "License distribution for repos under a given organisation.",
-        "body": "# Replace ORG_NAME with the value found in 'Distinct authors'.\n"
+        "summary": "License distribution for repos under a given organisation handle.",
+        "body": "# Filter repos by ownership using the canonical edge\n"
+        "# ``pulse:ownedBy <https://github.com/<handle>>``. The literal-name\n"
+        "# path ``schema:name '<handle>'`` won't match in the v3 hybrid\n"
+        "# extractor — that field carries the formal Infoscience/ROR name\n"
+        "# (e.g. 'Swiss Data Science Center - ORD'), not the GitHub login.\n"
         "PREFIX schema: <http://schema.org/>\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
         "SELECT ?license (COUNT(DISTINCT ?repo) AS ?n) WHERE {\n"
         "  ?repo a schema:SoftwareSourceCode ;\n"
-        '        (schema:author|schema:publisher)/schema:name "sdsc-ordes" ;\n'
+        "        pulse:ownedBy <https://github.com/sdsc-ordes> ;\n"
         "        schema:license ?license .\n"
         "}\n"
         "GROUP BY ?license\n"
@@ -218,14 +229,28 @@ SPARQL: list[dict[str, str]] = [
     {
         "id": "sparql-by-org-name",
         "name": "All repos for one org",
-        "summary": "Hand-pick a single organisation and list its repos.",
-        "body": "# Substitute ORG_NAME with the org's schema:name.\n"
+        "summary": "List every repo owned by a given org via pulse:ownedBy.",
+        "body": "# Repos point to their owning org with ``pulse:ownedBy`` — the\n"
+        "# subject of that triple is the org's canonical GitHub @id\n"
+        "# (https://github.com/<handle>). To pivot to a different org,\n"
+        "# swap the IRI on the right-hand side. Two equivalent forms below.\n"
         "PREFIX schema: <http://schema.org/>\n"
+        "PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>\n"
+        "\n"
+        "# Form A — direct match on the @id (fastest, prefers indexes)\n"
         "SELECT DISTINCT ?repo WHERE {\n"
         "  ?repo a schema:SoftwareSourceCode ;\n"
-        '        (schema:author|schema:publisher)/schema:name "sdsc-ordes" .\n'
+        "        pulse:ownedBy <https://github.com/sdsc-ordes> .\n"
         "}\n"
-        "ORDER BY ?repo",
+        "ORDER BY ?repo\n"
+        "\n"
+        "# Form B — by handle string (handy when the @id isn't known)\n"
+        "# SELECT DISTINCT ?repo WHERE {\n"
+        "#   ?repo a schema:SoftwareSourceCode ;\n"
+        "#         pulse:ownedBy ?org .\n"
+        '#   ?org pulse:githubOrganizationHandle "sdsc-ordes" .\n'
+        "# }\n"
+        "# ORDER BY ?repo",
     },
     # ── pulse: ontology (project-specific facets) ─────────────────────────
     {
