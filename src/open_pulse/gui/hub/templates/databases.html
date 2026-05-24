@@ -108,6 +108,42 @@
   </div>
   <p class="examples-summary" x-show="activeExampleSummary" x-text="activeExampleSummary"></p>
 
+  <!-- Snapshots rail: SPARQL-only. Lists the named graphs currently in
+       the store (typically ``YYYY-MM/{runtime}``). Clicking a chip
+       prepends a ``FROM <iri>`` to the editor so the query targets that
+       snapshot; clicking the same chip again removes it (toggle). The
+       ``default`` chip is always present so users can reset back to
+       the un-scoped query. -->
+  <div class="snapshots-rail" x-show="engine === 'sparql'" x-cloak>
+    <span class="examples-label">Snapshot</span>
+    <button class="example-chip"
+            :class="activeGraphFromUri === null ? 'is-active' : ''"
+            title="Run against the SPARQL store's default graph (un-scoped)."
+            @click="setActiveGraph(null)">
+      <span class="example-chip-name">default</span>
+      <span class="example-chip-mode" x-text="formatGraphCount(snapshotsDefaultCount)"></span>
+    </button>
+    <template x-for="g in (sparqlNamedGraphs || [])" :key="g.uri">
+      <button class="example-chip"
+              :class="activeGraphFromUri === g.uri ? 'is-active' : ''"
+              :title="g.uri + ' · ' + g.triples + ' triples'"
+              @click="setActiveGraph(g.uri)">
+        <span class="example-chip-name"
+              x-text="g.uri.replace('https://open-pulse.epfl.ch/graph/','')"></span>
+        <span class="example-chip-mode" x-text="formatGraphCount(g.triples)"></span>
+      </button>
+    </template>
+    <template x-if="!(sparqlNamedGraphs || []).length && !snapshotsLoading">
+      <span class="card-meta" style="font-style: italic;">no named graphs — only default.</span>
+    </template>
+    <span class="card-meta ml-auto" x-show="snapshotsLoading">probing store…</span>
+    <button class="btn btn-ghost"
+            @click="refreshSnapshots()"
+            :disabled="snapshotsLoading"
+            title="Re-probe the SPARQL store for new named graphs"
+            style="margin-left: 4px; padding: 2px 8px; font-size: 11px;">↻</button>
+  </div>
+
   <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;">
 
     <!-- ── Editor (left, 2fr) ─────────────────────────────────────── -->
@@ -508,6 +544,17 @@
     background: var(--surface-soft);
     border: 1px solid var(--border);
     border-radius: 10px;
+  }
+  /* Snapshots rail mirrors the examples-rail visually but uses a
+     subtly different background tint to signal it manipulates query
+     scope (FROM clauses) rather than swapping query bodies. */
+  .snapshots-rail {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 8px 12px;
+    background: var(--surface-sunk);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-top: 8px;
   }
   .examples-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
@@ -1254,6 +1301,12 @@ function dbConsole() {
     // ── session query log (browser-local) ────────────────────────
     sessionLog: [],
 
+    // ── snapshots rail (SPARQL named graphs) ─────────────────────
+    sparqlNamedGraphs: [],         // [{uri, triples}, …] from /api/stats/
+    snapshotsDefaultCount: null,   // default-graph triple count (live, separate query)
+    snapshotsLoading: false,
+    activeGraphFromUri: null,      // currently-injected ``FROM <iri>`` (null = default)
+
     async init() {
       this.tabs = loadTabs();
       this.sessionLog = loadSessionLog();
@@ -1287,6 +1340,9 @@ function dbConsole() {
       await Promise.all([this.loadExamples(), this.loadSaved()]);
       this.recomputeGutter();
       this.rehighlightEditor();
+      // Probe the SPARQL store for named graphs if SPARQL is the initial
+      // engine — same lazy-load pattern setEngine() uses on tab switch.
+      if (this.engine === 'sparql') this.refreshSnapshots();
 
       // Deep-link handler: if the page was opened with a fragment
       // like ``#engine=cypher&q=…&os_mode=dsl`` (e.g. from a "Open
@@ -1488,6 +1544,79 @@ function dbConsole() {
       const found = this.tabs.find(t => t.engine === name);
       if (found) this.switchTab(found.id);
       else this.newTab();
+      // Probe the SPARQL store for snapshots when the user lands on the
+      // SPARQL tab. We only fetch once per tab visit — the user can
+      // press the ↻ button to re-probe after a quest run lands a new
+      // snapshot graph.
+      if (name === 'sparql' && !this.sparqlNamedGraphs.length) {
+        this.refreshSnapshots();
+      }
+    },
+
+    // ── Snapshots rail (SPARQL named graphs) ─────────────────────
+    async refreshSnapshots() {
+      this.snapshotsLoading = true;
+      try {
+        const r = await fetch('/api/stats/');
+        if (!r.ok) return;
+        const j = await r.json();
+        const graphs = (j.sparql || {}).named_graphs;
+        if (Array.isArray(graphs)) this.sparqlNamedGraphs = graphs;
+        // Default-graph count: the stats endpoint already returns the
+        // total (sum across all graphs in some stores); query the
+        // default explicitly for the chip badge.
+        try {
+          const dr = await fetch('/api/databases/sparql/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              query: 'SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }',
+            }),
+          });
+          if (dr.ok) {
+            const d = await dr.json();
+            const v = ((d.rows || [])[0] || [])[0];
+            this.snapshotsDefaultCount = v ? parseInt(v, 10) : null;
+          }
+        } catch (_) {}
+      } catch (_) { /* swallow */ }
+      finally { this.snapshotsLoading = false; }
+    },
+    setActiveGraph(uri) {
+      // Toggle: clicking the active graph clears the FROM scope.
+      const next = this.activeGraphFromUri === uri ? null : uri;
+      this.activeGraphFromUri = next;
+      this.query = this._rewriteFromClause(this.query, next);
+      this.persistActive();
+      this.recomputeGutter();
+    },
+    _rewriteFromClause(query, graphUri) {
+      // Strip any existing managed FROM line first (marked with a tag
+      // comment so we don't touch the user's own FROM clauses), then
+      // re-insert. ``graphUri == null`` means leave the query without a
+      // scope (default graph).
+      const cleaned = (query || '').replace(
+        /^FROM <[^>]+>\s*#\s*managed by snapshots rail\s*\r?\n?/gim,
+        '',
+      );
+      if (!graphUri) return cleaned;
+      const fromLine = `FROM <${graphUri}>  # managed by snapshots rail\n`;
+      // Insert after the last PREFIX line, or at the very start otherwise,
+      // so it sits where SPARQL grammar expects (between prologue + WHERE).
+      const lines = cleaned.split('\n');
+      let lastPrefix = -1;
+      for (let i = 0; i < lines.length; i++) {
+        if (/^\s*PREFIX\b/i.test(lines[i])) lastPrefix = i;
+      }
+      const insertAt = lastPrefix + 1;
+      lines.splice(insertAt, 0, fromLine.trimEnd());
+      return lines.join('\n');
+    },
+    formatGraphCount(n) {
+      if (n === null || n === undefined) return '';
+      if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+      if (n >= 1_000) return (n / 1_000).toFixed(0) + 'k';
+      return String(n);
     },
 
     // ── line-number gutter ───────────────────────────────────────
