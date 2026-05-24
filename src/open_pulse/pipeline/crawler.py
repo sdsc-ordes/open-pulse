@@ -84,7 +84,13 @@ def run_crawler(context: dict[str, object]) -> None:
 
     request = _build_request(step_cfg)
     poll_interval = float(step_cfg.get("poll_interval_seconds", 5.0))
-    timeout = float(step_cfg.get("timeout_seconds", 3600.0))
+    timeout_raw = step_cfg.get("timeout_seconds", 3600.0)
+    # ``None`` or ``<= 0`` opts out of the client-side timeout — the
+    # crawler keeps running regardless of our budget. Useful for heavy
+    # multi-hop crawls where the runtime can't be predicted up front.
+    timeout: float | None = (
+        None if timeout_raw is None or float(timeout_raw) <= 0 else float(timeout_raw)
+    )
     # GraphQL is the canonical endpoint per project convention — see
     # ``CrawlerStepConfig.use_graphql`` for the rationale. Quests can
     # opt out by setting ``use_graphql: false`` in their YAML.
