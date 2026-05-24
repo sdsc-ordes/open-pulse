@@ -408,6 +408,105 @@
     </div>
   </div>
 
+  <!-- ── AI assistant: floating bottom-right chat ────────────────────
+       Always present; collapsed to a button until the user opens it.
+       Posts to ``/api/ai/chat`` which proxies to the configured LLM
+       endpoint (RCP by default). The composer attaches the current
+       engine + query + named-graph list + an optional head/tail of
+       the result table so the model has page context without the
+       user having to repaste anything.
+  -->
+  <button class="ai-launcher"
+          x-show="!aiOpen"
+          @click="openAi()"
+          title="Ask the AI assistant — has the page context already.">
+    <span style="font-size: 16px;">✨</span>
+    <span>Assistant</span>
+  </button>
+
+  <div class="ai-panel" x-show="aiOpen" x-cloak
+       @keydown.escape.window="aiOpen = false">
+    <div class="ai-panel-head">
+      <span class="card-title">Assistant</span>
+      <select class="ai-model" x-model="aiModel"
+              :disabled="!aiModels.length"
+              title="Model — comes from the configured LLM endpoint.">
+        <template x-for="m in aiModels" :key="m.id">
+          <option :value="m.id" x-text="m.id"></option>
+        </template>
+      </select>
+      <button class="btn btn-ghost"
+              @click="aiMessages = []; persistAiMessages()"
+              title="Clear chat history (kept per-browser).">⌫</button>
+      <button class="btn btn-ghost" @click="aiOpen = false" title="Close">✕</button>
+    </div>
+
+    <div class="ai-panel-body" x-ref="aiBody">
+      <template x-if="!aiMessages.length">
+        <div class="ai-empty">
+          <p style="margin-bottom: 6px;">Ask me to write or refine a query.</p>
+          <p class="card-meta" style="font-size: 11px;">
+            I see your current engine, the editor's query, the
+            available named graphs, and any result-table rows you
+            attach.  Click <code>Use as query</code> on my replies to
+            drop a code block into the editor.
+          </p>
+        </div>
+      </template>
+      <template x-for="(m, i) in aiMessages" :key="i">
+        <div class="ai-msg" :class="'ai-msg-' + m.role">
+          <div class="ai-msg-role" x-text="m.role"></div>
+          <div class="ai-msg-body" x-html="renderAiMessage(m.content)"></div>
+          <div class="ai-msg-actions" x-show="m.role === 'assistant' && extractCodeBlock(m.content)">
+            <button class="btn btn-ghost"
+                    @click="useAiBlockAsQuery(extractCodeBlock(m.content))"
+                    title="Replace the editor's query with this code block.">
+              ⤴ Use as query
+            </button>
+          </div>
+        </div>
+      </template>
+      <div x-show="aiBusy" class="ai-msg ai-msg-assistant">
+        <div class="ai-msg-role">assistant</div>
+        <div class="ai-msg-body" x-text="aiPartial || '…'"></div>
+      </div>
+    </div>
+
+    <div class="ai-attach-rail" x-show="rows.length" x-cloak>
+      <span class="card-meta" style="font-size: 11px;">Attach result rows:</span>
+      <input type="number" min="1" max="50" x-model.number="aiAttachN"
+             style="width: 50px; padding: 2px 4px; font-size: 11px;
+                    background: var(--surface-sunk); border: 1px solid var(--border);
+                    border-radius: 4px; color: var(--fg);" />
+      <button class="btn btn-ghost"
+              @click="attachRowsToChat('head')"
+              :disabled="!rows.length"
+              title="Add the first N rows of the current result table to the chat as context.">
+        + head
+      </button>
+      <button class="btn btn-ghost"
+              @click="attachRowsToChat('tail')"
+              :disabled="!rows.length"
+              title="Add the last N rows of the current result table to the chat as context.">
+        + tail
+      </button>
+      <span class="card-meta ml-auto" style="font-size: 11px;"
+            x-text="rows.length + ' total'"></span>
+    </div>
+
+    <div class="ai-composer">
+      <textarea x-model="aiInput"
+                @keydown.enter.exact.prevent="sendAi()"
+                @keydown.enter.shift.exact="aiInput += '\n'"
+                :disabled="aiBusy"
+                placeholder="Describe what you want — e.g. 'orgs with most archived repos, scoped to 2026-05/hybrid'."
+                rows="3"></textarea>
+      <button class="btn btn-primary"
+              @click="sendAi()"
+              :disabled="aiBusy || !aiInput.trim()">Send</button>
+    </div>
+  </div>
+
 </div>
 
 <style>
@@ -964,6 +1063,81 @@
     font-style: italic;
   }
   [x-cloak] { display: none !important; }
+
+  /* ── AI assistant (floating bottom-right) ───────────────────────── */
+  .ai-launcher {
+    position: fixed; bottom: 20px; right: 20px; z-index: 9000;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 14px; border-radius: 999px;
+    background: var(--accent, #335bff); color: white;
+    border: 0; cursor: pointer;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    font-size: 13px; font-weight: 500;
+  }
+  .ai-launcher:hover { filter: brightness(1.1); }
+  .ai-panel {
+    position: fixed; bottom: 20px; right: 20px; z-index: 9000;
+    width: 420px; max-width: calc(100vw - 32px);
+    height: min(640px, calc(100vh - 80px));
+    display: flex; flex-direction: column;
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #ddd);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+  }
+  .ai-panel-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .ai-model {
+    font-size: 11px; padding: 3px 6px;
+    background: var(--surface-sunk); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--fg);
+    margin-right: auto; max-width: 200px;
+  }
+  .ai-panel-body {
+    flex: 1; min-height: 0; overflow: auto;
+    padding: 10px 14px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .ai-empty { color: var(--fg-muted); font-size: 12px; padding: 20px 0; }
+  .ai-msg {
+    border-radius: 8px; padding: 8px 10px;
+    background: var(--surface-sunk);
+    font-size: 13px;
+  }
+  .ai-msg-user   { background: var(--surface-soft); }
+  .ai-msg-system { background: var(--surface-sunk); font-style: italic; opacity: 0.7; font-size: 11px; }
+  .ai-msg-role {
+    font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--fg-muted); margin-bottom: 4px;
+  }
+  .ai-msg-body { line-height: 1.45; }
+  .ai-msg-body pre {
+    background: var(--bg, #1e1e1e); color: #e6e6e6;
+    padding: 8px 10px; border-radius: 6px;
+    overflow-x: auto; font-size: 11px;
+    margin: 6px 0; white-space: pre;
+  }
+  .ai-msg-body code { font-family: monospace; font-size: 12px; }
+  .ai-msg-body p { margin: 4px 0; }
+  .ai-msg-actions { margin-top: 6px; }
+  .ai-msg-actions .btn { font-size: 11px; padding: 3px 8px; }
+  .ai-attach-rail {
+    display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+    border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .ai-attach-rail .btn { font-size: 11px; padding: 3px 8px; }
+  .ai-composer {
+    display: flex; gap: 6px; padding: 10px 14px;
+    border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .ai-composer textarea {
+    flex: 1; resize: none; font-family: inherit; font-size: 12px;
+    padding: 6px 8px; background: var(--surface-sunk);
+    border: 1px solid var(--border); border-radius: 6px; color: var(--fg);
+  }
+  .ai-composer textarea:focus { outline: 1px solid var(--accent); }
 </style>
 
 <script>
@@ -1253,6 +1427,16 @@ function dbConsole() {
 
     // ── session query log (browser-local) ────────────────────────
     sessionLog: [],
+
+    // ── AI assistant (floating chat) ─────────────────────────────
+    aiOpen: false,
+    aiModels: [],                  // [{id}, …] from /api/ai/models
+    aiModel: '',                   // selected model id
+    aiMessages: [],                // conversation history (OpenAI shape)
+    aiInput: '',                   // composer textarea
+    aiBusy: false,                 // a request is in flight
+    aiPartial: '',                 // streaming accumulator until the message lands
+    aiAttachN: 10,                 // head/tail row count to attach
 
     async init() {
       this.tabs = loadTabs();
@@ -1592,6 +1776,227 @@ function dbConsole() {
       this.activeExampleSummary = ex.summary || '';
       if (this.engine === 'opensearch' && ex.mode) this.osMode = ex.mode;
       this.onEditorInput();
+    },
+
+    // ── AI assistant ─────────────────────────────────────────────
+    // Chat state is browser-local (localStorage) so a refresh
+    // doesn't drop the conversation.  Messages follow the OpenAI
+    // ``{role, content}`` shape — same the proxy forwards upstream.
+    AI_STORAGE_KEY: 'op:hub:db-ai:v1',
+    async openAi() {
+      this.aiOpen = true;
+      if (!this.aiModels.length) await this.loadAiModels();
+      this.loadAiMessages();
+      // Auto-scroll the body to the bottom after Alpine renders.
+      this.$nextTick(() => {
+        const el = this.$refs.aiBody;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+    async loadAiModels() {
+      try {
+        const r = await fetch('/api/ai/models');
+        if (!r.ok) return;
+        const j = await r.json();
+        // OpenAI shape: ``{"data":[{"id":…}, …]}``; some self-hosted
+        // servers return a bare list — handle both.
+        const list = Array.isArray(j) ? j : (j.data || []);
+        this.aiModels = list
+          .filter(m => m && (m.id || typeof m === 'string'))
+          .map(m => typeof m === 'string' ? { id: m } : { id: m.id })
+          .sort((a, b) => a.id.localeCompare(b.id));
+        // Prefer a sane default: previously-selected model from
+        // localStorage > the GME's gpt-oss-120b > whatever's first.
+        const saved = localStorage.getItem(this.AI_STORAGE_KEY + ':model');
+        if (saved && this.aiModels.some(m => m.id === saved)) {
+          this.aiModel = saved;
+        } else {
+          const preferred = this.aiModels.find(m => /gpt-oss-120b/i.test(m.id));
+          this.aiModel = preferred ? preferred.id : (this.aiModels[0]?.id || '');
+        }
+      } catch (_) {}
+    },
+    loadAiMessages() {
+      try {
+        const raw = localStorage.getItem(this.AI_STORAGE_KEY);
+        if (raw) this.aiMessages = JSON.parse(raw);
+      } catch (_) { this.aiMessages = []; }
+    },
+    persistAiMessages() {
+      try {
+        localStorage.setItem(this.AI_STORAGE_KEY, JSON.stringify(this.aiMessages));
+      } catch (_) {}
+    },
+    aiContext() {
+      // The hub-side proxy folds this into a system message, so the
+      // model always sees the editor's current state without the user
+      // having to repaste it.  Named graphs and snapshot probe come
+      // from companion PRs; we look them up defensively so this file
+      // works in isolation too.
+      const ctx = {
+        engine: this.engine,
+        query: this.query || '',
+      };
+      if (Array.isArray(this.sparqlNamedGraphs) && this.sparqlNamedGraphs.length) {
+        ctx.named_graphs = this.sparqlNamedGraphs;
+      }
+      return ctx;
+    },
+    async sendAi() {
+      const text = (this.aiInput || '').trim();
+      if (!text || this.aiBusy) return;
+      this.aiMessages.push({ role: 'user', content: text });
+      this.aiInput = '';
+      this.persistAiMessages();
+      await this._aiCompletion();
+    },
+    async _aiCompletion() {
+      this.aiBusy = true;
+      this.aiPartial = '';
+      try {
+        if (this.aiModel) {
+          localStorage.setItem(this.AI_STORAGE_KEY + ':model', this.aiModel);
+        }
+        const resp = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: this.aiMessages,
+            model: this.aiModel,
+            context: this.aiContext(),
+            temperature: 0.3,
+          }),
+        });
+        if (!resp.ok || !resp.body) {
+          this.aiMessages.push({
+            role: 'assistant',
+            content: `⚠ Request failed (HTTP ${resp.status}). Check that the LLM endpoint is reachable.`,
+          });
+          this.persistAiMessages();
+          return;
+        }
+        // Consume the SSE stream chunk by chunk; ``aiPartial`` holds
+        // what's been seen so far so Alpine re-renders incrementally.
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let accumulated = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          // SSE frames are separated by blank lines; each frame can
+          // carry multiple ``data: …`` lines that concatenate.
+          let nlIdx;
+          while ((nlIdx = buf.indexOf('\n\n')) !== -1) {
+            const frame = buf.slice(0, nlIdx);
+            buf = buf.slice(nlIdx + 2);
+            const payload = frame
+              .split('\n')
+              .filter(l => l.startsWith('data:'))
+              .map(l => l.slice(5).trim())
+              .join('');
+            if (!payload || payload === '[DONE]') continue;
+            try {
+              const obj = JSON.parse(payload);
+              if (obj.error) {
+                accumulated += `\n⚠ ${obj.error}`;
+                this.aiPartial = accumulated;
+                continue;
+              }
+              const delta = (obj.choices?.[0]?.delta?.content) || '';
+              if (delta) {
+                accumulated += delta;
+                this.aiPartial = accumulated;
+                // Scroll to bottom as tokens arrive.
+                this.$nextTick(() => {
+                  const el = this.$refs.aiBody;
+                  if (el) el.scrollTop = el.scrollHeight;
+                });
+              }
+            } catch (_) { /* malformed frame — keep going */ }
+          }
+        }
+        if (accumulated) {
+          this.aiMessages.push({ role: 'assistant', content: accumulated });
+          this.persistAiMessages();
+        }
+      } catch (e) {
+        this.aiMessages.push({
+          role: 'assistant',
+          content: `⚠ ${e.message}`,
+        });
+        this.persistAiMessages();
+      } finally {
+        this.aiBusy = false;
+        this.aiPartial = '';
+      }
+    },
+    attachRowsToChat(which) {
+      if (!this.rows.length) return;
+      const n = Math.max(1, Math.min(50, Number(this.aiAttachN) || 10));
+      const slice = which === 'tail'
+        ? this.rows.slice(-n)
+        : this.rows.slice(0, n);
+      // Convert rows + columns into an array of {col: value} records
+      // so the model gets self-describing JSON.
+      const records = slice.map(row => {
+        const o = {};
+        this.columns.forEach((c, i) => { o[c] = row[i]; });
+        return o;
+      });
+      const label = which === 'tail'
+        ? `tail ${slice.length} of ${this.rows.length} rows`
+        : `head ${slice.length} of ${this.rows.length} rows`;
+      const content =
+        `Attached **${label}** from the current result table:\n\n` +
+        '```json\n' + JSON.stringify(records, null, 2) + '\n```';
+      this.aiMessages.push({ role: 'user', content });
+      this.persistAiMessages();
+      this.$nextTick(() => {
+        const el = this.$refs.aiBody;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+    renderAiMessage(content) {
+      // Tiny Markdown-ish render: escape HTML, then bring back fenced
+      // code blocks and inline backticks.  We don't pull in a full
+      // markdown library for one feature.
+      const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      let html = esc(content);
+      // Fenced code blocks: ```lang\n…\n```
+      html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) =>
+        `<pre data-lang="${esc(lang || '')}">${code}</pre>`);
+      // Inline backticks
+      html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+      // Bold (single line) **…**
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      // Paragraph splits
+      return html
+        .split(/\n\n+/)
+        .map(p => p.includes('<pre') ? p : '<p>' + p.replace(/\n/g, '<br>') + '</p>')
+        .join('');
+    },
+    extractCodeBlock(content) {
+      // Return the first fenced code block whose language matches the
+      // active engine (sparql/cypher/opensearch). Falls back to any
+      // code block so the user can still grab e.g. an SQL snippet.
+      const re = /```(\w+)?\n([\s\S]*?)```/g;
+      const blocks = [];
+      let m;
+      while ((m = re.exec(content)) !== null) {
+        blocks.push({ lang: (m[1] || '').toLowerCase(), code: m[2].trimEnd() });
+      }
+      if (!blocks.length) return null;
+      const match = blocks.find(b => b.lang === this.engine);
+      return (match || blocks[0]).code;
+    },
+    useAiBlockAsQuery(code) {
+      if (!code) return;
+      this.query = code;
+      this.persistActive();
+      this.recomputeGutter();
+      this.rehighlightEditor();
     },
 
     // ── run ──────────────────────────────────────────────────────
