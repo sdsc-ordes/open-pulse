@@ -2069,31 +2069,61 @@ function dbConsole() {
         const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         return '<pre>' + esc(content) + '</pre>';
       }
-      // marked v12: pass options inline. ``gfm`` covers tables, task
-      // lists, strikethrough; ``breaks`` turns a single \n into <br>
-      // which is what users expect in chat (LLMs love single-line wraps).
-      // ``highlight`` is invoked for each fenced block; we pick the
-      // hljs grammar by the fence tag when known, otherwise let hljs
-      // auto-detect.
-      const html = window.marked.parse(content, {
-        gfm: true,
-        breaks: true,
-        highlight(code, lang) {
-          if (!window.hljs) return code;
-          const norm = (lang || '').toLowerCase().trim();
-          if (norm && window.hljs.getLanguage(norm)) {
-            try { return window.hljs.highlight(code, { language: norm, ignoreIllegals: true }).value; }
-            catch (_) {}
-          }
-          try { return window.hljs.highlightAuto(code).value; }
-          catch (_) { return code; }
-        },
-      });
+      // marked ≥5 removed the ``highlight`` option from ``parse()`` — you
+      // have to register a renderer override via ``marked.use``. We set
+      // this up once per page-load (idempotent because marked merges
+      // renderers); the code() override hands every fenced block to
+      // hljs, falling back to auto-detect when the fence is untagged or
+      // the language is unknown.
+      this._initMarkedOnce();
+      const html = window.marked.parse(content);
       // DOMPurify keeps Markdown's structural tags (tables, lists,
       // code, headings) but strips scripts / on* handlers / data: URLs.
       return window.DOMPurify.sanitize(html, {
         ADD_TAGS: ['table', 'thead', 'tbody', 'tr', 'th', 'td'],
         ADD_ATTR: ['class', 'data-lang'],
+      });
+    },
+    _initMarkedOnce() {
+      if (this._markedReady) return;
+      this._markedReady = true;
+      const escapeHtml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      window.marked.use({
+        gfm: true,
+        breaks: true,
+        // ``renderer.code`` is called for every fenced block. We try
+        // the explicit fence tag first (``sparql`` / ``cypher`` /
+        // ``json`` …), then fall back to ``highlightAuto`` so untagged
+        // blocks still get colourised — many LLMs forget the tag.
+        renderer: {
+          code(token) {
+            // marked v12 passes a token object; older signatures pass
+            // (code, lang, escaped). Normalise.
+            const code = typeof token === 'object' ? token.text : token;
+            const lang = (typeof token === 'object' ? token.lang : arguments[1] || '').toLowerCase().trim();
+            if (!window.hljs) {
+              return `<pre><code>${escapeHtml(code)}</code></pre>`;
+            }
+            let highlighted = null;
+            let actualLang = lang;
+            if (lang && window.hljs.getLanguage(lang)) {
+              try {
+                highlighted = window.hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+              } catch (_) {}
+            }
+            if (highlighted === null) {
+              try {
+                const auto = window.hljs.highlightAuto(code);
+                highlighted = auto.value;
+                actualLang = actualLang || auto.language || '';
+              } catch (_) {
+                highlighted = escapeHtml(code);
+              }
+            }
+            const cls = actualLang ? `hljs language-${actualLang}` : 'hljs';
+            return `<pre><code class="${cls}">${highlighted}</code></pre>`;
+          },
+        },
       });
     },
     extractCodeBlock(content) {

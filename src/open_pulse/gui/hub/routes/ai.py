@@ -108,7 +108,19 @@ _SYSTEM_PROMPT = (
     "block tagged with the engine (``sparql`` / ``cypher`` / ``opensearch``) "
     "and put a 1-2 sentence rationale outside the block. Prefer the "
     "canonical predicates above over guessing schema.org variants — they "
-    "matter, the v3 extractor doesn't emit many older shorthand fields."
+    "matter, the v3 extractor doesn't emit many older shorthand fields.\n\n"
+    "Formatting requirements (strict — the UI relies on these):\n"
+    "* ALWAYS open a code fence with the language tag matching the engine: "
+    "```sparql``` for SPARQL, ```cypher``` for Cypher, ```json``` for "
+    "OpenSearch DSL, ```sql``` for OpenSearch SQL. Untagged ``` blocks "
+    "won't get syntax highlighting in the chat panel.\n"
+    "* Use GitHub-flavoured Markdown for prose: tables with ``|`` for "
+    "tabular data, ``**bold**`` for emphasis, ``- `` for lists. The "
+    "chat renderer supports tables, lists, headings, blockquotes, "
+    "task lists, and inline ``code``.\n"
+    "* Keep responses tight: 1-2 sentence preamble, the code block, "
+    "then a 1-2 sentence follow-up if useful. The chat panel is "
+    "420px wide so very long paragraphs hurt readability."
 )
 
 
