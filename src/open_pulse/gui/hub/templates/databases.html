@@ -2361,6 +2361,48 @@ function dbConsole() {
       e.preventDefault();
       this.sendAi();
     },
+    _messagesForUpstream() {
+      // Convert the chat panel's display-friendly shape into the strict
+      // OpenAI tool-calling schema:
+      //   * Tool messages MUST have ``role: "tool"``, ``tool_call_id``,
+      //     and ``content`` as a *string* (not a dict). RCP / litellm
+      //     rejects the request with a pydantic validation error if
+      //     ``content`` is anything else.
+      //   * Assistant messages that carried ``tool_calls`` need
+      //     ``content: null`` (not ``""``) so the upstream knows the
+      //     model spoke only by invoking tools — some endpoints flag
+      //     mismatched empty-string+tool_calls combos.
+      // Locally-only flagged messages (e.g. placeholders we might add
+      // later) get filtered out at the same time.
+      return this.aiMessages
+        .filter(m => !m._localOnly)
+        .map(m => {
+          if (m.role === 'tool') {
+            const raw = m.content;
+            const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+            return {
+              role: 'tool',
+              tool_call_id: m.tool_call_id || '',
+              content: text,
+            };
+          }
+          if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+            const out = {
+              role: 'assistant',
+              tool_calls: m.tool_calls,
+            };
+            // OpenAI permits content=null alongside tool_calls; some
+            // servers also accept the field omitted. We keep the
+            // string when the assistant actually wrote prose this
+            // turn, drop it otherwise.
+            if (m.content) out.content = m.content;
+            else out.content = null;
+            return out;
+          }
+          // ``user`` and plain ``assistant`` messages pass through.
+          return { role: m.role, content: m.content || '' };
+        });
+    },
     async _aiCompletion() {
       this.aiBusy = true;
       this.aiPartial = '';
@@ -2372,9 +2414,10 @@ function dbConsole() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            // ``aiMessages`` carries tool_calls / tool messages too —
-            // forward verbatim so the agent loop has full context.
-            messages: this.aiMessages.filter(m => !m._localOnly),
+            // ``aiMessages`` carries display-friendly tool / tool_calls
+            // payloads (dicts, separate name/arguments fields). The
+            // upstream OpenAI schema is stricter — see _messagesForUpstream.
+            messages: this._messagesForUpstream(),
             model: this.aiModel,
             context: this.aiContext(),
             temperature: 0.3,
