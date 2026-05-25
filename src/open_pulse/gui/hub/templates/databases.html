@@ -1189,11 +1189,14 @@
     display: flex; flex-direction: column;
     padding: 0;
     min-height: 0;
-    /* Keep the rail roughly the height of the editor side so the
-       chat-body scroll feels anchored. The exact value is a balance
-       between "tall enough to be useful" and "doesn't push the
-       result table off-screen". */
-    max-height: calc(100vh - 200px);
+    /* CSS-grid ``align-items: stretch`` (the default) stretches both
+       columns to the taller one's height. We let that happen on its
+       own — no ``max-height`` cap — so the rail tracks the editor card
+       and the two sides always end on the same baseline. The inner
+       ``.right-rail-pane`` carries ``flex: 1; min-height: 0; overflow:
+       auto`` so the chat / log scrolls *inside* the rail rather than
+       pushing the surrounding card taller. */
+    height: 100%;
   }
   .right-rail-tabs {
     display: flex; align-items: center; gap: 6px;
