@@ -290,12 +290,21 @@
                 x-show="rightTab === 'session' && sessionLog.length"
                 @click="clearSessionLog()"
                 title="Clear all session-log entries">clear</button>
+        <label x-show="rightTab === 'assistant'"
+               class="ai-tools-toggle"
+               style="margin-left: auto;"
+               :title="aiToolsEnabled ? 'Agent mode: assistant can run read-only SPARQL / Cypher tools and refine its answer with the results.' : 'Agent mode off — assistant only writes queries; you click Use as query + Run.'">
+          <input type="checkbox" x-model="aiToolsEnabled"
+                 @change="localStorage.setItem('op:hub:db-ai-tools', aiToolsEnabled ? '1' : '0')"
+                 style="margin-right: 4px;" />
+          <span style="font-size: 11px;">tools</span>
+        </label>
         <select class="ai-model"
                 x-show="rightTab === 'assistant'"
                 x-model="aiModel"
                 :disabled="!aiModels.length"
                 title="Model — comes from the configured LLM endpoint."
-                style="margin-left: auto; max-width: 160px;">
+                style="max-width: 160px;">
           <template x-for="m in aiModels" :key="m.id">
             <option :value="m.id" x-text="m.id"></option>
           </template>
@@ -359,9 +368,39 @@
           </template>
           <template x-for="(m, i) in aiMessages" :key="i">
             <div class="ai-msg" :class="'ai-msg-' + m.role">
-              <div class="ai-msg-role" x-text="m.role"></div>
-              <div class="ai-msg-body" x-html="renderAiMessage(m.content)"></div>
-              <div class="ai-msg-actions" x-show="m.role === 'assistant' && extractCodeBlock(m.content)">
+              <div class="ai-msg-role" x-text="aiMessageLabel(m)"></div>
+              <!-- Tool result: collapsible card showing the call +
+                   result. The model already consumed the full result
+                   via a ``role: tool`` message; this UI is just so the
+                   human can see what the agent did. -->
+              <template x-if="m.role === 'tool'">
+                <details class="ai-tool" :open="i === aiMessages.length - 1">
+                  <summary>
+                    <code x-text="m.name"></code>
+                    <span class="card-meta" x-text="aiToolSummary(m)"></span>
+                  </summary>
+                  <div class="ai-tool-call">
+                    <div class="ai-tool-label">arguments</div>
+                    <pre x-text="aiPrettyArgs(m.arguments)"></pre>
+                  </div>
+                  <div class="ai-tool-result">
+                    <div class="ai-tool-label">result</div>
+                    <pre x-text="aiPrettyResult(m.content)"></pre>
+                  </div>
+                  <div class="ai-msg-actions" x-show="aiExtractToolQuery(m)">
+                    <button class="btn btn-ghost"
+                            @click="useAiBlockAsQuery(aiExtractToolQuery(m))"
+                            title="Drop the tool's query into the editor.">
+                      ⤴ Use as query
+                    </button>
+                  </div>
+                </details>
+              </template>
+              <template x-if="m.role !== 'tool'">
+                <div class="ai-msg-body" x-html="renderAiMessage(m.content || '')"></div>
+              </template>
+              <div class="ai-msg-actions"
+                   x-show="m.role === 'assistant' && m.content && extractCodeBlock(m.content)">
                 <button class="btn btn-ghost"
                         @click="useAiBlockAsQuery(extractCodeBlock(m.content))"
                         title="Replace the editor's query with this code block.">
@@ -1149,12 +1188,18 @@
   .right-rail {
     display: flex; flex-direction: column;
     padding: 0;
-    min-height: 0;
-    /* Keep the rail roughly the height of the editor side so the
-       chat-body scroll feels anchored. The exact value is a balance
-       between "tall enough to be useful" and "doesn't push the
-       result table off-screen". */
-    max-height: calc(100vh - 200px);
+    /* Bound the rail's growth so a long chat scrolls *inside* the
+       pane rather than ratcheting the surrounding card up forever:
+       ``max-height`` caps it, ``min-height`` keeps it tall enough to
+       be useful when the chat is empty, and ``height: 100%`` lets
+       CSS-grid still stretch the rail to match the editor card's
+       baseline when the editor side is the dominant column.
+       Mathematical effect:
+           rail_height = clamp(min, editor_card_height, max)
+       — within these bounds both columns share the same baseline. */
+    min-height: 480px;
+    max-height: calc(100vh - 160px);
+    height: 100%;
   }
   .right-rail-tabs {
     display: flex; align-items: center; gap: 6px;
@@ -1202,10 +1247,36 @@
     border-radius: 4px; color: var(--fg);
   }
   .ai-panel-body {
-    flex: 1; min-height: 0; overflow: auto;
+    flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
     padding: 10px 14px; display: flex; flex-direction: column; gap: 10px;
     box-sizing: border-box; width: 100%;
+    /* Thin, theme-aware scrollbar so the rail doesn't get visually
+       crowded by a default 16px chrome scrollbar. Firefox honours
+       ``scrollbar-width`` + ``scrollbar-color``; WebKit gets its own
+       pseudo-elements below. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
   }
+  .ai-panel-body::-webkit-scrollbar { width: 8px; }
+  .ai-panel-body::-webkit-scrollbar-track { background: transparent; }
+  .ai-panel-body::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+  .ai-panel-body::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
+  /* Session-log pane gets the same scrollbar treatment for visual
+     consistency between the two tabs. */
+  .right-rail-pane:not(.right-rail-pane-chat) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .right-rail-pane::-webkit-scrollbar { width: 8px; }
+  .right-rail-pane::-webkit-scrollbar-track { background: transparent; }
+  .right-rail-pane::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+  .right-rail-pane::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
   .ai-msg {
     box-sizing: border-box;
     max-width: 100%;
@@ -1307,6 +1378,38 @@
   }
   /* Inline anchors — keep the brand accent. */
   .ai-msg-body a { color: var(--accent, #335bff); text-decoration: underline; }
+  /* Tool-call card: collapsible summary + arguments + result. The
+     card sits inside an .ai-msg bubble (role=tool) so the surrounding
+     spacing matches the rest of the chat. */
+  .ai-tool { font-size: 12px; }
+  .ai-tool summary {
+    cursor: pointer; list-style: none; padding: 4px 0;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ai-tool summary::before {
+    content: '▸';
+    transition: transform 0.15s;
+  }
+  .ai-tool[open] summary::before { transform: rotate(90deg); }
+  .ai-tool-label {
+    font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--fg-muted);
+    margin: 6px 0 2px;
+  }
+  .ai-tool pre {
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 6px 8px; border-radius: 4px;
+    font-size: 11px; max-height: 220px; overflow: auto;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  .ai-tools-toggle {
+    display: inline-flex; align-items: center;
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .ai-tools-toggle input { accent-color: var(--accent, #335bff); }
   .ai-msg-body p { margin: 4px 0; }
   .ai-msg-actions { margin-top: 6px; }
   .ai-msg-actions .btn { font-size: 11px; padding: 3px 8px; }
@@ -1636,6 +1739,10 @@ function dbConsole() {
     aiPartial: '',                 // streaming accumulator until the message lands
     aiAttachN: 10,                 // head/tail row count to attach
     aiSchema: null,                // {sparql:{…}, neo4j:{…}} from /api/ai/schema-context
+    // Agentic mode lets the assistant call ``run_sparql`` / ``run_cypher``
+    // tools on its own (read-only, row-capped). Default off so the
+    // experience stays predictable until the user opts in.
+    aiToolsEnabled: localStorage.getItem('op:hub:db-ai-tools') === '1',
 
     async init() {
       this.tabs = loadTabs();
@@ -2118,6 +2225,50 @@ function dbConsole() {
         this.aiSchema = await r.json();
       } catch (_) { /* fail-soft — chat still works without schema */ }
     },
+    // ── Tool-result rendering helpers ────────────────────────────
+    aiMessageLabel(m) {
+      if (m.role !== 'tool') return m.role;
+      return (m.name ? 'tool · ' + m.name : 'tool');
+    },
+    aiToolSummary(m) {
+      const r = m.content || {};
+      if (r.error) return '⚠ error';
+      if (typeof r.row_count === 'number') {
+        let s = `${r.row_count} rows`;
+        if (r.truncated) s += ' (truncated)';
+        if (typeof r.elapsed_ms === 'number') s += ` · ${r.elapsed_ms} ms`;
+        return s;
+      }
+      if (typeof r.ask !== 'undefined') return `ask = ${r.ask}`;
+      return '';
+    },
+    aiPrettyArgs(args) {
+      // Tool arguments arrive as a JSON-encoded string from the model;
+      // pretty-print so the call is easy to scan.
+      if (typeof args !== 'string') return JSON.stringify(args ?? {}, null, 2);
+      try { return JSON.stringify(JSON.parse(args), null, 2); }
+      catch (_) { return args; }
+    },
+    aiPrettyResult(content) {
+      // ``content`` is the structured result the server gives us. We
+      // also accept legacy string shape (older streams) just in case.
+      if (typeof content === 'string') {
+        try { return JSON.stringify(JSON.parse(content), null, 2); }
+        catch (_) { return content; }
+      }
+      return JSON.stringify(content ?? {}, null, 2);
+    },
+    aiExtractToolQuery(m) {
+      // Pull the SPARQL / Cypher query the tool was called with so the
+      // user can drop it into the editor without re-copying.
+      try {
+        const args = typeof m.arguments === 'string'
+          ? JSON.parse(m.arguments)
+          : (m.arguments || {});
+        return args.query || null;
+      } catch (_) { return null; }
+    },
+
     aiSchemaSummary() {
       const s = this.aiSchema || {};
       const parts = [];
@@ -2210,6 +2361,48 @@ function dbConsole() {
       e.preventDefault();
       this.sendAi();
     },
+    _messagesForUpstream() {
+      // Convert the chat panel's display-friendly shape into the strict
+      // OpenAI tool-calling schema:
+      //   * Tool messages MUST have ``role: "tool"``, ``tool_call_id``,
+      //     and ``content`` as a *string* (not a dict). RCP / litellm
+      //     rejects the request with a pydantic validation error if
+      //     ``content`` is anything else.
+      //   * Assistant messages that carried ``tool_calls`` need
+      //     ``content: null`` (not ``""``) so the upstream knows the
+      //     model spoke only by invoking tools — some endpoints flag
+      //     mismatched empty-string+tool_calls combos.
+      // Locally-only flagged messages (e.g. placeholders we might add
+      // later) get filtered out at the same time.
+      return this.aiMessages
+        .filter(m => !m._localOnly)
+        .map(m => {
+          if (m.role === 'tool') {
+            const raw = m.content;
+            const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+            return {
+              role: 'tool',
+              tool_call_id: m.tool_call_id || '',
+              content: text,
+            };
+          }
+          if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+            const out = {
+              role: 'assistant',
+              tool_calls: m.tool_calls,
+            };
+            // OpenAI permits content=null alongside tool_calls; some
+            // servers also accept the field omitted. We keep the
+            // string when the assistant actually wrote prose this
+            // turn, drop it otherwise.
+            if (m.content) out.content = m.content;
+            else out.content = null;
+            return out;
+          }
+          // ``user`` and plain ``assistant`` messages pass through.
+          return { role: m.role, content: m.content || '' };
+        });
+    },
     async _aiCompletion() {
       this.aiBusy = true;
       this.aiPartial = '';
@@ -2221,10 +2414,14 @@ function dbConsole() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            messages: this.aiMessages,
+            // ``aiMessages`` carries display-friendly tool / tool_calls
+            // payloads (dicts, separate name/arguments fields). The
+            // upstream OpenAI schema is stricter — see _messagesForUpstream.
+            messages: this._messagesForUpstream(),
             model: this.aiModel,
             context: this.aiContext(),
             temperature: 0.3,
+            tools_enabled: this.aiToolsEnabled,
           }),
         });
         if (!resp.ok || !resp.body) {
@@ -2241,6 +2438,13 @@ function dbConsole() {
         const decoder = new TextDecoder();
         let buf = '';
         let accumulated = '';
+        // Tool-calls accumulator for the current assistant turn —
+        // mirrors the server-side merge so the local copy of messages
+        // matches what the backend appended into ``messages`` (the
+        // server is the source of truth; this is just so the UI can
+        // re-render after an agentic loop without a full refetch).
+        const toolCallsAcc = [];
+        let turnFinishReason = null;
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
@@ -2264,21 +2468,71 @@ function dbConsole() {
                 this.aiPartial = accumulated;
                 continue;
               }
-              const delta = (obj.choices?.[0]?.delta?.content) || '';
-              if (delta) {
-                accumulated += delta;
+              // Synthetic tool-result frame from the hub. Push as a
+              // ``tool`` message into the chat and flush the
+              // in-progress assistant turn so the UI renders the
+              // tool result + the new assistant turn that follows.
+              if (obj.op_tool) {
+                if (accumulated || toolCallsAcc.length) {
+                  this.aiMessages.push({
+                    role: 'assistant',
+                    content: accumulated,
+                    tool_calls: toolCallsAcc.length ? toolCallsAcc.slice() : undefined,
+                  });
+                  accumulated = '';
+                  toolCallsAcc.length = 0;
+                }
+                this.aiMessages.push({
+                  role: 'tool',
+                  tool_call_id: obj.tool_call_id,
+                  name: obj.name,
+                  arguments: obj.arguments,
+                  content: obj.result,
+                });
+                this.aiPartial = '';
+                this.persistAiMessages();
+                continue;
+              }
+              const choice = obj.choices?.[0] || {};
+              const delta = choice.delta || {};
+              if (delta.content) {
+                accumulated += delta.content;
                 this.aiPartial = accumulated;
-                // Scroll to bottom as tokens arrive.
                 this.$nextTick(() => {
                   const el = this.$refs.aiBody;
                   if (el) el.scrollTop = el.scrollHeight;
                 });
               }
+              // Streamed tool-call delta — merge by index so the
+              // local UI matches the backend's view of the turn.
+              for (const tc of delta.tool_calls || []) {
+                const idx = tc.index || 0;
+                while (toolCallsAcc.length <= idx) {
+                  toolCallsAcc.push({
+                    id: '', type: 'function',
+                    function: { name: '', arguments: '' },
+                  });
+                }
+                const slot = toolCallsAcc[idx];
+                if (tc.id) slot.id = tc.id;
+                if (tc.type) slot.type = tc.type;
+                if (tc.function?.name) slot.function.name = tc.function.name;
+                if (tc.function?.arguments) slot.function.arguments += tc.function.arguments;
+              }
+              if (choice.finish_reason) turnFinishReason = choice.finish_reason;
             } catch (_) { /* malformed frame — keep going */ }
           }
         }
-        if (accumulated) {
-          this.aiMessages.push({ role: 'assistant', content: accumulated });
+        // Whatever the model finished with — flush the final assistant
+        // turn (could be a regular text reply, or a turn that ended
+        // on tool_calls but never produced more content after the
+        // last tool round).
+        if (accumulated || toolCallsAcc.length) {
+          this.aiMessages.push({
+            role: 'assistant',
+            content: accumulated,
+            tool_calls: toolCallsAcc.length ? toolCallsAcc.slice() : undefined,
+          });
           this.persistAiMessages();
         }
       } catch (e) {
