@@ -297,7 +297,7 @@
           <input type="checkbox" x-model="aiToolsEnabled"
                  @change="localStorage.setItem('op:hub:db-ai-tools', aiToolsEnabled ? '1' : '0')"
                  style="margin-right: 4px;" />
-          <span style="font-size: 11px;">agent</span>
+          <span style="font-size: 11px;">tools</span>
         </label>
         <select class="ai-model"
                 x-show="rightTab === 'assistant'"
