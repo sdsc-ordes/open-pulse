@@ -121,7 +121,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Delete pr-<number> tag from GHCR
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = process.env.ORG;

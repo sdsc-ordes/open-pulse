@@ -49,7 +49,7 @@ jobs:
           - open-pulse-applier
     steps:
       - name: Prune package versions
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           PACKAGE_NAME: ${{ matrix.package }}
         with:
