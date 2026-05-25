@@ -1188,14 +1188,17 @@
   .right-rail {
     display: flex; flex-direction: column;
     padding: 0;
-    min-height: 0;
-    /* CSS-grid ``align-items: stretch`` (the default) stretches both
-       columns to the taller one's height. We let that happen on its
-       own — no ``max-height`` cap — so the rail tracks the editor card
-       and the two sides always end on the same baseline. The inner
-       ``.right-rail-pane`` carries ``flex: 1; min-height: 0; overflow:
-       auto`` so the chat / log scrolls *inside* the rail rather than
-       pushing the surrounding card taller. */
+    /* Bound the rail's growth so a long chat scrolls *inside* the
+       pane rather than ratcheting the surrounding card up forever:
+       ``max-height`` caps it, ``min-height`` keeps it tall enough to
+       be useful when the chat is empty, and ``height: 100%`` lets
+       CSS-grid still stretch the rail to match the editor card's
+       baseline when the editor side is the dominant column.
+       Mathematical effect:
+           rail_height = clamp(min, editor_card_height, max)
+       — within these bounds both columns share the same baseline. */
+    min-height: 480px;
+    max-height: calc(100vh - 160px);
     height: 100%;
   }
   .right-rail-tabs {
@@ -1244,10 +1247,36 @@
     border-radius: 4px; color: var(--fg);
   }
   .ai-panel-body {
-    flex: 1; min-height: 0; overflow: auto;
+    flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
     padding: 10px 14px; display: flex; flex-direction: column; gap: 10px;
     box-sizing: border-box; width: 100%;
+    /* Thin, theme-aware scrollbar so the rail doesn't get visually
+       crowded by a default 16px chrome scrollbar. Firefox honours
+       ``scrollbar-width`` + ``scrollbar-color``; WebKit gets its own
+       pseudo-elements below. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
   }
+  .ai-panel-body::-webkit-scrollbar { width: 8px; }
+  .ai-panel-body::-webkit-scrollbar-track { background: transparent; }
+  .ai-panel-body::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+  .ai-panel-body::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
+  /* Session-log pane gets the same scrollbar treatment for visual
+     consistency between the two tabs. */
+  .right-rail-pane:not(.right-rail-pane-chat) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .right-rail-pane::-webkit-scrollbar { width: 8px; }
+  .right-rail-pane::-webkit-scrollbar-track { background: transparent; }
+  .right-rail-pane::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+  .right-rail-pane::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
   .ai-msg {
     box-sizing: border-box;
     max-width: 100%;
