@@ -26,6 +26,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from ..auth import get_settings, require_auth
+from .ai_tools import MAX_TOOL_TURNS, TOOLS_SPEC, ToolError, run_tool
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 log = logging.getLogger(__name__)
@@ -300,7 +301,16 @@ _SYSTEM_PROMPT = (
     "task lists, and inline ``code``.\n"
     "* Keep responses tight: 1-2 sentence preamble, the code block, "
     "then a 1-2 sentence follow-up if useful. The chat panel is "
-    "420px wide so very long paragraphs hurt readability."
+    "420px wide so very long paragraphs hurt readability.\n\n"
+    "Agentic mode: when tools (``run_sparql`` / ``run_cypher``) are "
+    "exposed in this turn, prefer calling them to verify your answer "
+    "before quoting numbers. Use the result rows to refine the query "
+    "if needed — you can chain up to a handful of tool calls before "
+    "writing the final reply. Always summarise the findings in prose "
+    "after the last tool call, citing the actual counts you observed. "
+    "Stay read-only: any attempt at a write keyword (INSERT / DELETE / "
+    "CREATE / MERGE / SET / …) is rejected by the guardrail before "
+    "reaching the store, so don't try."
 )
 
 
@@ -346,6 +356,83 @@ def _build_messages(
         out.append({"role": "system", "content": "\n\n".join(parts)})
     out.extend(user_messages)
     return out
+
+
+def _merge_tool_call_delta(acc: list[dict[str, Any]], delta: dict[str, Any]) -> None:
+    """Fold a streamed tool-call delta into the accumulator.
+
+    OpenAI sends tool calls in pieces — first frame has ``id`` + name,
+    later frames append to ``function.arguments`` as the JSON arrives
+    token-by-token. We key by ``index`` (each parallel tool call has
+    its own slot) so the merge is order-independent within a call.
+    """
+    idx = delta.get("index", 0)
+    while len(acc) <= idx:
+        acc.append(
+            {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+        )
+    slot = acc[idx]
+    if delta.get("id"):
+        slot["id"] = delta["id"]
+    if delta.get("type"):
+        slot["type"] = delta["type"]
+    func = delta.get("function") or {}
+    if func.get("name"):
+        slot["function"]["name"] = func["name"]
+    if func.get("arguments"):
+        slot["function"]["arguments"] += func["arguments"]
+
+
+def _finalize_tool_call(tc: dict[str, Any]) -> dict[str, Any]:
+    """Strip the working state and return the OpenAI-shape tool_call."""
+    return {
+        "id": tc.get("id") or "",
+        "type": tc.get("type") or "function",
+        "function": {
+            "name": (tc.get("function") or {}).get("name", ""),
+            "arguments": (tc.get("function") or {}).get("arguments", ""),
+        },
+    }
+
+
+def _execute_tool_safely(tc: dict[str, Any]) -> dict[str, Any]:
+    """Run the tool, capturing every failure shape into the same envelope
+    so the model always sees JSON (never a Python traceback)."""
+    name = (tc.get("function") or {}).get("name", "")
+    raw_args = (tc.get("function") or {}).get("arguments", "")
+    try:
+        args = json.loads(raw_args) if raw_args else {}
+    except (TypeError, ValueError) as exc:
+        return {"error": f"Could not parse tool arguments: {exc}"}
+    try:
+        return run_tool(name, args)
+    except ToolError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — never propagate to the SSE stream
+        log.exception("tool %s crashed", name)
+        return {"error": f"Tool crashed: {exc}"}
+
+
+def _synthetic_tool_frame(tc: dict[str, Any], result: dict[str, Any]) -> str:
+    """Emit an SSE frame the chat widget renders as a tool-result card.
+
+    The shape is intentionally distinct from a regular OpenAI delta so
+    the client's frame parser can branch on ``op_tool``. We keep the
+    payload small — the model already saw the full result via the
+    ``role: tool`` message; this is purely for UI display.
+    """
+    preview = result
+    rows = result.get("rows") if isinstance(result, dict) else None
+    if isinstance(rows, list) and len(rows) > 25:
+        preview = {**result, "rows": rows[:25], "_preview": True}
+    body = {
+        "op_tool": True,
+        "tool_call_id": tc.get("id") or "",
+        "name": (tc.get("function") or {}).get("name", ""),
+        "arguments": (tc.get("function") or {}).get("arguments", ""),
+        "result": preview,
+    }
+    return f"data: {json.dumps(body, default=str)}\n\n"
 
 
 def _format_schema_block(schema: dict[str, Any]) -> str:
@@ -419,38 +506,125 @@ async def chat(
         payload.get("context") if isinstance(payload.get("context"), dict) else None
     )
     temperature = float(payload.get("temperature", 0.3))
-    upstream_payload = {
-        "model": model,
-        "messages": _build_messages(user_messages, context),
-        "temperature": temperature,
-        "stream": True,
-    }
+    # ``tools_enabled`` defaults False so the existing chat UI (the one
+    # that just renders text) keeps working unchanged. The agent path
+    # only kicks in when the client opts in.
+    tools_enabled = bool(payload.get("tools_enabled", False))
+    messages = _build_messages(user_messages, context)
 
     async def event_source():
-        # Forward the upstream SSE stream chunk-by-chunk. We don't try
-        # to parse — the browser-side handler expects raw OpenAI delta
-        # frames so the chat widget can render token streaming as-is.
+        # When ``tools_enabled`` is on we run an agentic loop: stream
+        # the LLM's reply to the client live, but also parse it
+        # server-side. If the model finishes a turn with
+        # ``finish_reason == "tool_calls"``, we execute each call,
+        # synthesise SSE frames carrying the tool results (so the UI
+        # can render them), append the assistant + tool messages, and
+        # re-call the LLM. Bounded by ``MAX_TOOL_TURNS`` to keep a
+        # runaway loop from melting the LLM budget.
         try:
             async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
-                async with client.stream(
-                    "POST",
-                    f"{base}/chat/completions",
-                    headers=_headers(),
-                    json=upstream_payload,
-                ) as resp:
-                    if resp.status_code != 200:
-                        err = await resp.aread()
+                for turn in range(MAX_TOOL_TURNS + 1):
+                    body = {
+                        "model": model,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "stream": True,
+                    }
+                    if tools_enabled:
+                        body["tools"] = TOOLS_SPEC
+                        body["tool_choice"] = "auto"
+                    async with client.stream(
+                        "POST",
+                        f"{base}/chat/completions",
+                        headers=_headers(),
+                        json=body,
+                    ) as resp:
+                        if resp.status_code != 200:
+                            err = await resp.aread()
+                            yield (
+                                'data: {"error":'
+                                + json.dumps(
+                                    f"HTTP {resp.status_code}: "
+                                    + err.decode("utf-8", errors="replace")[:400]
+                                )
+                                + "}\n\n"
+                            )
+                            return
+                        # Accumulate the assistant's content + tool calls
+                        # as we forward chunks. ``buf`` carries SSE-frame
+                        # fragments across ``aiter_text`` chunks (the
+                        # network boundary isn't aligned with ``\n\n``).
+                        accumulated_content = ""
+                        accumulated_tool_calls: list[dict[str, Any]] = []
+                        finish_reason: str | None = None
+                        buf = ""
+                        async for chunk in resp.aiter_text():
+                            yield chunk  # pass through to client first
+                            buf += chunk
+                            while "\n\n" in buf:
+                                frame, buf = buf.split("\n\n", 1)
+                                # Frame is a series of ``data: …`` /
+                                # ``event: …`` lines; we only care about
+                                # ``data:`` to read delta state.
+                                payload_text = "".join(
+                                    line[5:].strip()
+                                    for line in frame.splitlines()
+                                    if line.startswith("data:")
+                                )
+                                if not payload_text or payload_text == "[DONE]":
+                                    continue
+                                try:
+                                    obj = json.loads(payload_text)
+                                except ValueError:
+                                    continue
+                                choice = (obj.get("choices") or [{}])[0]
+                                delta = choice.get("delta") or {}
+                                if delta.get("content"):
+                                    accumulated_content += delta["content"]
+                                for tc in delta.get("tool_calls") or []:
+                                    _merge_tool_call_delta(accumulated_tool_calls, tc)
+                                if choice.get("finish_reason"):
+                                    finish_reason = choice["finish_reason"]
+
+                    if (
+                        not tools_enabled
+                        or finish_reason != "tool_calls"
+                        or not accumulated_tool_calls
+                    ):
+                        return  # plain text reply (or final turn) — done
+                    if turn >= MAX_TOOL_TURNS:
                         yield (
                             'data: {"error":'
                             + json.dumps(
-                                f"HTTP {resp.status_code}: "
-                                + err.decode("utf-8", errors="replace")[:400]
+                                f"Tool-loop budget exhausted after {MAX_TOOL_TURNS} "
+                                "turns. The model is still asking to call tools."
                             )
                             + "}\n\n"
                         )
                         return
-                    async for chunk in resp.aiter_text():
-                        yield chunk
+                    # Append the assistant turn (with its tool_calls) +
+                    # one ``role: tool`` message per call result. The
+                    # client also gets a synthetic SSE frame for each
+                    # result so the chat panel can render it inline.
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": accumulated_content or None,
+                            "tool_calls": [
+                                _finalize_tool_call(tc) for tc in accumulated_tool_calls
+                            ],
+                        }
+                    )
+                    for tc in accumulated_tool_calls:
+                        result = _execute_tool_safely(tc)
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.get("id") or "",
+                                "content": json.dumps(result, default=str)[:32000],
+                            }
+                        )
+                        yield _synthetic_tool_frame(tc, result)
         except httpx.HTTPError as exc:
             yield 'data: {"error":' + json.dumps(str(exc)) + "}\n\n"
 
