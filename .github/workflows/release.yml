@@ -45,7 +45,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build open-pulse image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: tools/images/Dockerfile-open-pulse
@@ -53,7 +53,7 @@ jobs:
           tags: open-pulse/open-pulse:${{ github.ref_name }}
 
       - name: Build devcontainer image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .devcontainer
           file: .devcontainer/Dockerfile
