@@ -188,10 +188,20 @@
           <thead>
             <tr>
               <template x-for="(col, ci) in meta.columns" :key="col">
-                <th :class="(ci === 0 ? 'sticky-col ' : '') + 'sortable-col' + (sort.col === col ? ' sort-active' : '')"
+                <th :class="(isPinned(col) ? 'pinned-col ' : '') + 'sortable-col' + (sort.col === col ? ' sort-active' : '')"
+                    :data-col="col"
                     @click="cycleSort(col)"
                     :title="'Sort by ' + col">
                   <div class="th-with-type">
+                    {# Pin toggle: 📌 → highlighted when pinned; click does
+                       NOT bubble to the th's sort handler. Pinning a column
+                       freezes it during horizontal scroll; multiple pins are
+                       allowed and stack left-to-right in click order. #}
+                    <button class="pin-btn"
+                            :class="isPinned(col) ? 'pinned' : ''"
+                            @click.stop="togglePin(col)"
+                            :title="isPinned(col) ? 'Unpin column' : 'Pin column (freeze during horizontal scroll)'"
+                            type="button">📌</button>
                     <span class="th-label">
                       <span x-text="col"></span>
                       <span class="sort-indicator"
@@ -222,7 +232,8 @@
             <template x-for="(row, i) in rows" :key="i">
               <tr>
                 <template x-for="(col, ci) in meta.columns" :key="col">
-                  <td :class="ci === 0 ? 'sticky-col' : ''"
+                  <td :class="isPinned(col) ? 'pinned-col' : ''"
+                      :data-col="col"
                       :title="formatCell(row[col])"
                       x-html="renderCell(row[col], col)"></td>
                 </template>
@@ -303,6 +314,15 @@ function collectionRows(init) {
     jumpPage: 1,
     loading: false,
     error: '',
+    // Ordered list of pinned columns. Pinned columns are frozen at the
+    // left of the viewport during horizontal scroll; the order in the
+    // array determines the stack order (first entry sits flush at left:0,
+    // each subsequent entry sits after the cumulative width of earlier
+    // pinned columns). The first column is auto-pinned on first load
+    // (preserves the legacy ``sticky-col`` behaviour) but can be unpinned.
+    pinnedCols: [],
+    _pinsInitialized: false,
+
     // Per-column render override (set via the in-header dropdown):
     //   auto    — try to JSON-parse strings that look like JSON; render
     //             arrays/objects as nested table/list; auto-link URLs;
@@ -346,11 +366,54 @@ function collectionRows(init) {
         const j = await r.json();
         this.meta = j;
         this.rows = j.rows || [];
+        // First load: auto-pin the first column to match the legacy
+        // ``sticky-col`` UX. The user can unpin it (or pin others) and
+        // their choice persists across pagination.
+        if (!this._pinsInitialized && Array.isArray(this.meta.columns) && this.meta.columns.length) {
+          this.pinnedCols = [this.meta.columns[0]];
+          this._pinsInitialized = true;
+        }
         this.jumpPage = j.page || 1;
+        this.$nextTick(() => this._measurePins());
       } catch (e) {
         this.error = e.message || 'request failed';
       } finally {
         this.loading = false;
+      }
+    },
+
+    isPinned(col) {
+      return this.pinnedCols.includes(col);
+    },
+    togglePin(col) {
+      this.pinnedCols = this.isPinned(col)
+        ? this.pinnedCols.filter(c => c !== col)
+        : [...this.pinnedCols, col];
+      this.$nextTick(() => this._measurePins());
+    },
+    _measurePins() {
+      // Imperatively set ``left`` on each pinned <th>/<td> after Alpine
+      // re-renders. Column widths depend on content, so cumulative
+      // offsets can't be expressed in pure CSS — we measure the live
+      // DOM. Cells that are no longer pinned get their inline ``left``
+      // cleared so old offsets don't linger.
+      const table = document.querySelector('.duckdb-table-wrap.tree-table table.duckdb-table');
+      if (!table) return;
+      // Clear stale offsets on previously-pinned-now-unpinned cells.
+      table.querySelectorAll('[data-col]').forEach(el => {
+        if (!this.isPinned(el.dataset.col || '')) el.style.left = '';
+      });
+      // Apply cumulative offsets in pin order.
+      let offset = 0;
+      for (const col of this.pinnedCols) {
+        const cssCol = (window.CSS && CSS.escape) ? CSS.escape(col) : col.replace(/"/g, '\\"');
+        const th = table.querySelector(`thead th[data-col="${cssCol}"]`);
+        if (!th) continue;
+        th.style.left = offset + 'px';
+        table.querySelectorAll(`tbody td[data-col="${cssCol}"]`).forEach(td => {
+          td.style.left = offset + 'px';
+        });
+        offset += th.offsetWidth;
       }
     },
     cycleSort(col) {

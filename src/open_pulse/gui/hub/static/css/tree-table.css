@@ -55,10 +55,56 @@
   word-break: break-all;
 }
 
-/* Header cell with column name + type-selector dropdown. */
+/* Header cell with pin button + column name + type-selector dropdown.
+ * Layout: [pin][th-label flex:1][type-select]. The pin sits flush
+ * left so it stays visible when columns are narrow; the dropdown
+ * sits flush right so it doesn't push the sort indicator off-screen. */
 .tree-table .th-with-type {
   display: flex; align-items: center; gap: 6px;
-  justify-content: space-between;
+}
+.tree-table .th-with-type .th-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Pin toggle: dim by default, accent when pinned. The 📌 emoji renders
+ * a tiny bit large in some themes, so the font-size + lineheight keep
+ * it from stretching the header row. */
+.tree-table .pin-btn {
+  flex: 0 0 auto;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  opacity: 0.35;
+  font-size: 11px;
+  line-height: 1;
+  transition: opacity .12s ease, transform .12s ease;
+}
+.tree-table .pin-btn:hover { opacity: 0.85; }
+.tree-table .pin-btn.pinned {
+  opacity: 1;
+  transform: rotate(-20deg);
+}
+
+/* Pinned columns: frozen during horizontal scroll. The `left` offset is
+ * set imperatively by JS after each render (cumulative width of earlier
+ * pinned cols). z-index is higher on <th> than <td> so a pinned cell
+ * doesn't paint over its own header during simultaneous vertical +
+ * horizontal scroll. Background is opaque so scrolling content doesn't
+ * bleed through. */
+.tree-table th.pinned-col,
+.tree-table td.pinned-col {
+  position: sticky;
+  z-index: 2;
+}
+.tree-table td.pinned-col {
+  background: var(--surface);
+}
+.tree-table th.pinned-col {
+  z-index: 3;
+  background: var(--surface-sunk);
 }
 .tree-table .th-with-type .th-label {
   font-weight: 600;
