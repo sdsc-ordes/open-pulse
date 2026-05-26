@@ -1,0 +1,102 @@
+/* Styles for the tree-aware table renderer (static/js/tree-table.js).
+ *
+ * Scoped under .tree-table so a page can opt in by wrapping the
+ * rendered output:
+ *
+ *   <div class="tree-table" x-html="renderTreeTable()" …></div>
+ *
+ * Theme variables come from app.css (--surface, --border, --fg-muted,
+ * --accent). No hard-coded colors except the cell-url fallback.
+ */
+
+/* ── tree-view: tabla en tabla ─────────────────────────────────── */
+.tree-table table.data.tree {
+  border-collapse: collapse;
+  width: 100%;
+}
+.tree-table table.data.tree th {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  font-weight: 600;
+  text-align: left;
+  font-size: 11px;
+  position: sticky; top: 0; z-index: 1;
+}
+.tree-table table.data.tree > tbody > tr > td {
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+.tree-table table.nested {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+  background: var(--surface-soft);
+}
+.tree-table table.nested th,
+.tree-table table.nested td {
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+}
+.tree-table table.nested th {
+  background: var(--surface);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.tree-table .nested-cell { padding: 2px !important; }
+.tree-table .nested-list { display: flex; flex-direction: column; gap: 1px; }
+.tree-table .nested-list > div {
+  padding: 2px 6px;
+  background: var(--surface-soft);
+  border-radius: 3px;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* Header cell with column name + type-selector dropdown. */
+.tree-table .th-with-type {
+  display: flex; align-items: center; gap: 6px;
+  justify-content: space-between;
+}
+.tree-table .th-with-type .th-label {
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.tree-table .th-with-type .th-label:hover { color: var(--accent, currentColor); }
+.tree-table .th-type {
+  font-size: 10px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.tree-table .th-type:hover { color: var(--fg); }
+
+/* Per-leaf renderers for url / image / pretty. */
+.tree-table .cell-url {
+  color: var(--accent, #4a9eff);
+  text-decoration: underline;
+  word-break: break-all;
+}
+.tree-table .cell-img-cell { text-align: center; }
+.tree-table .cell-img {
+  max-width: 120px; max-height: 80px;
+  object-fit: contain;
+  border-radius: 3px;
+  background: var(--surface-soft);
+}
+.tree-table .cell-pretty {
+  margin: 0;
+  padding: 4px 8px;
+  background: var(--surface-soft);
+  border-radius: 3px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px; overflow: auto;
+}
