@@ -47,17 +47,21 @@ def _slugify(s: str) -> str:
 # datatypes back to int/float so the tree-table renderer can sort them
 # numerically and the column-type 'auto' detection picks the right
 # shape. Everything else stays as a string (URIs, dates, plain literals).
-_XSD_INT_TYPES = frozenset({
-    "http://www.w3.org/2001/XMLSchema#integer",
-    "http://www.w3.org/2001/XMLSchema#int",
-    "http://www.w3.org/2001/XMLSchema#long",
-    "http://www.w3.org/2001/XMLSchema#nonNegativeInteger",
-})
-_XSD_FLOAT_TYPES = frozenset({
-    "http://www.w3.org/2001/XMLSchema#decimal",
-    "http://www.w3.org/2001/XMLSchema#double",
-    "http://www.w3.org/2001/XMLSchema#float",
-})
+_XSD_INT_TYPES = frozenset(
+    {
+        "http://www.w3.org/2001/XMLSchema#integer",
+        "http://www.w3.org/2001/XMLSchema#int",
+        "http://www.w3.org/2001/XMLSchema#long",
+        "http://www.w3.org/2001/XMLSchema#nonNegativeInteger",
+    }
+)
+_XSD_FLOAT_TYPES = frozenset(
+    {
+        "http://www.w3.org/2001/XMLSchema#decimal",
+        "http://www.w3.org/2001/XMLSchema#double",
+        "http://www.w3.org/2001/XMLSchema#float",
+    }
+)
 # Columns we treat as "the repo URL" when present. First match wins.
 # Lets the GrimoireLab Apply → workflow keep accepting both the
 # canonical ``?repo`` and a few common synonyms users write by hand.
