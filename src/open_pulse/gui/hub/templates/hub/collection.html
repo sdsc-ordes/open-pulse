@@ -232,9 +232,10 @@
             <template x-for="(row, i) in rows" :key="i">
               <tr>
                 <template x-for="(col, ci) in meta.columns" :key="col">
-                  <td :class="isPinned(col) ? 'pinned-col' : ''"
+                  <td :class="(isPinned(col) ? 'pinned-col ' : '') + 'copyable-cell'"
                       :data-col="col"
-                      :title="formatCell(row[col])"
+                      :title="formatCell(row[col]) + ' · click to copy'"
+                      @click="copyCell(row, col, $event)"
                       x-html="renderCell(row[col], col)"></td>
                 </template>
               </tr>
@@ -382,6 +383,51 @@ function collectionRows(init) {
       }
     },
 
+    async copyCell(row, col, ev) {
+      // Don't intercept clicks on links (let the user navigate), on the
+      // per-column dropdown/pin button (header controls — shouldn't fire
+      // here anyway, but defensive), or on images (clicking the image
+      // copies its URL via the surrounding td's value — that's the
+      // intent, but if a future caller embeds form controls in a cell
+      // we shouldn't swallow those either).
+      const t = ev.target;
+      if (t && (t.closest('a') || t.closest('button') || t.closest('select') || t.closest('input'))) {
+        return;
+      }
+      const v = row[col];
+      if (v === null || v === undefined) return;
+      const text = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        // Clipboard API requires a secure context (HTTPS or localhost).
+        // Fall back to the legacy execCommand path so copy still works
+        // on plain-HTTP intranet deployments.
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        } catch (_) { return; }
+      }
+      this._flashCell(ev.currentTarget);
+    },
+    _flashCell(td) {
+      if (!td) return;
+      // Re-trigger the CSS animation by removing the class on the next
+      // frame before re-adding — assigning the same class twice in a
+      // row wouldn't restart the keyframes otherwise.
+      td.classList.remove('cell-flash');
+      // Force reflow so the animation restarts on rapid successive clicks.
+      void td.offsetWidth;
+      td.classList.add('cell-flash');
+      setTimeout(() => td.classList.remove('cell-flash'), 500);
+    },
     isPinned(col) {
       return this.pinnedCols.includes(col);
     },
