@@ -270,6 +270,10 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "extractor/index/openalex/duckdb/openalex.duckdb",
         "topics",
     ),
+    "works": (
+        _DATA_ROOT / "extractor/index/openalex/duckdb/openalex.duckdb",
+        "works",
+    ),
     # EPFL Graph
     "epfl_graph_disciplines": (
         _DATA_ROOT / "extractor/index/epfl_graph/duckdb/epfl_graph.duckdb",

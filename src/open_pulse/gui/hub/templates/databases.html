@@ -3,6 +3,10 @@
 {% block subheading %}Community Graph (Neo4j) · Repositories Properties (SPARQL) · Grimoire Lab (OpenSearch). Click an example chip to load it; your tabs persist locally in your browser.{% endblock %}
 
 {% block content %}
+{# Shared tree-aware table renderer (state + methods are mixed into the
+   page's Alpine x-data via spread; CSS is scoped under .tree-table). #}
+<link rel="stylesheet" href="/static/css/tree-table.css" />
+<script src="/static/js/tree-table.js"></script>
 {# highlight.js for the snippet codeblock. CDN load — the dark theme
    (atom-one-dark) plays nicely with the existing dark code panel
    in both light and dark hub themes. #}
@@ -619,95 +623,7 @@
 </div>
 
 <style>
-  /* ── tree-view: tabla en tabla ─────────────────────────────────── */
-  .tree-table table.data.tree {
-    border-collapse: collapse;
-    width: 100%;
-  }
-  .tree-table table.data.tree th {
-    background: var(--surface-sunk);
-    border: 1px solid var(--border);
-    padding: 4px 8px;
-    font-weight: 600;
-    text-align: left;
-    font-size: 11px;
-    position: sticky; top: 0; z-index: 1;
-  }
-  .tree-table table.data.tree > tbody > tr > td {
-    border: 1px solid var(--border);
-    vertical-align: top;
-  }
-  .tree-table table.nested {
-    border-collapse: collapse;
-    width: 100%;
-    font-size: 11px;
-    background: var(--surface-soft);
-  }
-  .tree-table table.nested th,
-  .tree-table table.nested td {
-    border: 1px solid var(--border);
-    padding: 2px 6px;
-  }
-  .tree-table table.nested th {
-    background: var(--surface);
-    font-weight: 600;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-  }
-  .tree-table .nested-cell { padding: 2px !important; }
-  .tree-table .nested-list { display: flex; flex-direction: column; gap: 1px; }
-  .tree-table .nested-list > div {
-    padding: 2px 6px;
-    background: var(--surface-soft);
-    border-radius: 3px;
-    font-size: 11px;
-    word-break: break-all;
-  }
-  /* Header cell with column name + type-selector dropdown. */
-  .tree-table .th-with-type {
-    display: flex; align-items: center; gap: 6px;
-    justify-content: space-between;
-  }
-  .tree-table .th-with-type .th-label {
-    font-weight: 600;
-    cursor: pointer;
-    user-select: none;
-  }
-  .tree-table .th-with-type .th-label:hover { color: var(--accent, currentColor); }
-  .tree-table .th-type {
-    font-size: 10px;
-    padding: 1px 4px;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    background: var(--surface);
-    color: var(--fg-muted);
-    cursor: pointer;
-  }
-  .tree-table .th-type:hover { color: var(--fg); }
-  /* Per-leaf renderers for url / image / pretty. */
-  .tree-table .cell-url {
-    color: var(--accent, #4a9eff);
-    text-decoration: underline;
-    word-break: break-all;
-  }
-  .tree-table .cell-img-cell { text-align: center; }
-  .tree-table .cell-img {
-    max-width: 120px; max-height: 80px;
-    object-fit: contain;
-    border-radius: 3px;
-    background: var(--surface-soft);
-  }
-  .tree-table .cell-pretty {
-    margin: 0;
-    padding: 4px 8px;
-    background: var(--surface-soft);
-    border-radius: 3px;
-    font-size: 11px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 200px; overflow: auto;
-  }
+  /* tree-table CSS moved to /static/css/tree-table.css */
 
   /* ── examples chips ─────────────────────────────────────────────── */
   .examples-rail {
@@ -1641,6 +1557,12 @@ function _opensearchSnippet(lang, q, host, osMode) {
 }
 function dbConsole() {
   return {
+    // Tree-table renderer mixin: columns / rows / truncated / sortColumn /
+    // sortDir / cellTypes / treeMaxDepth + every render/sort method.
+    // Spread first so page-specific entries below can override safely
+    // (Alpine merges by spread order — later wins).
+    ...window.treeTable(),
+
     // Tab order + default match the reading order on the entity
     // pages: graph relations first (who connects to what), then
     // semantic properties, then operational data.
@@ -1657,9 +1579,7 @@ function dbConsole() {
     showSnippets: false, snippetLang: 'curl', snippetCopied: false,
     osMode: 'sql',
     busy: false, error: '',
-    columns: [], rows: [], truncated: false, rawDump: '',
-    sortColumn: null,
-    sortDir: 'asc',          // 'asc' | 'desc'
+    rawDump: '',
     // Graph viz modal state (Cypher only; vis-network lazy-loaded).
     graphOpen: false,
     graphNetwork: null,
@@ -1686,18 +1606,7 @@ function dbConsole() {
     // collapsed when auto-detect picked ≥2 node columns; auto-
     // expanded otherwise so the user knows to map columns.
     graphConfigOpen: false,
-    // Per-column render override (set via the in-header dropdown). Keys
-    // are column names; values are one of:
-    //   auto    — primitive → text, object → tree, array → sub-table,
-    //             mixed shapes → JSON string (the safe heuristic)
-    //   json    — force tree expansion even for mixed columns
-    //   pretty  — multi-line indented JSON inside a <pre>
-    //   text    — single-line JSON.stringify / String(value)
-    //   url     — render as <a href> for string values
-    //   image   — render as <img src> for string values
-    // Reset on every fresh query (different queries → different schema).
-    cellTypes: {},
-    treeMaxDepth: 5,
+    // (cellTypes + treeMaxDepth come from the treeTable mixin.)
     examples: {},
     activeExampleId: null,
     activeExampleSummary: '',
@@ -2757,40 +2666,7 @@ function dbConsole() {
       } catch (_) { return iso; }
     },
 
-    // ── sorting ──────────────────────────────────────────────────
-    toggleSort(col) {
-      if (this.sortColumn === col) {
-        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
-      } else {
-        this.sortColumn = col;
-        this.sortDir = 'asc';
-      }
-    },
-    clearSort() { this.sortColumn = null; this.sortDir = 'asc'; },
-
-    sortedRows() {
-      if (!this.sortColumn) return this.rows;
-      const idx = this.columns.indexOf(this.sortColumn);
-      if (idx === -1) return this.rows;
-      const dir = this.sortDir === 'desc' ? -1 : 1;
-      // Copy first — Array.sort mutates and would re-trigger Alpine watchers.
-      return [...this.rows].sort((a, b) => {
-        const av = a[idx], bv = b[idx];
-        // Stable handling of nulls / undefined: always last.
-        const aN = av === null || av === undefined;
-        const bN = bv === null || bv === undefined;
-        if (aN && bN) return 0;
-        if (aN) return 1;
-        if (bN) return -1;
-        // Numeric path when both sides parse as finite numbers.
-        const an = Number(av), bn = Number(bv);
-        if (Number.isFinite(an) && Number.isFinite(bn) && av !== '' && bv !== '') {
-          return (an - bn) * dir;
-        }
-        // Fall back to locale-aware string compare.
-        return String(av).localeCompare(String(bv), undefined, { numeric: true }) * dir;
-      });
-    },
+    // (toggleSort / clearSort / sortedRows come from the treeTable mixin.)
 
     // ── downloads ────────────────────────────────────────────────
     _csvCell(v) {
@@ -3480,271 +3356,12 @@ function dbConsole() {
       if (!this.rows.length) return '';
       return this.rows.length + ' rows' + (this.truncated ? ' (truncated)' : '');
     },
-    cellLabel(v) {
-      if (v === null || v === undefined) return '';
-      if (typeof v === 'object') return JSON.stringify(v);
-      return String(v);
-    },
+    // (cellLabel / renderTreeTable / getCellType / onCellTypeChange /
+    //  onHeaderClick / _typeSelectHtml / _buildTopSubtree / _buildSubtree /
+    //  _leafCount / _addHeaderCells / _renderCells / _renderLeaf / _escape
+    //  all come from the treeTable mixin.)
 
-    // ── Tree-aware renderer ─────────────────────────────────────────
-    // Single x-html blob: walks every cell to discover nested structure,
-    // emits multi-row thead (object expansion) + nested <table>s for
-    // array cells. Per-column type dropdowns are embedded in the level-0
-    // <th>; a delegated @change handler rewrites cellTypes.
-    renderTreeTable() {
-      const rows = this.sortedRows();
-      const cols = this.columns;
-
-      // Top-level subtrees honor the per-column type override.
-      const subtrees = cols.map((c, j) =>
-        this._buildTopSubtree(rows.map(r => r[j]), this.getCellType(c))
-      );
-
-      // Number of header rows = 1 (column name + dropdown) + max object
-      // expansion depth. Leaves and arrays don't grow the header.
-      const objDepth = (t) => {
-        if (!t || t.kind !== 'object') return 0;
-        return 1 + Math.max(0, ...Object.values(t.children).map(objDepth));
-      };
-      const headerLevels = 1 + Math.max(0, ...subtrees.map(objDepth));
-      const headerGrid = Array.from({length: headerLevels}, () => []);
-      for (let j = 0; j < cols.length; j++) {
-        this._addHeaderCells(cols[j], subtrees[j], 0, headerLevels - 1, headerGrid, /*topLevel=*/ true);
-      }
-
-      let html = '<table class="data tree">';
-      html += '<thead>';
-      for (const row of headerGrid) {
-        html += '<tr>';
-        for (const cell of row) {
-          if (cell.topLevel) {
-            const sortMark = this.sortColumn === cell.label
-              ? (this.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
-            const safeCol = this._escape(cell.label);
-            html += `<th colspan="${cell.colspan}" rowspan="${cell.rowspan}">`
-                  + `<div class="th-with-type">`
-                  +   `<span class="th-label" data-col-sort="${safeCol}" title="Sort by ${safeCol}">${safeCol}${sortMark}</span>`
-                  +   this._typeSelectHtml(cell.label, this.getCellType(cell.label))
-                  + `</div>`
-                  + `</th>`;
-          } else {
-            html += `<th colspan="${cell.colspan}" rowspan="${cell.rowspan}">${this._escape(cell.label)}</th>`;
-          }
-        }
-        html += '</tr>';
-      }
-      html += '</thead><tbody>';
-
-      for (const row of rows) {
-        html += '<tr>';
-        for (let j = 0; j < cols.length; j++) {
-          html += this._renderCells(row[j], subtrees[j]);
-        }
-        html += '</tr>';
-      }
-      html += '</tbody></table>';
-      return html;
-    },
-
-    getCellType(col) {
-      return this.cellTypes[col] || 'auto';
-    },
-
-    onCellTypeChange(e) {
-      const col = e.target && e.target.getAttribute && e.target.getAttribute('data-col-type');
-      if (!col) return;
-      // Replace object so Alpine sees a property change (not a deep mutation).
-      this.cellTypes = { ...this.cellTypes, [col]: e.target.value };
-    },
-
-    onHeaderClick(e) {
-      // Delegated click handler for the sort affordance. Only fires for
-      // elements explicitly tagged data-col-sort (the column-name span);
-      // the type-selector dropdown sits next to it but doesn't carry the
-      // attr, so clicking the dropdown won't trigger a sort.
-      const col = e.target && e.target.getAttribute && e.target.getAttribute('data-col-sort');
-      if (!col) return;
-      this.toggleSort(col);
-    },
-
-    _typeSelectHtml(col, current) {
-      const opts = ['auto', 'json', 'pretty', 'text', 'url', 'image'];
-      const safeCol = this._escape(col);
-      const options = opts.map(t =>
-        `<option value="${t}"${t === current ? ' selected' : ''}>${t}</option>`
-      ).join('');
-      return `<select class="th-type" data-col-type="${safeCol}" title="Render this column as…">${options}</select>`;
-    },
-
-    // Top-level subtree honors the user's override:
-    //   url/image/text/pretty → leaf with a render hint
-    //   json                  → object/array expansion, mixed shapes allowed
-    //   auto                  → object/array expansion, mixed → leaf (safe default)
-    _buildTopSubtree(values, type) {
-      if (type === 'text' || type === 'pretty' || type === 'url' || type === 'image') {
-        return { kind: 'leaf', renderAs: type };
-      }
-      return this._buildSubtree(values, 0, /*allowMixed=*/ type === 'json');
-    },
-
-    // Recursive shape detector. `allowMixed` lets json-typed columns
-    // expand even when some rows have primitives or arrays alongside
-    // objects — primitive rows just render empty for the sub-keys.
-    _buildSubtree(values, depth, allowMixed) {
-      if (depth >= this.treeMaxDepth) return { kind: 'leaf' };
-      let hasObj = false, hasArr = false, hasPrim = false;
-      const keys = new Set();
-      const arrItems = [];
-      for (const v of values) {
-        if (v === null || v === undefined) continue;
-        if (Array.isArray(v)) {
-          hasArr = true;
-          for (const it of v) arrItems.push(it);
-        } else if (typeof v === 'object') {
-          hasObj = true;
-          for (const k of Object.keys(v)) keys.add(k);
-        } else {
-          hasPrim = true;
-        }
-      }
-      if (!allowMixed) {
-        if (hasObj && hasPrim) return { kind: 'leaf' };
-        if (hasArr && (hasObj || hasPrim)) return { kind: 'leaf' };
-      }
-      // Forced-expand under json: pick whichever shape dominates;
-      // arrays beat objects since "tabla en tabla" reads better than
-      // "expanded keys with empty cells for the array rows".
-      if (hasArr) return { kind: 'array', child: this._buildSubtree(arrItems, depth + 1, allowMixed) };
-      if (hasObj) {
-        const children = {};
-        for (const k of keys) {
-          const sub = values.map(v =>
-            (v && typeof v === 'object' && !Array.isArray(v)) ? v[k] : undefined
-          );
-          children[k] = this._buildSubtree(sub, depth + 1, allowMixed);
-        }
-        return { kind: 'object', children };
-      }
-      return { kind: 'leaf' };
-    },
-
-    _leafCount(t) {
-      if (!t || t.kind !== 'object') return 1;
-      return Object.values(t.children).reduce((a, c) => a + this._leafCount(c), 0);
-    },
-
-    _addHeaderCells(label, subtree, level, maxLevel, grid, topLevel) {
-      if (subtree.kind !== 'object') {
-        grid[level].push({
-          label,
-          colspan: this._leafCount(subtree),
-          rowspan: maxLevel - level + 1,
-          topLevel: !!topLevel,
-        });
-        return;
-      }
-      grid[level].push({
-        label,
-        colspan: this._leafCount(subtree),
-        rowspan: 1,
-        topLevel: !!topLevel,
-      });
-      for (const k of Object.keys(subtree.children)) {
-        this._addHeaderCells(k, subtree.children[k], level + 1, maxLevel, grid, /*topLevel=*/ false);
-      }
-    },
-
-    _renderCells(value, subtree) {
-      if (subtree.kind === 'leaf') {
-        return this._renderLeaf(value, subtree.renderAs);
-      }
-      if (subtree.kind === 'object') {
-        let out = '';
-        for (const k of Object.keys(subtree.children)) {
-          const sub = (value && typeof value === 'object' && !Array.isArray(value)) ? value[k] : undefined;
-          out += this._renderCells(sub, subtree.children[k]);
-        }
-        return out;
-      }
-      if (subtree.kind === 'array') {
-        const items = Array.isArray(value) ? value : [];
-        if (!items.length) return '<td class="card-meta" style="font-style: italic;">∅</td>';
-        const child = subtree.child;
-        if (child.kind === 'object') {
-          const keys = Object.keys(child.children);
-          const objDepth = (t) => (!t || t.kind !== 'object') ? 0 : 1 + Math.max(0, ...Object.values(t.children).map(objDepth));
-          const innerLevels = 1 + Math.max(0, ...keys.map(k => objDepth(child.children[k])));
-          const innerGrid = Array.from({length: innerLevels}, () => []);
-          for (const k of keys) {
-            this._addHeaderCells(k, child.children[k], 0, innerLevels - 1, innerGrid, /*topLevel=*/ false);
-          }
-          let inner = '<table class="nested">';
-          inner += '<thead>';
-          for (const r of innerGrid) {
-            inner += '<tr>';
-            for (const c of r) {
-              inner += `<th colspan="${c.colspan}" rowspan="${c.rowspan}">${this._escape(c.label)}</th>`;
-            }
-            inner += '</tr>';
-          }
-          inner += '</thead><tbody>';
-          for (const item of items) {
-            inner += '<tr>';
-            for (const k of keys) {
-              const sub = (item && typeof item === 'object' && !Array.isArray(item)) ? item[k] : undefined;
-              inner += this._renderCells(sub, child.children[k]);
-            }
-            inner += '</tr>';
-          }
-          inner += '</tbody></table>';
-          return `<td class="nested-cell">${inner}</td>`;
-        }
-        // Array of primitives or array-of-arrays: stacked list.
-        let html = '<td class="nested-cell"><div class="nested-list">';
-        for (const item of items) {
-          if (Array.isArray(item) || (item && typeof item === 'object')) {
-            html += `<div>${this._escape(JSON.stringify(item))}</div>`;
-          } else {
-            html += `<div>${this._escape(item === null || item === undefined ? '' : String(item))}</div>`;
-          }
-        }
-        html += '</div></td>';
-        return html;
-      }
-      return '<td></td>';
-    },
-
-    // Leaf renderer. `renderAs` (set on the subtree by _buildTopSubtree)
-    // selects the variant; undefined falls back to the default which is
-    // "single-line text / JSON-stringified objects" — same as the auto
-    // heuristic produced before per-column types existed.
-    _renderLeaf(value, renderAs) {
-      if (value === null || value === undefined) {
-        return '<td class="mono" style="font-size: 12px;"></td>';
-      }
-      if (renderAs === 'url' && typeof value === 'string' && value) {
-        const safe = this._escape(value);
-        return `<td><a href="${safe}" target="_blank" rel="noopener" class="cell-url">${safe}</a></td>`;
-      }
-      if (renderAs === 'image' && typeof value === 'string' && value) {
-        const safe = this._escape(value);
-        return `<td class="cell-img-cell"><img src="${safe}" loading="lazy" alt="" class="cell-img"/></td>`;
-      }
-      if (renderAs === 'pretty') {
-        const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
-        return `<td><pre class="cell-pretty">${this._escape(text)}</pre></td>`;
-      }
-      // text / auto leaf / fallback
-      const label = typeof value === 'object' ? JSON.stringify(value) : String(value);
-      return `<td class="mono" style="font-size: 12px;">${this._escape(label)}</td>`;
-    },
-
-    _escape(s) {
-      if (s === null || s === undefined) return '';
-      return String(s).replace(/[&<>"']/g, c => (
-        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-      ));
-    },
+    // ── (tree-renderer methods are mixed in from window.treeTable) ──
   };
 }
 </script>
