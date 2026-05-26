@@ -19,6 +19,10 @@
 {% endblock %}
 
 {% block content %}
+{# Shared tree-aware table styles: powers the nested-rendering of JSON
+   cells and the per-column type dropdown in the header. Scoped under
+   .tree-table so it doesn't bleed elsewhere on the page. #}
+<link rel="stylesheet" href="/static/css/tree-table.css" />
 <div style="display: flex; flex-direction: column; gap: 18px;">
 
   <div class="card">
@@ -179,16 +183,37 @@
         </div>
       </div>
 
-      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap" x-cloak>
+      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap tree-table" x-cloak>
         <table class="data duckdb-table">
           <thead>
             <tr>
               <template x-for="(col, ci) in meta.columns" :key="col">
                 <th :class="(ci === 0 ? 'sticky-col ' : '') + 'sortable-col' + (sort.col === col ? ' sort-active' : '')"
-                    @click="cycleSort(col)" :title="'Sort by ' + col">
-                  <span x-text="col"></span>
-                  <span class="sort-indicator"
-                        x-text="sort.col === col ? (sort.dir === 'desc' ? '▼' : '▲') : '↕'"></span>
+                    @click="cycleSort(col)"
+                    :title="'Sort by ' + col">
+                  <div class="th-with-type">
+                    <span class="th-label">
+                      <span x-text="col"></span>
+                      <span class="sort-indicator"
+                            x-text="sort.col === col ? (sort.dir === 'desc' ? '▼' : '▲') : '↕'"></span>
+                    </span>
+                    {# Per-column render type override. ``auto`` JSON-parses
+                       strings that look like JSON and renders arrays/objects
+                       as nested elements; the other modes force a specific
+                       render. @click.stop so changing the dropdown doesn't
+                       also trigger a sort on the surrounding th. #}
+                    <select class="th-type"
+                            @click.stop
+                            @change="setCellType(col, $event.target.value)"
+                            :title="'Render ' + col + ' as…'">
+                      <option value="auto" :selected="(cellTypes[col]||'auto') === 'auto'">auto</option>
+                      <option value="json" :selected="cellTypes[col] === 'json'">json</option>
+                      <option value="pretty" :selected="cellTypes[col] === 'pretty'">pretty</option>
+                      <option value="text" :selected="cellTypes[col] === 'text'">text</option>
+                      <option value="url" :selected="cellTypes[col] === 'url'">url</option>
+                      <option value="image" :selected="cellTypes[col] === 'image'">image</option>
+                    </select>
+                  </div>
                 </th>
               </template>
             </tr>
@@ -199,7 +224,7 @@
                 <template x-for="(col, ci) in meta.columns" :key="col">
                   <td :class="ci === 0 ? 'sticky-col' : ''"
                       :title="formatCell(row[col])"
-                      x-html="renderCell(row[col])"></td>
+                      x-html="renderCell(row[col], col)"></td>
                 </template>
               </tr>
             </template>
@@ -278,6 +303,22 @@ function collectionRows(init) {
     jumpPage: 1,
     loading: false,
     error: '',
+    // Per-column render override (set via the in-header dropdown):
+    //   auto    — try to JSON-parse strings that look like JSON; render
+    //             arrays/objects as nested table/list; auto-link URLs;
+    //             apply search-term highlight (the legacy behaviour
+    //             plus nested rendering for JSON-shaped cells)
+    //   json    — force JSON.parse + nested rendering even when the
+    //             column looks like prose
+    //   pretty  — multi-line indented JSON inside a <pre>
+    //   text    — single-line escaped string, no nesting, no auto-link
+    //   url     — render as <a href> for string values
+    //   image   — render as <img src> for string values
+    // Reset on every new page load (different query/filter → different
+    // schema). Persisting per-column overrides across pagination is the
+    // desired UX — a user who picked ``url`` for ``path`` shouldn't have
+    // to re-pick it after clicking "next ›".
+    cellTypes: {},
     async loadStats() {
       try {
         const r = await fetch(`/api/hub/c/${encodeURIComponent(this.name)}/stats`);
@@ -356,14 +397,137 @@ function collectionRows(init) {
         return escapedText.replace(new RegExp(`(${term})`, 'gi'), '<mark>$1</mark>');
       } catch (_) { return escapedText; }
     },
-    renderCell(v) {
-      // Returns HTML — escaped, then optionally wrapped in <a> (URLs)
-      // and decorated with <mark> for the current search term.
+    setCellType(col, t) {
+      // Replace the object so Alpine sees a property change (not a
+      // deep mutation). Re-render is automatic via x-html.
+      this.cellTypes = { ...this.cellTypes, [col]: t };
+    },
+    _maybeParseJson(s) {
+      // Returns the parsed value if `s` looks like JSON, else null.
+      // Cheap shape check first so we don't pay JSON.parse on every cell.
+      if (typeof s !== 'string') return null;
+      const t = s.trim();
+      if (!t) return null;
+      const first = t[0], last = t[t.length - 1];
+      if (!((first === '[' && last === ']') || (first === '{' && last === '}'))) return null;
+      try { return JSON.parse(t); } catch (_) { return null; }
+    },
+    _renderNested(value) {
+      // Compact HTML for an already-parsed JSON value. Arrays of objects
+      // → mini <table>; arrays of primitives → stacked <div> list; bare
+      // objects → key/value pairs in a mini <table>. No deep recursion
+      // beyond one level — DuckDB cells rarely nest deeper than that, and
+      // a runaway recursion would freeze the browser on a 50-row page.
+      if (Array.isArray(value)) {
+        if (!value.length) return '<span class="card-meta" style="font-style: italic;">∅</span>';
+        const allObj = value.every(v => v && typeof v === 'object' && !Array.isArray(v));
+        if (allObj) {
+          // Union of keys across items, in first-seen order.
+          const keys = [];
+          const seen = new Set();
+          for (const item of value) {
+            for (const k of Object.keys(item)) {
+              if (!seen.has(k)) { seen.add(k); keys.push(k); }
+            }
+          }
+          let html = '<table class="nested"><thead><tr>';
+          for (const k of keys) html += `<th>${this.escapeHtml(k)}</th>`;
+          html += '</tr></thead><tbody>';
+          for (const item of value) {
+            html += '<tr>';
+            for (const k of keys) {
+              const cell = item[k];
+              html += `<td>${this._renderInlineLeaf(cell)}</td>`;
+            }
+            html += '</tr>';
+          }
+          html += '</tbody></table>';
+          return html;
+        }
+        // Array of primitives or mixed: stacked list.
+        let html = '<div class="nested-list">';
+        for (const item of value) {
+          html += `<div>${this._renderInlineLeaf(item)}</div>`;
+        }
+        html += '</div>';
+        return html;
+      }
+      if (value && typeof value === 'object') {
+        const keys = Object.keys(value);
+        if (!keys.length) return '<span class="card-meta" style="font-style: italic;">{}</span>';
+        let html = '<table class="nested"><tbody>';
+        for (const k of keys) {
+          html += `<tr><th>${this.escapeHtml(k)}</th><td>${this._renderInlineLeaf(value[k])}</td></tr>`;
+        }
+        html += '</tbody></table>';
+        return html;
+      }
+      return this._renderInlineLeaf(value);
+    },
+    _renderInlineLeaf(v) {
+      // Single-cell rendering inside a nested table: escape + auto-link
+      // URLs + search highlight. Mirrors the legacy renderCell behaviour
+      // so cells inside the nested structure feel like cells outside.
       if (v === null || v === undefined) return '<span class="cell-null">—</span>';
-      if (typeof v === 'object') {
-        let s; try { s = JSON.stringify(v); } catch (_) { s = String(v); }
+      if (Array.isArray(v) || (v && typeof v === 'object')) {
+        return this.highlight(this.escapeHtml(JSON.stringify(v)));
+      }
+      const s = String(v);
+      if (/^https?:\/\//i.test(s)) {
+        const href = this.escapeHtml(s);
+        const text = this.highlight(this.escapeHtml(s));
+        return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+      }
+      return this.highlight(this.escapeHtml(s));
+    },
+    renderCell(v, col) {
+      // Honors the per-column type dropdown; falls back to ``auto`` which
+      // is the legacy behaviour + JSON-shape detection for cells whose
+      // raw string looks like JSON. The DuckDB browser stores
+      // ``*_json`` columns as serialized strings so this is where they
+      // become navigable structures.
+      if (v === null || v === undefined) return '<span class="cell-null">—</span>';
+      const t = (col && this.cellTypes[col]) || 'auto';
+
+      if (t === 'text') {
+        const s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
         return this.highlight(this.escapeHtml(s));
       }
+      if (t === 'url') {
+        const s = String(v);
+        const href = this.escapeHtml(s);
+        const text = this.highlight(this.escapeHtml(s));
+        return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+      }
+      if (t === 'image') {
+        const safe = this.escapeHtml(String(v));
+        return `<img src="${safe}" loading="lazy" alt="" class="cell-img"/>`;
+      }
+      if (t === 'pretty') {
+        // pretty: if it parses as JSON, indent it; otherwise show the raw
+        // string in a <pre> so multi-line text stays multi-line.
+        let parsed = (typeof v === 'object') ? v : this._maybeParseJson(v);
+        const text = (parsed !== null && typeof parsed === 'object')
+          ? JSON.stringify(parsed, null, 2)
+          : String(v);
+        return `<pre class="cell-pretty">${this.highlight(this.escapeHtml(text))}</pre>`;
+      }
+      if (t === 'json') {
+        // Force-parse + nested render. Falls back to text if parse fails.
+        let parsed = (typeof v === 'object') ? v : this._maybeParseJson(v);
+        if (parsed === null) return this.highlight(this.escapeHtml(String(v)));
+        return this._renderNested(parsed);
+      }
+
+      // ── auto ──
+      // Native object → render nested.
+      if (typeof v === 'object') return this._renderNested(v);
+      // String that smells like JSON → parse + render nested.
+      const parsed = this._maybeParseJson(v);
+      if (parsed !== null && (Array.isArray(parsed) || typeof parsed === 'object')) {
+        return this._renderNested(parsed);
+      }
+      // Plain string: auto-link URLs + highlight (legacy behaviour).
       const s = String(v);
       if (/^https?:\/\//i.test(s)) {
         const href = this.escapeHtml(s);
