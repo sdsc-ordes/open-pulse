@@ -71,20 +71,31 @@ async def _sparql_query_count(
     client: httpx.AsyncClient,
     base: str,
     where: str,
-    timeout: float = 4.0,
+    timeout: float = 8.0,
 ) -> int | None:
     """Cheap COUNT helper for the SPARQL store.
 
-    Submits ``SELECT (COUNT(?s) AS ?c) WHERE { <where> }`` and returns the
-    integer count, or ``None`` on any failure (network, non-200, malformed
-    body). All callers must treat ``None`` as "skip this column for this
-    sample"; the chart layer renders gaps cleanly.
+    Counts ``?s`` matching ``<where>`` across the default graph **and**
+    every named graph (UNION + DISTINCT). Uploads stream into named
+    graphs (e.g. ``2026-05/hybrid``) and the ``publish_to_default``
+    mirror that copies them into the default graph routinely times out
+    on large stores — querying only the default graph understates the
+    real count by however much the mirror lags. The UNION + DISTINCT
+    combination is the cheapest correct shape: it lets Oxigraph reuse
+    the type-index for both branches, and DISTINCT collapses subjects
+    that appear in multiple graphs back to one. Returns ``None`` on any
+    failure (network, non-200, malformed body); callers treat that as
+    "skip this column for this sample" and the chart renders a gap.
     """
     settings = get_settings()
     url = base.rstrip("/")
     if not url.endswith("/query"):
         url += "/query"
-    query = f"SELECT (COUNT(?s) AS ?c) WHERE {{ {where} }}"
+    query = (
+        f"SELECT (COUNT(DISTINCT ?s) AS ?c) WHERE {{ "
+        f"{{ {where} }} UNION {{ GRAPH ?g {{ {where} }} }} "
+        f"}}"
+    )
     auth: tuple[str, str] | None = None
     if settings.sparql_user and settings.sparql_password:
         auth = (settings.sparql_user, settings.sparql_password)
