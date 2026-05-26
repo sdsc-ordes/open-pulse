@@ -106,6 +106,24 @@
   z-index: 3;
   background: var(--surface-sunk);
 }
+
+/* Click-to-copy: a cell click puts its raw value on the clipboard.
+ * cursor: copy on the td signals the affordance, but cells contain
+ * links and images too — those keep their default cursors so the
+ * user can tell "this navigates" vs "this copies" before clicking.
+ * The .cell-flash class is toggled briefly by JS after a successful
+ * copy; box-shadow is used (not background) so it composes cleanly
+ * with the pinned-col background set inline by _measurePins. */
+.tree-table td.copyable-cell { cursor: copy; }
+.tree-table td.copyable-cell a { cursor: pointer; }
+.tree-table td.copyable-cell img { cursor: copy; }
+.tree-table td.cell-flash {
+  animation: cell-copy-flash 500ms ease-out;
+}
+@keyframes cell-copy-flash {
+  0%   { box-shadow: inset 0 0 0 2px var(--accent, #4a9eff); }
+  100% { box-shadow: inset 0 0 0 0   var(--accent, #4a9eff); }
+}
 .tree-table .th-with-type .th-label {
   font-weight: 600;
   cursor: pointer;
