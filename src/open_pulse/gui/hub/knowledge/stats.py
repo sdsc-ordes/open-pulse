@@ -120,7 +120,7 @@ def cached_compute(data_dir: Path, key: str, compute_fn: Callable[[], Any]) -> A
 
 def compute_top_github_orgs(limit: int = 10) -> list[dict[str, Any]]:
     """Orgs ranked by how many Repos they own (Neo4j OWNS edges)."""
-    from .stores import neo4j_run
+    from .stores import _from_gh_url, neo4j_run
 
     cypher = (
         "MATCH (o:Org)-[:OWNS]->(r:Repo) "
@@ -131,12 +131,15 @@ def compute_top_github_orgs(limit: int = 10) -> list[dict[str, Any]]:
         "LIMIT $limit"
     )
     rows = neo4j_run(cypher, {"limit": limit})
+    # Neo4j stores login as ``https://github.com/<slug>``; strip the
+    # prefix so the bare slug fits the ``/hub/github.com/<slug>`` URL
+    # we build and the display column stays human-friendly.
     return [
         {
-            "login": r["login"],
+            "login": _from_gh_url(r["login"]),
             "name": (r.get("name") or "").strip(),
             "count": int(r["n_repos"]),
-            "hub_url": f"/hub/github.com/{r['login']}",
+            "hub_url": f"/hub/github.com/{_from_gh_url(r['login'])}",
         }
         for r in rows
         if r.get("login")
@@ -145,7 +148,7 @@ def compute_top_github_orgs(limit: int = 10) -> list[dict[str, Any]]:
 
 def compute_top_contributors(limit: int = 10) -> list[dict[str, Any]]:
     """Users ranked by repo-count they CONTRIBUTE_TO."""
-    from .stores import neo4j_run
+    from .stores import _from_gh_url, neo4j_run
 
     cypher = (
         "MATCH (u:User)-[:CONTRIBUTES_TO]->(r:Repo) "
@@ -156,12 +159,15 @@ def compute_top_contributors(limit: int = 10) -> list[dict[str, Any]]:
         "LIMIT $limit"
     )
     rows = neo4j_run(cypher, {"limit": limit})
+    # Neo4j stores login as ``https://github.com/<slug>``; strip the
+    # prefix so the bare slug fits the ``/hub/github.com/<slug>`` URL
+    # we build and the display column stays human-friendly.
     return [
         {
-            "login": r["login"],
+            "login": _from_gh_url(r["login"]),
             "name": (r.get("name") or "").strip(),
             "count": int(r["n_repos"]),
-            "hub_url": f"/hub/github.com/{r['login']}",
+            "hub_url": f"/hub/github.com/{_from_gh_url(r['login'])}",
         }
         for r in rows
         if r.get("login")
@@ -170,7 +176,7 @@ def compute_top_contributors(limit: int = 10) -> list[dict[str, Any]]:
 
 def compute_top_repos_by_contributors(limit: int = 10) -> list[dict[str, Any]]:
     """Repos with the most distinct contributors (community signal)."""
-    from .stores import neo4j_run
+    from .stores import _from_gh_url, neo4j_run
 
     cypher = (
         "MATCH (r:Repo)<-[:CONTRIBUTES_TO]-(u:User) "
@@ -181,11 +187,13 @@ def compute_top_repos_by_contributors(limit: int = 10) -> list[dict[str, Any]]:
         "LIMIT $limit"
     )
     rows = neo4j_run(cypher, {"limit": limit})
+    # ``slug`` arrives as ``https://github.com/<owner>/<repo>``; strip the
+    # prefix so the hub URL and display column show the bare slug.
     return [
         {
-            "slug": r["slug"],
+            "slug": _from_gh_url(r["slug"]),
             "count": int(r["n_contributors"]),
-            "hub_url": f"/hub/github.com/{r['slug']}",
+            "hub_url": f"/hub/github.com/{_from_gh_url(r['slug'])}",
         }
         for r in rows
         if r.get("slug")
