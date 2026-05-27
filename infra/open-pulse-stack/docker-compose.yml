@@ -153,7 +153,19 @@ services:
       OPENROUTER_API_KEY: "${EXTRACTOR_OPENROUTER_API_KEY:-}"
       # See the crawler block above — soft default keeps other profiles
       # buildable. Extractor itself errors when this is empty.
-      GITHUB_TOKEN: "${EXTRACTOR_GITHUB_TOKEN:-}"
+      #
+      # Token split:
+      #   GITHUB_TOKEN      — single PAT, fed into v1/parsers/* which
+      #                       paste it verbatim into the Authorization
+      #                       header (no rotation there). Must be a
+      #                       lone token, NOT comma-separated.
+      #   GITHUB_TOKEN_POOL — comma-separated PATs, consumed by
+      #                       v2/ingest/providers/github_provider.py
+      #                       via _next_github_token() for round-robin
+      #                       rotation. Effective ceiling: N × 5k
+      #                       GraphQL pts/h.
+      GITHUB_TOKEN: "${GRIMOIRE_GITHUB_TOKEN:-}"
+      GITHUB_TOKEN_POOL: "${EXTRACTOR_GITHUB_TOKEN:-}"
       GITLAB_TOKEN: "${EXTRACTOR_GITLAB_TOKEN:-}"
       INFOSCIENCE_TOKEN: "${EXTRACTOR_INFOSCIENCE_TOKEN:-}"
       MODEL: "${EXTRACTOR_MODEL:-gpt-4o-mini}"
