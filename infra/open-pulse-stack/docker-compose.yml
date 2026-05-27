@@ -104,7 +104,16 @@ services:
       # is empty — keep the validation in the service, not in compose's
       # parse-time interpolation (which fires for every profile).
       API_TOKEN: "${CRAWLER_API_TOKEN:-}"
-      GITHUB_TOKEN: "${CRAWLER_GITHUB_TOKEN:-}"
+      # GitHub PAT(s). Renamed from ``GITHUB_TOKEN`` to the
+      # ``CRAWLER_*`` namespace so it stops shadowing the gh CLI's
+      # magic ``GITHUB_TOKEN`` env (same motivation as the GME rename
+      # in Imaging-Plaza/git-metadata-extractor PR #57). The
+      # ``_POOL`` variant carries the full comma-separated list used
+      # by the round-robin; the bare ``CRAWLER_GITHUB_TOKEN`` is the
+      # single-PAT fallback used by legacy / external lib call sites
+      # that 401 on commas.
+      CRAWLER_GITHUB_TOKEN: "${CRAWLER_GITHUB_TOKEN:-}"
+      CRAWLER_GITHUB_TOKEN_POOL: "${CRAWLER_GITHUB_TOKEN:-}"
     ports:
       - "${CRAWLER_PORT:-8000}:8000"
     restart: unless-stopped
