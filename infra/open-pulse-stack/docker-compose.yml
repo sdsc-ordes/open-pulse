@@ -154,18 +154,24 @@ services:
       # See the crawler block above — soft default keeps other profiles
       # buildable. Extractor itself errors when this is empty.
       #
-      # Token split:
-      #   GITHUB_TOKEN      — single PAT, fed into v1/parsers/* which
-      #                       paste it verbatim into the Authorization
-      #                       header (no rotation there). Must be a
-      #                       lone token, NOT comma-separated.
-      #   GITHUB_TOKEN_POOL — comma-separated PATs, consumed by
-      #                       v2/ingest/providers/github_provider.py
-      #                       via _next_github_token() for round-robin
-      #                       rotation. Effective ceiling: N × 5k
-      #                       GraphQL pts/h.
-      GITHUB_TOKEN: "${GRIMOIRE_GITHUB_TOKEN:-}"
-      GITHUB_TOKEN_POOL: "${EXTRACTOR_GITHUB_TOKEN:-}"
+      # GME_GITHUB_TOKEN: comma-separated PATs for the GitHub call sites
+      # the GME makes (REST + GraphQL + gimie). The extractor's
+      # ``src/api.py`` startup runs ``_normalize_github_token_pool()``
+      # before any worker imports: it parses the comma list, exports
+      # ``GME_GITHUB_TOKEN_POOL=<full list>`` for the round-robin pool,
+      # and overwrites ``GME_GITHUB_TOKEN=<first token>`` for legacy
+      # single-token consumers (gimie, validate_github_token). With N
+      # PATs the effective GraphQL ceiling is N × 5 000 pts/h.
+      #
+      # Renamed from ``GITHUB_TOKEN`` in upstream PR #57 — gh CLI
+      # treats ``GITHUB_TOKEN`` as a magic env that overrides
+      # ``gh auth login``, so the GME_ namespace lets the two coexist
+      # in the devcontainer / admin shells.
+      #
+      # Note: do NOT inject ``GME_GITHUB_TOKEN_POOL`` from here — the
+      # app derives it. Setting it externally risks it drifting out of
+      # sync with ``GME_GITHUB_TOKEN`` after a future restart.
+      GME_GITHUB_TOKEN: "${EXTRACTOR_GITHUB_TOKEN:-}"
       GITLAB_TOKEN: "${EXTRACTOR_GITLAB_TOKEN:-}"
       INFOSCIENCE_TOKEN: "${EXTRACTOR_INFOSCIENCE_TOKEN:-}"
       MODEL: "${EXTRACTOR_MODEL:-gpt-4o-mini}"
