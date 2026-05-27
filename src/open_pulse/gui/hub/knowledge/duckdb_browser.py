@@ -363,7 +363,9 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "extractor/index/renkulab/duckdb/renkulab.duckdb",
         "users",
     ),
-    # ROR — same records table for every regional flavour; search bar narrows it.
+    # ROR — same ``records`` table for every regional flavour; the
+    # per-tile WHERE clause that turns ``ror_switzerland`` into the
+    # 1.8k-row Swiss subset lives in ``_AUTO_FILTERS`` below.
     "ror_epfl_ethz": (_DATA_ROOT / "extractor/index/ror/duckdb/ror.duckdb", "records"),
     "ror_europe": (_DATA_ROOT / "extractor/index/ror/duckdb/ror.duckdb", "records"),
     "ror_switzerland": (
@@ -371,7 +373,9 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         "records",
     ),
     "ror_worldwide": (_DATA_ROOT / "extractor/index/ror/duckdb/ror.duckdb", "records"),
-    # SNSF — same here. Grants is the headline table.
+    # SNSF — same here. ``grants`` is the headline table; the EPFL and
+    # ETHZ flavours are filtered via ``_AUTO_FILTERS`` so the home tile
+    # counts and the row browser show the right per-institution subset.
     "snsf_epfl": (_DATA_ROOT / "extractor/index/snsf/duckdb/snsf.duckdb", "grants"),
     "snsf_ethz": (_DATA_ROOT / "extractor/index/snsf/duckdb/snsf.duckdb", "grants"),
     "snsf_switzerland": (
@@ -557,6 +561,54 @@ def _is_hidden_col(col: str) -> bool:
     )
 
 
+# Per-collection WHERE filter applied when several collections share
+# the same underlying DuckDB table — without these, every regional
+# flavour reports the worldwide row count and the row browser shows
+# the same unfiltered set behind every tile. The WHERE is wrapped
+# into the ``Backing.select_sql`` so it propagates uniformly to
+# ``row_count_for``, ``/api/hub/c/<name>/rows``, ``/export``, and the
+# stats panel's Total counter (the secondary auto-stats still aggregate
+# over the bare table — a known second-order limitation).
+_AUTO_FILTERS: dict[str, str] = {
+    # ROR — country-scoped subsets of ``records``. ``ror_worldwide``
+    # has no filter (everything counts). Europe uses the EU + EFTA +
+    # UK + non-EU European geography (Liechtenstein, Norway, Iceland,
+    # the Western Balkans, Türkiye, etc.) so a Swiss-region query
+    # still finds CH partners in the obvious "Europe" view.
+    "ror_europe": (
+        "country_code IN ('AT','BE','BG','HR','CY','CZ','DK','EE','FI',"
+        "'FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT',"
+        "'RO','SK','SI','ES','SE','CH','NO','IS','GB','LI','MC','SM','AD',"
+        "'VA','UA','RS','MK','ME','BA','AL','MD','BY','RU','TR')"
+    ),
+    "ror_switzerland": "country_code = 'CH'",
+    # The EPFL/ETHZ tile is a shortlist — institutions whose ROR
+    # display name carries the EPFL or ETH-Zürich brand. Catches both
+    # the parent record and the small set of affiliated centers that
+    # ROR indexes under those acronyms.
+    "ror_epfl_ethz": (
+        "name ILIKE '%EPFL%' "
+        "OR name ILIKE '%Ecole polytechnique fédérale de Lausanne%' "
+        "OR (name ILIKE '%ETH%' "
+        "    AND (name ILIKE '%Zürich%' OR name ILIKE '%Zurich%'))"
+    ),
+    # SNSF — institution-scoped subsets of ``grants``. The Swiss flavour
+    # is the unfiltered table (every SNSF grant is by definition Swiss),
+    # EPFL and ETHZ are matched against the canonical ``institute``
+    # column where the values look like ``"Laboratory of … EPFL - …"``
+    # or ``"Institut für … ETH Zürich"``.
+    "snsf_epfl": (
+        "institute ILIKE '%EPFL%' "
+        "OR institute ILIKE '%polytechnique%lausanne%'"
+    ),
+    "snsf_ethz": (
+        "institute ILIKE '%ETH%Zürich%' "
+        "OR institute ILIKE '%ETH Zurich%' "
+        "OR institute ILIKE '%ETHZ%'"
+    ),
+}
+
+
 def _build_auto_backing(collection: str) -> Backing | None:
     """Construct a ``Backing`` for ``collection`` by sniffing the DuckDB schema.
 
@@ -586,10 +638,19 @@ def _build_auto_backing(collection: str) -> Backing | None:
     names = [c[0] for c in cols]
     lowered = {c.lower(): c for c in names}
 
+    # Optional WHERE clause that scopes the Backing to a regional /
+    # institutional subset of the underlying table. Threaded into
+    # ``Backing.select_sql`` below so ``_source_expr`` picks it up
+    # everywhere — row count, paginated rows endpoint, export, etc.
+    filter_clause = _AUTO_FILTERS.get(collection)
+
     # Stats — always Total, then up to 3 more from the pattern table.
-    stats: list[Stat] = [
-        Stat(f"Total {table}", f'SELECT COUNT(*) FROM "{table}"'),
-    ]
+    # Apply the filter to the Total counter so the in-tile stats card
+    # matches the home-page tile count.
+    total_sql = f'SELECT COUNT(*) FROM "{table}"'
+    if filter_clause:
+        total_sql += f" WHERE {filter_clause}"
+    stats: list[Stat] = [Stat(f"Total {table}", total_sql)]
     used: set[str] = set()
     for label, opts, tmpl, unit in _AUTO_STAT_PATTERNS:
         if len(stats) >= 4:
@@ -617,6 +678,15 @@ def _build_auto_backing(collection: str) -> Backing | None:
 
     hidden = tuple(n for n in names if _is_hidden_col(n))
 
+    # When a filter is in play, wrap the bare table in a SELECT so the
+    # generic ``_source_expr`` path applies the WHERE everywhere it
+    # matters (row_count, /rows pagination, /export). Without this
+    # wrap, every regional flavour of a shared-table collection reports
+    # the same worldwide row count.
+    select_sql_override: str | None = None
+    if filter_clause:
+        select_sql_override = f'SELECT * FROM "{table}" WHERE {filter_clause}'
+
     return Backing(
         db_path=db_path,
         table=table,
@@ -624,6 +694,7 @@ def _build_auto_backing(collection: str) -> Backing | None:
         stats=tuple(stats),
         search_cols=tuple(search_cols),
         search_examples=_AUTO_SEARCH_EXAMPLES.get(collection, ()),
+        select_sql=select_sql_override,
     )
 
 
@@ -709,7 +780,11 @@ def _source_expr(b: Backing) -> str:
 
 
 def _row_count(b: Backing) -> int:
-    key = (str(b.db_path), b.table)
+    # Cache key includes ``select_sql`` so collections that share the
+    # same underlying ``(db_path, table)`` but apply different WHERE
+    # filters (e.g. the ROR regional flavours) each get their own
+    # cached count instead of stomping on each other's value.
+    key = (str(b.db_path), b.table, b.select_sql or "")
     with _COUNT_LOCK:
         cached = _COUNT_CACHE.get(key)
     if cached is not None:
