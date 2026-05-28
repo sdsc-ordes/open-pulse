@@ -461,7 +461,13 @@ services:
       - ${OPEN_PULSE_DATA_DIR:-./data}/edge-proxy/data:/data
       - ${OPEN_PULSE_DATA_DIR:-./data}/edge-proxy/config:/config
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/ || exit 1"]
+      # Caddy serves a permanent 308 HTTP→HTTPS redirect on :80 which
+      # wget --spider follows into a real TLS handshake and chokes on
+      # SNI (localhost ≠ openpulse.epfl.ch) — every check failed even
+      # though external traffic worked fine. Hit Caddy's admin API on
+      # :2019 instead: it returns the running config as JSON over plain
+      # HTTP and only answers when the server process is alive.
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:2019/config/ >/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
