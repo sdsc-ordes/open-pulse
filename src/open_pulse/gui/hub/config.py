@@ -27,7 +27,17 @@ def _env_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     auth_token: str
-    """Single shared password. Set via HUB_AUTH; required."""
+    """Admin password — full UI + every mutating endpoint. Set via
+    HUB_AUTH; required."""
+
+    auth_token_reader: str
+    """Reader password — login succeeds with this string but the
+    session is stamped as ``reader``, which means: (a) every mutating
+    endpoint returns 403 (same gate as HUB_READONLY), and (b) the
+    sidebar hides operator-only tabs (Stack, Settings, Quests,
+    GrimoireLab Projects). Set via HUB_AUTH_READER; leave empty
+    (default) to disable the reader role entirely — admin-only
+    deploys keep their current behaviour."""
 
     data_dir: Path
     """Where the hub keeps its SQLite app DB and DuckDB scratch files."""
@@ -174,6 +184,7 @@ def load_settings() -> Settings:
 
     return Settings(
         auth_token=auth,
+        auth_token_reader=os.environ.get("HUB_AUTH_READER", "").strip(),
         data_dir=Path(os.environ.get("HUB_DATA_DIR", "/data/hub")),
         applier_url=os.environ.get("HUB_APPLIER_URL", "http://projects-applier:8000"),
         sparql_url=os.environ.get("HUB_SPARQL_URL", "http://sparql-proxy:7878"),
