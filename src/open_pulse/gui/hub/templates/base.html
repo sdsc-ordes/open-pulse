@@ -112,24 +112,34 @@
              Status leads the admin block (was the old Overview tile view).
              GrimoireLab Projects sits with admin tools because it builds
              the projects.json that the GrimoireLab applier reloads. #}
-          {# Sidebar items split into always-visible (read-only friendly)
-             and writeable-only. When HUB_READONLY=true the writeable
-             ones are dropped from the rendered list — the matching
-             require_writable dependency on every linked route returns
-             403 anyway, so hiding them just keeps the UI honest. #}
-          {% set nav_admin_readonly = [
+          {# Sidebar items split into two tiers:
+             - "basic": always visible. Read-only safe — anyone with a
+               valid session can browse these. Reader role + HUB_READONLY
+               deploys see only this tier.
+             - "expert": operator-only. The matching routes carry
+               ``require_writable`` so even if a reader manages to hit
+               them directly the server refuses with 403. Hiding them
+               in the nav just keeps the UI honest.
+
+             ``request.state.user_role`` is stamped by ``require_auth``
+             on every protected page. Default to "admin" for legacy
+             single-password deploys that pre-date the reader role. #}
+          {% set _role = request.state.user_role if request.state and request.state.user_role else 'admin' %}
+          {% set _is_admin = _role == 'admin' %}
+          {% set _is_expert = _is_admin and not hub_read_only %}
+          {% set nav_admin_basic = [
             ('/status', 'status', 'Status', 'M3 12l9-9 9 9M5 10v10h14V10'),
             ('/services', 'services', 'Services', 'M4 6h16M4 12h16M4 18h16'),
-            ('/pipeline', 'pipeline', 'Quests', 'M4 6h6M4 12h12M4 18h8 M14 6l4 4-4 4'),
-            ('/projects', 'projects', 'GrimoireLab Projects', 'M3 7l9-4 9 4-9 4-9-4z M3 12l9 4 9-4 M3 17l9 4 9-4'),
             ('/logs', 'logs', 'Logs', 'M4 6h16M4 10h16M4 14h12M4 18h8'),
             ('/admin', 'admin', 'Resources', 'M3 13l4-4 4 4 5-7 5 9 M3 21h18'),
           ] %}
-          {% set nav_admin_writeable = [
+          {% set nav_admin_expert = [
+            ('/pipeline', 'pipeline', 'Quests', 'M4 6h6M4 12h12M4 18h8 M14 6l4 4-4 4'),
+            ('/projects', 'projects', 'GrimoireLab Projects', 'M3 7l9-4 9 4-9 4-9-4z M3 12l9 4 9-4 M3 17l9 4 9-4'),
             ('/stack', 'stack', 'Stack', 'M3 5l9-3 9 3-9 3-9-3z M3 12l9 3 9-3 M3 19l9 3 9-3'),
             ('/settings', 'settings', 'Settings', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'),
           ] %}
-          {% set nav_admin = nav_admin_readonly if hub_read_only else nav_admin_readonly + nav_admin_writeable %}
+          {% set nav_admin = nav_admin_basic + nav_admin_expert if _is_expert else nav_admin_basic %}
 
           <div class="sidebar-group">
             <div class="sidebar-group-label">Explore</div>

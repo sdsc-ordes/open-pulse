@@ -26,7 +26,6 @@ looks like a browser (HTML accept) rather than an API client.
 
 from __future__ import annotations
 
-import hmac
 import os
 from urllib.parse import urlsplit
 
@@ -34,7 +33,7 @@ from fastapi import APIRouter, Cookie, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from ..auth import _COOKIE_NAME, _SESSIONS, clear_session, issue_session, get_settings
+from ..auth import _match_role, clear_session, issue_session
 
 # Templates live next to the routes package; same directory as base.html.
 _TEMPLATES = Jinja2Templates(
@@ -92,20 +91,21 @@ def login_submit(
     password: str = Form(...),
     next: str = Form("/hub/"),
 ) -> RedirectResponse:
-    settings = get_settings()
     target = _safe_next(next)
-    expected = settings.auth_token
-    if not expected or not hmac.compare_digest(password.encode("utf-8"),
-                                               expected.encode("utf-8")):
+    role = _match_role(password)
+    if role is None:
         # Bounce back to the form with ?error=1 and the original ?next=
         # preserved so a second attempt still lands where the user wanted.
-        redirect_to = f"/login?error=1&next={target}"
-        return RedirectResponse(redirect_to, status_code=303)
-    # Match the docstring's "issue cookie on success" promise. Status 303
-    # converts the POST into a GET, which is what we want — browsers
-    # follow it and re-render the destination page cleanly.
+        return RedirectResponse(
+            f"/login?error=1&next={target}", status_code=303,
+        )
+    # Issue the cookie + stamp the role. 303 converts the POST into a GET
+    # so the browser re-renders the destination page cleanly. Readers who
+    # try to land on an expert-only page (e.g. /pipeline) will hit the
+    # template's role check, not a server-side redirect — keeps the URL
+    # they typed intact for a possible later upgrade.
     resp = RedirectResponse(target, status_code=303)
-    issue_session(resp)
+    issue_session(resp, role)
     return resp
 
 
