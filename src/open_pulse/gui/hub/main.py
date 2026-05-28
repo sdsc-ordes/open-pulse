@@ -104,6 +104,11 @@ templates.env.globals["sparql_browser_url"] = _settings.sparql_browser_url
 templates.env.globals["opensearch_dashboards_url"] = _settings.opensearch_dashboards_url
 templates.env.globals["crawler_docs_url"] = _settings.crawler_docs_url
 templates.env.globals["extractor_docs_url"] = _settings.extractor_docs_url
+# Surface HUB_READONLY to every template so the sidebar / action buttons
+# can hide themselves when the deploy is locked down. The matching
+# auth.require_writable dependency enforces the same gate on every
+# mutating endpoint, so the UI hint and the server contract can't drift.
+templates.env.globals["hub_read_only"] = _settings.read_only
 
 
 # Several route modules ship their own Jinja2Templates instance

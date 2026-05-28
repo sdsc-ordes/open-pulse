@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from ..auth import get_settings, require_auth
+from ..auth import get_settings, require_auth, require_writable
 from ..queries import (
     FACETS,
     build_filtered_query,
@@ -183,7 +183,8 @@ async def run_sparql(
     return {"count": len(table["repos"]), **table}
 
 
-@router.post("/build", dependencies=[Depends(require_auth)])
+@router.post("/build",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 def build(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     """Wrap a repo list in the GrimoireLab projects.json envelope (no I/O)."""
     repos = list(payload.get("repos") or [])
@@ -192,7 +193,8 @@ def build(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any
     return {slug: {"meta": {"title": title}, "git": repos}}
 
 
-@router.post("/apply", dependencies=[Depends(require_auth)])
+@router.post("/apply",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 async def apply(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     """Forward a projects.json payload to the applier sidecar.
 
@@ -426,7 +428,8 @@ async def _decorate_wikidata_labels(
                     v["label"] = lbl
 
 
-@router.post("/build-from-filters", dependencies=[Depends(require_auth)])
+@router.post("/build-from-filters",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 async def build_from_filters(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
@@ -480,7 +483,8 @@ async def build_from_filters(
     }
 
 
-@router.post("/build-by-owner", dependencies=[Depends(require_auth)])
+@router.post("/build-by-owner",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 def build_by_owner(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
