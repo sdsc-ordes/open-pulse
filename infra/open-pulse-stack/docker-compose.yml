@@ -114,6 +114,22 @@ services:
       # that 401 on commas.
       CRAWLER_GITHUB_TOKEN: "${CRAWLER_GITHUB_TOKEN:-}"
       CRAWLER_GITHUB_TOKEN_POOL: "${CRAWLER_GITHUB_TOKEN:-}"
+      # Bridge for the pr-9 crawler image, which still reads ``GITHUB_TOKEN``
+      # in ``open_pulse_crawler/api.py`` (lines 549, 649) and aborts jobs
+      # with "GITHUB_TOKEN environment variable is not set" if it is empty.
+      # Until the image is updated to honor the ``CRAWLER_*`` rename above,
+      # forward the same PAT under both names. Remove once the image picks
+      # up the rename and re-reads ``CRAWLER_GITHUB_TOKEN_POOL`` directly.
+      GITHUB_TOKEN: "${CRAWLER_GITHUB_TOKEN:-}"
+      # The pr-9 image's API cache (``open_pulse_crawler/github_client.py``)
+      # defaults to a relative ``data/open-pulse-crawler/cache`` path, which
+      # the ``app`` user cannot create under cwd ``/app`` (owned by root).
+      # Without this override, every GraphQL crawl aborts with
+      # ``PermissionError: [Errno 13] Permission denied: 'data'`` before a
+      # single request is issued. Pointing the cache at /tmp keeps the
+      # speedup of cross-job request memoization without needing a mounted
+      # volume — the trade-off is the cache evaporates on container restart.
+      OPC_CACHE_DIR: "/tmp/open-pulse-crawler/cache"
     ports:
       - "${CRAWLER_PORT:-8000}:8000"
     restart: unless-stopped
@@ -407,3 +423,48 @@ services:
       start_period: 10s
     mem_limit: ${HUB_MEM_LIMIT:-512m}
     cpus: ${HUB_CPUS:-1.0}
+
+  # ── edge-proxy ───────────────────────────────────────────────────────
+  # Public TLS-terminating reverse proxy for openpulse.epfl.ch.
+  #
+  # Listens on 80 + 443 (the only two ports the EPFL DMZ opens for public
+  # browser traffic — every other 75xx port is restricted to operators on
+  # the EPFL net / VPN) and forwards every request to the hub. The hub
+  # already implements path-prefixed proxies for the crawler API
+  # (`/api/crawler/*`) and the metadata extractor (`/api/extractor/*`),
+  # so there's no per-service routing here — one reverse_proxy block
+  # gives external users the whole control plane under one URL.
+  #
+  # Caddy auto-obtains a Let's Encrypt certificate via HTTP-01 challenge
+  # on port 80 (DNS resolves openpulse.epfl.ch to this host's public
+  # IP). Cert state lives in /data, mounted as a host volume so renewals
+  # survive container recreates.
+  #
+  # Profile: `edge`. Bring up alongside the rest with
+  # `docker compose --profile edge --profile hub --profile crawler … up -d`.
+  edge-proxy:
+    image: caddy:2.8-alpine
+    container_name: openpulse-edge-proxy
+    profiles:
+      - edge
+    restart: unless-stopped
+    # No depends_on: the hub lives in the `hub` profile, so compose
+    # can't validate the link when only `--profile edge` is active.
+    # Caddy retries upstream connections automatically — if the hub is
+    # down the proxy returns 502 until it's back, which is what we want.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ../services/edge-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${OPEN_PULSE_DATA_DIR:-./data}/edge-proxy/data:/data
+      - ${OPEN_PULSE_DATA_DIR:-./data}/edge-proxy/config:/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: ${EDGE_PROXY_MEM_LIMIT:-128m}
+    cpus: ${EDGE_PROXY_CPUS:-0.5}

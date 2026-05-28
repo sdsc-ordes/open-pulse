@@ -1,0 +1,200 @@
+<!doctype html>
+{# Standalone login page for the Open Pulse hub.
+
+   Bypasses base.html on purpose: we don't want the marquee strip, the
+   side-nav, or any of the auth-gated chrome to flash before the user
+   is logged in. The whole page is self-contained except for the
+   Tailwind CDN script (same version base.html uses, so the cached
+   bundle is reused after first paint).
+
+   POSTs to /login with `password` (the shared HUB_AUTH secret) and an
+   optional `next` field (the URL the user originally tried to reach).
+   The server validates, issues the session cookie, and redirects.
+#}
+<html lang="en" x-data="{ theme: localStorage.getItem('op-hub-theme') || 'dark' }"
+      :data-theme="theme">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Open Pulse — Sign in</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%2338bdf8' stroke-width='2.4'/%3E%3Ccircle cx='16' cy='16' r='3.4' fill='%2338bdf8'/%3E%3C/svg%3E" />
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <script>
+      tailwind.config = { darkMode: ['selector', '[data-theme="dark"]'] };
+    </script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+      /* Hydrogen-atom orbit pulse — same brand mark as the favicon, but
+         scaled and animated. Pure CSS so it works before Alpine boots. */
+      @keyframes orbit-pulse {
+        0%, 100% { transform: scale(1);   opacity: 0.9; }
+        50%      { transform: scale(1.05); opacity: 1.0; }
+      }
+      .op-logo svg { animation: orbit-pulse 3.2s ease-in-out infinite; }
+
+      /* Subtle moving gradient backdrop. Sits behind the card so the
+         page has some life without distracting from the form. */
+      .op-backdrop {
+        background:
+          radial-gradient(circle at 20% 15%, rgba(56,189,248,0.18), transparent 45%),
+          radial-gradient(circle at 80% 85%, rgba(168,85,247,0.14), transparent 45%),
+          radial-gradient(circle at 50% 50%, rgba(34,197,94,0.06),  transparent 60%);
+      }
+    </style>
+  </head>
+  <body class="min-h-screen antialiased
+               bg-slate-50 text-slate-900
+               dark:bg-slate-950 dark:text-slate-100
+               flex items-center justify-center
+               op-backdrop">
+
+    <!-- Top-right theme toggle. Matches base.html's pattern so the choice
+         carries over once the user lands in the hub. -->
+    <button @click="theme = theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('op-hub-theme', theme)"
+            class="absolute top-4 right-4 p-2 rounded-lg
+                   text-slate-500 hover:text-slate-900
+                   dark:text-slate-400 dark:hover:text-slate-100
+                   hover:bg-slate-200/40 dark:hover:bg-slate-800/60
+                   transition"
+            aria-label="Toggle theme">
+      <svg x-show="theme === 'dark'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.36 6.36l-.7-.7M6.34 6.34l-.7-.7m12.72 0l-.7.7M6.34 17.66l-.7.7M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+      </svg>
+      <svg x-show="theme !== 'dark'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+      </svg>
+    </button>
+
+    <main class="w-full max-w-md mx-auto px-6">
+      <div class="bg-white/85 dark:bg-slate-900/85 backdrop-blur
+                  border border-slate-200/60 dark:border-slate-700/60
+                  rounded-2xl shadow-xl shadow-sky-500/5
+                  px-8 py-10">
+
+        <!-- Brand mark + product name. The animated hydrogen atom is the
+             same icon used in the browser tab; reusing it keeps the
+             visual anchor consistent across surfaces. -->
+        <div class="flex items-center gap-3 mb-6">
+          <span class="op-logo inline-flex items-center justify-center
+                       w-12 h-12 rounded-xl
+                       bg-sky-100 dark:bg-sky-500/10">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" class="w-7 h-7">
+              <circle cx="16" cy="16" r="11" fill="none" stroke="#38bdf8" stroke-width="2.4"/>
+              <circle cx="16" cy="16" r="3.4" fill="#38bdf8"/>
+            </svg>
+          </span>
+          <div>
+            <h1 class="text-2xl font-semibold tracking-tight leading-none">
+              Open Pulse
+            </h1>
+            <p class="text-xs uppercase tracking-widest
+                      text-slate-500 dark:text-slate-400 mt-1">
+              Software intelligence hub
+            </p>
+          </div>
+        </div>
+
+        <!-- Project blurb. Three short paragraphs covering what Open Pulse
+             is, who it's for, and where the user actually lands once they
+             authenticate. Keeps the login surface from feeling like a
+             dead end if they hit it by accident. -->
+        <div class="mb-7 space-y-3
+                    text-sm leading-relaxed
+                    text-slate-700 dark:text-slate-300">
+          <p>
+            <span class="font-medium text-slate-900 dark:text-slate-100">Open Pulse</span>
+            maps and measures the open-source research ecosystem —
+            repositories, contributors, organisations, and the
+            knowledge artefacts (ROR, ORCID, publications) that anchor
+            them. Built at
+            <a href="https://www.epfl.ch/labs/sdsc/" target="_blank" rel="noopener"
+               class="text-sky-600 dark:text-sky-400 hover:underline">EPFL SDSC</a>.
+          </p>
+          <p>
+            The hub on the other side of this page is the operator
+            control plane: crawl jobs, metadata extractions, SPARQL /
+            Neo4j queries, dashboards, and the CHAOSS health metrics
+            we run across every project we track.
+          </p>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            Need access? Ping the
+            <a href="mailto:carlos.vivarrios@epfl.ch"
+               class="text-sky-600 dark:text-sky-400 hover:underline">project owner</a>.
+          </p>
+        </div>
+
+        <!-- Inline error banner. The login POST handler redirects back to
+             /login?error=1 on a bad password; the form is otherwise the
+             same shape so the user doesn't lose context. -->
+        {% if error %}
+        <div class="mb-5 px-4 py-3 rounded-lg
+                    bg-red-50 dark:bg-red-500/10
+                    border border-red-200/60 dark:border-red-500/30
+                    text-sm text-red-700 dark:text-red-300">
+          Incorrect password. Try again.
+        </div>
+        {% endif %}
+
+        <form method="post" action="/login" autocomplete="off" class="space-y-4">
+          {# Preserve the originally-requested URL so we can bounce the
+             user back to it after login (defaults to /hub/). #}
+          <input type="hidden" name="next" value="{{ next | default('/hub/') }}" />
+
+          <label class="block">
+            <span class="block text-sm font-medium
+                         text-slate-700 dark:text-slate-300 mb-1.5">
+              Password
+            </span>
+            <input type="password" name="password" required autofocus
+                   placeholder="••••••••••••"
+                   class="w-full px-3 py-2.5 rounded-lg
+                          bg-white dark:bg-slate-950
+                          border border-slate-300 dark:border-slate-700
+                          text-slate-900 dark:text-slate-100
+                          placeholder-slate-400 dark:placeholder-slate-600
+                          focus:outline-none
+                          focus:ring-2 focus:ring-sky-500/40
+                          focus:border-sky-500
+                          transition" />
+          </label>
+
+          <button type="submit"
+                  class="group w-full inline-flex items-center justify-center gap-2
+                         px-4 py-2.5 rounded-lg
+                         bg-sky-600 hover:bg-sky-500 active:bg-sky-700
+                         text-white text-sm font-medium
+                         shadow-sm shadow-sky-500/20
+                         focus:outline-none focus:ring-2 focus:ring-offset-2
+                         focus:ring-sky-500 focus:ring-offset-slate-950
+                         transition">
+            Enter the hub
+            <svg class="w-4 h-4 transition-transform group-hover:translate-x-0.5"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+            </svg>
+          </button>
+        </form>
+
+        <!-- Footer crumbs. EPFL + SDSC attribution, plus the public ontology
+             URL so curious visitors can poke at the schema even without
+             logging in. -->
+        <div class="mt-8 pt-5 border-t border-slate-200/60 dark:border-slate-800/60
+                    flex items-center justify-between
+                    text-xs text-slate-500 dark:text-slate-400">
+          <span>EPFL · SDSC</span>
+          <a href="https://sdsc-ordes.github.io/open-pulse-ontology/" target="_blank" rel="noopener"
+             class="hover:text-slate-700 dark:hover:text-slate-300 inline-flex items-center gap-1">
+            Ontology
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

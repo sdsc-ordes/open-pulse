@@ -4,6 +4,13 @@ The hub doesn't own any crawler state — these routes just forward to the
 crawler service so the browser can pause/resume/cancel/delete jobs from
 the same auth-gated origin (and so we don't have to teach the UI about
 the crawler's bearer token, which lives in HUB env / Settings).
+
+Same shape as ``routes/extractor.py``: the docs + openapi proxies make
+Swagger UI's "Try it out" work through the hub, and the catch-all
+``/api/v1/{path:path}`` route forwards every upstream endpoint with the
+crawler bearer auto-injected. The EPFL firewall in front of this VM
+only opens 75xx ports — without the proxy the upstream :8000 is not
+reachable from outside the host.
 """
 
 from __future__ import annotations
@@ -13,13 +20,17 @@ import os
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse
 
 from ..auth import require_auth
 
 router = APIRouter(prefix="/api/crawler", tags=["crawler"])
+
+# Methods the crawler API implements. Catching unknown ones early saves
+# an upstream round-trip and a misleading 405.
+_PROXIED_METHODS = ("GET", "POST", "PUT", "DELETE", "PATCH")
 
 
 def _crawler_base() -> str:
@@ -103,18 +114,100 @@ def crawler_docs() -> HTMLResponse:
     "/openapi.json", include_in_schema=False, dependencies=[Depends(require_auth)]
 )
 def crawler_openapi() -> Response:
-    """Proxy the upstream spec and rewrite ``servers`` to the crawler's
-    public URL so Swagger UI's "Try it out" hits the upstream directly
-    (the user pastes ``CRAWLER_API_TOKEN`` into the Authorize dialog).
+    """Pass through the upstream OpenAPI spec, rewriting ``servers:`` so
+    Swagger UI's "Try it out" hits the hub proxy (same origin as the
+    docs page) instead of the unreachable upstream port.
+
+    We also strip the ``security`` requirements: the hub auto-injects
+    the crawler bearer server-side, so asking the user to paste it into
+    Swagger's "Authorize" dialog would be confusing and could leak the
+    token into browser memory unnecessarily.
     """
     try:
         upstream = httpx.get(f"{_crawler_base()}/api/v1/openapi.json", timeout=5.0)
         upstream.raise_for_status()
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    spec = upstream.json()
-    spec["servers"] = [{"url": _crawler_public_url()}]
+    spec: dict[str, Any] = upstream.json()
+    # Same-origin relative path → works whether the hub is reached on
+    # :7507, an SSH forward, or any internal alias.
+    spec["servers"] = [{"url": "/api/crawler"}]
+    # Hub does the auth; clear per-operation security so Swagger UI
+    # doesn't gate "Try it out" behind the now-unnecessary HTTPBearer
+    # dialog. Keep components.securitySchemes intact for reference.
+    if isinstance(spec.get("paths"), dict):
+        for ops in spec["paths"].values():
+            if not isinstance(ops, dict):
+                continue
+            for op in ops.values():
+                if isinstance(op, dict) and "security" in op:
+                    op["security"] = []
+    spec.setdefault("security", [])
     return Response(content=json.dumps(spec), media_type="application/json")
+
+
+@router.api_route(
+    "/api/v1/{path:path}",
+    methods=list(_PROXIED_METHODS),
+    include_in_schema=False,
+    dependencies=[Depends(require_auth)],
+)
+async def crawler_v1_proxy(path: str, request: Request) -> Response:
+    """Forward ``/api/crawler/api/v1/{path}`` to the crawler container.
+
+    Hub session auth gates the route; the crawler bearer is injected
+    server-side. The body, query string, content-type, and method are
+    preserved end-to-end. A long client-side timeout (15 min) matches
+    the longest poll a single crawl status check can take when the
+    crawler is heavily loaded.
+
+    The hand-coded ``/jobs`` and ``/jobs/{id}`` routes below predate
+    this catch-all and stay registered for backwards compatibility —
+    FastAPI matches them first because they were declared earlier.
+    """
+    token = _crawler_token()
+    if not token:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "CRAWLER_API_TOKEN not set in the hub container's env. "
+                "Add it to infra/.env and restart the hub."
+            ),
+        )
+
+    body = await request.body()
+    forward_headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+    content_type = request.headers.get("content-type")
+    if content_type:
+        forward_headers["Content-Type"] = content_type
+
+    upstream_url = f"{_crawler_base()}/api/v1/{path}"
+    try:
+        async with httpx.AsyncClient(timeout=900.0) as client:
+            upstream = await client.request(
+                method=request.method,
+                url=upstream_url,
+                content=body if body else None,
+                params=dict(request.query_params),
+                headers=forward_headers,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    excluded = {
+        "content-encoding", "content-length", "transfer-encoding",
+        "connection", "keep-alive", "proxy-authenticate",
+        "proxy-authorization", "te", "trailers", "upgrade",
+    }
+    out_headers = {
+        k: v for k, v in upstream.headers.items() if k.lower() not in excluded
+    }
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=out_headers,
+        media_type=upstream.headers.get("content-type"),
+    )
 
 
 @router.get("/jobs", dependencies=[Depends(require_auth)])

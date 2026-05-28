@@ -22,6 +22,7 @@ from .routes import (
     databases,
     extractor,
     hub,
+    login,
     pipeline,
     projects,
     services,
@@ -140,6 +141,53 @@ app.include_router(admin.router)
 app.include_router(hub.router)
 app.include_router(hub.api)
 app.include_router(chaoss_routes.router)
+# Public auth surface: /login (GET + POST) and /logout. These are
+# intentionally outside the require_auth dependency tree — anyone can
+# reach the form, the POST validates against HUB_AUTH itself.
+app.include_router(login.router)
+
+
+# Browser-friendly 401 handling. The hub used to surface
+# `WWW-Authenticate: Basic realm="open-pulse-hub"` and the browser
+# popped up its native (ugly) credential dialog. Now: when an HTML
+# client hits a 401, redirect to /login with `?next=` set so the user
+# lands back where they were trying to go after sign-in. API clients
+# (curl, Postman, the v2 SDK) keep getting the bare 401 — they're
+# identified by their Accept header not asking for HTML.
+@app.exception_handler(401)
+async def _login_redirect_for_browsers(request: Request, exc):
+    accept = (request.headers.get("accept") or "").lower()
+    looks_like_browser = (
+        "text/html" in accept
+        # Be conservative: an Ajax/fetch caller that signals JSON
+        # explicitly stays in the 401 lane even if its Accept fall-back
+        # is `*/*` (which would technically include text/html).
+        and "application/json" not in accept
+        # And browsers always send a Sec-Fetch-Mode of navigate / iframe
+        # on top-level navigations; tools like curl don't set it at all.
+        # Treat its absence as "ambiguous → fall through to JSON 401".
+        and request.headers.get("sec-fetch-mode") is not None
+    )
+    if looks_like_browser:
+        next_url = request.url.path
+        if request.url.query:
+            next_url += f"?{request.url.query}"
+        from urllib.parse import quote
+        return RedirectResponse(
+            f"/login?next={quote(next_url, safe='/?=&')}",
+            status_code=303,
+        )
+    # Default JSON 401 (re-raises through FastAPI's default handler).
+    from fastapi.exception_handlers import http_exception_handler
+    from fastapi import HTTPException
+    if isinstance(exc, HTTPException):
+        return await http_exception_handler(request, exc)
+    return Response(
+        content='{"detail":"Authentication required"}',
+        status_code=401,
+        media_type="application/json",
+        headers={"WWW-Authenticate": 'Basic realm="open-pulse-hub"'},
+    )
 
 
 @app.get("/healthz")
