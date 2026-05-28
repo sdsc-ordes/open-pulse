@@ -79,7 +79,7 @@ _DATA_ROOT = Path(os.environ.get("HUB_DATA_DIR_HOST", "/data"))
 
 _BACKING: dict[str, Backing] = {
     "github_repos": Backing(
-        db_path=_DATA_ROOT / "extractor/index/github/duckdb/github.duckdb",
+        db_path=_DATA_ROOT / "index/github/duckdb/github.duckdb",
         table="repos",
         hidden_cols=("languages", "topics", "raw"),
         stats=(
@@ -174,49 +174,96 @@ _BACKING: dict[str, Backing] = {
         search_examples=("EPFL", "Swiss", "University", "CH"),
     ),
     "zenodo_records": Backing(
-        db_path=_DATA_ROOT / "extractor/index/zenodo/duckdb/zenodo.duckdb",
+        db_path=_DATA_ROOT / "index/zenodo/duckdb/zenodo.duckdb",
         table="records",
         hidden_cols=("raw", "keywords_json"),
         # SELECT joins ``record_communities`` so each record carries an
         # aggregated list of communities it belongs to. LEFT JOIN keeps
-        # records with no community (984 of 1638) — their ``community``
-        # cell renders as ``[]``. ``LIST(DISTINCT ...)`` dedupes when
-        # the join table happens to repeat a pair.
+        # records with no community — their ``community`` cell renders
+        # as ``[]``. ``LIST(DISTINCT ...)`` dedupes when the join table
+        # repeats a pair.
+        #
+        # 2.1.0rc1 surface: ``concept_doi`` is the "all versions" DOI
+        # (long-term citation); ``version`` / ``revision`` show how the
+        # record evolved; ``created_at`` / ``updated_at`` are lifecycle
+        # timestamps; ``views`` / ``downloads`` and their ``unique_*`` /
+        # ``version_*`` siblings are reach metrics from Zenodo stats.
         select_sql=(
-            "SELECT r.zenodo_id, r.doi, r.title, r.description, "
-            "r.publication_date, r.resource_type, r.access_right, "
-            "r.license_id, r.keywords_json, r.raw, r.ingested_at, "
-            "r.concept_recid, "
+            "SELECT r.zenodo_id, r.doi, r.concept_doi, r.title, "
+            "r.description, r.publication_date, r.resource_type, "
+            "r.access_right, r.license_id, r.version, r.revision, "
+            "r.created_at, r.updated_at, "
+            "r.views, r.unique_views, r.downloads, r.unique_downloads, "
+            "r.version_views, r.version_unique_views, "
+            "r.version_downloads, r.version_unique_downloads, "
+            "r.keywords_json, r.raw, r.ingested_at, r.concept_recid, "
             "LIST(DISTINCT rc.community_id) FILTER "
             "(WHERE rc.community_id IS NOT NULL) AS community "
             "FROM records r "
             "LEFT JOIN record_communities rc ON r.zenodo_id = rc.record_id "
-            "GROUP BY r.zenodo_id, r.doi, r.title, r.description, "
-            "r.publication_date, r.resource_type, r.access_right, "
-            "r.license_id, r.keywords_json, r.raw, r.ingested_at, "
-            "r.concept_recid"
+            "GROUP BY r.zenodo_id, r.doi, r.concept_doi, r.title, "
+            "r.description, r.publication_date, r.resource_type, "
+            "r.access_right, r.license_id, r.version, r.revision, "
+            "r.created_at, r.updated_at, "
+            "r.views, r.unique_views, r.downloads, r.unique_downloads, "
+            "r.version_views, r.version_unique_views, "
+            "r.version_downloads, r.version_unique_downloads, "
+            "r.keywords_json, r.raw, r.ingested_at, r.concept_recid"
         ),
         stats=(
             Stat("Total records", "SELECT COUNT(*) FROM records"),
             Stat(
-                "Distinct DOIs",
-                "SELECT COUNT(DISTINCT doi) FROM records WHERE doi IS NOT NULL",
+                "Distinct concept DOIs",
+                "SELECT COUNT(DISTINCT concept_doi) FROM records "
+                "WHERE concept_doi IS NOT NULL",
             ),
             Stat(
-                "Distinct communities",
-                "SELECT COUNT(DISTINCT community_id) FROM record_communities",
+                "Total downloads",
+                "SELECT COALESCE(SUM(downloads), 0) FROM records",
             ),
             Stat(
-                "With community",
-                "SELECT COUNT(DISTINCT record_id) FROM record_communities",
+                "Median views",
+                "SELECT CAST(median(views) AS BIGINT) FROM records "
+                "WHERE views IS NOT NULL",
             ),
         ),
         # Include ``community`` in search_cols so typing ``epfl`` filters
         # to records affiliated with that community. ILIKE on a list
         # column casts to text and matches the stringified array, which
         # is exactly the substring the user expects.
-        search_cols=("zenodo_id", "doi", "title", "description", "community"),
+        search_cols=("zenodo_id", "doi", "concept_doi", "title",
+                     "description", "version", "community"),
         search_examples=("dataset", "epfl", "10.5281", "machine learning"),
+    ),
+    # New in GME 2.1.0rc1 — the cross-platform communities registry.
+    # Today every row is ``source=zenodo``; the schema is designed for
+    # future GitHub orgs / OpenAlex institutions / ROR-anchored groups,
+    # so the table view exposes ``source`` + ``source_slug`` up front so
+    # operators can see the cardinality split as new sources come in.
+    "communities": Backing(
+        db_path=_DATA_ROOT / "index/communities/duckdb/communities.duckdb",
+        table="communities",
+        hidden_cols=("raw", "curator_names", "keywords"),
+        stats=(
+            Stat("Total communities", "SELECT COUNT(*) FROM communities"),
+            Stat(
+                "Distinct sources",
+                "SELECT COUNT(DISTINCT source) FROM communities",
+            ),
+            Stat(
+                "Distinct parent orgs",
+                "SELECT COUNT(DISTINCT parent_org) FROM communities "
+                "WHERE parent_org IS NOT NULL",
+            ),
+            Stat(
+                "Public",
+                "SELECT COUNT(*) FROM communities WHERE visibility = 'public'",
+            ),
+        ),
+        search_cols=(
+            "community_id", "source_slug", "parent_org", "title", "description",
+        ),
+        search_examples=("epfl", "cern", "ethz", "openlab"),
     ),
     "oamonitor_publishers": Backing(
         db_path=_DATA_ROOT / "index/oamonitor/duckdb/oamonitor.duckdb",
@@ -251,140 +298,140 @@ _BACKING: dict[str, Backing] = {
 _AUTO_TABLES: dict[str, tuple[Path, str]] = {
     # OpenAlex — shared by the generic "authors" / "concepts" / ...
     "authors": (
-        _DATA_ROOT / "extractor/index/openalex/duckdb/openalex.duckdb",
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
         "authors",
     ),
     "concepts": (
-        _DATA_ROOT / "extractor/index/openalex/duckdb/openalex.duckdb",
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
         "concepts",
     ),
     "institutions": (
-        _DATA_ROOT / "extractor/index/openalex/duckdb/openalex.duckdb",
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
         "institutions",
     ),
     "sources": (
-        _DATA_ROOT / "extractor/index/openalex/duckdb/openalex.duckdb",
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
         "sources",
     ),
     "topics": (
-        _DATA_ROOT / "extractor/index/openalex/duckdb/openalex.duckdb",
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
         "topics",
     ),
     "works": (
-        _DATA_ROOT / "extractor/index/openalex/duckdb/openalex.duckdb",
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
         "works",
     ),
     # EPFL Graph
     "epfl_graph_disciplines": (
-        _DATA_ROOT / "extractor/index/epfl_graph/duckdb/epfl_graph.duckdb",
+        _DATA_ROOT / "index/epfl_graph/duckdb/epfl_graph.duckdb",
         "categories",
     ),
     # ETH-Z Research Collection
     "ethz_research_collection_articles": (
         _DATA_ROOT
-        / "extractor/index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
+        / "index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
         "articles",
     ),
     "ethz_research_collection_organizations": (
         _DATA_ROOT
-        / "extractor/index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
+        / "index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
         "organizations",
     ),
     "ethz_research_collection_persons": (
         _DATA_ROOT
-        / "extractor/index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
+        / "index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
         "persons",
     ),
     # Hugging Face
     "hf_datasets": (
-        _DATA_ROOT / "extractor/index/huggingface/duckdb/huggingface.duckdb",
+        _DATA_ROOT / "index/huggingface/duckdb/huggingface.duckdb",
         "datasets",
     ),
     "hf_models": (
-        _DATA_ROOT / "extractor/index/huggingface/duckdb/huggingface.duckdb",
+        _DATA_ROOT / "index/huggingface/duckdb/huggingface.duckdb",
         "models",
     ),
     "hf_orgs": (
-        _DATA_ROOT / "extractor/index/huggingface/duckdb/huggingface.duckdb",
+        _DATA_ROOT / "index/huggingface/duckdb/huggingface.duckdb",
         "orgs",
     ),
     "hf_spaces": (
-        _DATA_ROOT / "extractor/index/huggingface/duckdb/huggingface.duckdb",
+        _DATA_ROOT / "index/huggingface/duckdb/huggingface.duckdb",
         "spaces",
     ),
     # Infoscience
     "infoscience_articles": (
-        _DATA_ROOT / "extractor/index/infoscience/duckdb/infoscience.duckdb",
+        _DATA_ROOT / "index/infoscience/duckdb/infoscience.duckdb",
         "articles",
     ),
     "infoscience_organizations": (
-        _DATA_ROOT / "extractor/index/infoscience/duckdb/infoscience.duckdb",
+        _DATA_ROOT / "index/infoscience/duckdb/infoscience.duckdb",
         "organizations",
     ),
     "infoscience_persons": (
-        _DATA_ROOT / "extractor/index/infoscience/duckdb/infoscience.duckdb",
+        _DATA_ROOT / "index/infoscience/duckdb/infoscience.duckdb",
         "persons",
     ),
     # ORCID
     "orcid_epfl_educations": (
-        _DATA_ROOT / "extractor/index/orcid-epfl/duckdb/orcid.duckdb",
+        _DATA_ROOT / "index/orcid-epfl/duckdb/orcid.duckdb",
         "educations",
     ),
     "orcid_epfl_employments": (
-        _DATA_ROOT / "extractor/index/orcid-epfl/duckdb/orcid.duckdb",
+        _DATA_ROOT / "index/orcid-epfl/duckdb/orcid.duckdb",
         "employments",
     ),
     "orcid_epfl_persons": (
-        _DATA_ROOT / "extractor/index/orcid-epfl/duckdb/orcid.duckdb",
+        _DATA_ROOT / "index/orcid-epfl/duckdb/orcid.duckdb",
         "persons",
     ),
     "orcid_switzerland_employments": (
-        _DATA_ROOT / "extractor/index/orcid-switzerland/duckdb/orcid.duckdb",
+        _DATA_ROOT / "index/orcid-switzerland/duckdb/orcid.duckdb",
         "employments",
     ),
     "orcid_switzerland_persons": (
-        _DATA_ROOT / "extractor/index/orcid-switzerland/duckdb/orcid.duckdb",
+        _DATA_ROOT / "index/orcid-switzerland/duckdb/orcid.duckdb",
         "persons",
     ),
     # RenkuLab
     "renkulab_data_connectors": (
-        _DATA_ROOT / "extractor/index/renkulab/duckdb/renkulab.duckdb",
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
         "data_connectors",
     ),
     "renkulab_groups": (
-        _DATA_ROOT / "extractor/index/renkulab/duckdb/renkulab.duckdb",
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
         "groups",
     ),
     "renkulab_projects": (
-        _DATA_ROOT / "extractor/index/renkulab/duckdb/renkulab.duckdb",
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
         "projects",
     ),
     "renkulab_users": (
-        _DATA_ROOT / "extractor/index/renkulab/duckdb/renkulab.duckdb",
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
         "users",
     ),
     # ROR — same ``records`` table for every regional flavour; the
     # per-tile WHERE clause that turns ``ror_switzerland`` into the
     # 1.8k-row Swiss subset lives in ``_AUTO_FILTERS`` below.
-    "ror_epfl_ethz": (_DATA_ROOT / "extractor/index/ror/duckdb/ror.duckdb", "records"),
-    "ror_europe": (_DATA_ROOT / "extractor/index/ror/duckdb/ror.duckdb", "records"),
+    "ror_epfl_ethz": (_DATA_ROOT / "index/ror/duckdb/ror.duckdb", "records"),
+    "ror_europe": (_DATA_ROOT / "index/ror/duckdb/ror.duckdb", "records"),
     "ror_switzerland": (
-        _DATA_ROOT / "extractor/index/ror/duckdb/ror.duckdb",
+        _DATA_ROOT / "index/ror/duckdb/ror.duckdb",
         "records",
     ),
-    "ror_worldwide": (_DATA_ROOT / "extractor/index/ror/duckdb/ror.duckdb", "records"),
+    "ror_worldwide": (_DATA_ROOT / "index/ror/duckdb/ror.duckdb", "records"),
     # SNSF — same here. ``grants`` is the headline table; the EPFL and
     # ETHZ flavours are filtered via ``_AUTO_FILTERS`` so the home tile
     # counts and the row browser show the right per-institution subset.
-    "snsf_epfl": (_DATA_ROOT / "extractor/index/snsf/duckdb/snsf.duckdb", "grants"),
-    "snsf_ethz": (_DATA_ROOT / "extractor/index/snsf/duckdb/snsf.duckdb", "grants"),
+    "snsf_epfl": (_DATA_ROOT / "index/snsf/duckdb/snsf.duckdb", "grants"),
+    "snsf_ethz": (_DATA_ROOT / "index/snsf/duckdb/snsf.duckdb", "grants"),
     "snsf_switzerland": (
-        _DATA_ROOT / "extractor/index/snsf/duckdb/snsf.duckdb",
+        _DATA_ROOT / "index/snsf/duckdb/snsf.duckdb",
         "grants",
     ),
     # SwissUBase — studies is the largest non-empty table.
     "swissubase_entities": (
-        _DATA_ROOT / "extractor/index/swissubase/duckdb/swissubase.duckdb",
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
         "studies",
     ),
     # Zenodo — ``zenodo_records`` is hand-tuned in ``_BACKING`` above
@@ -394,11 +441,11 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
     # though they don't have their own Qdrant collection (yet — they
     # live only in the DuckDB source-of-truth).
     "zenodo_communities": (
-        _DATA_ROOT / "extractor/index/zenodo/duckdb/zenodo.duckdb",
+        _DATA_ROOT / "index/zenodo/duckdb/zenodo.duckdb",
         "communities",
     ),
     "zenodo_creators": (
-        _DATA_ROOT / "extractor/index/zenodo/duckdb/zenodo.duckdb",
+        _DATA_ROOT / "index/zenodo/duckdb/zenodo.duckdb",
         "creators",
     ),
 }
