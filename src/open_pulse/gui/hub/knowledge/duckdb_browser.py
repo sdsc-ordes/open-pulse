@@ -321,10 +321,38 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
         "works",
     ),
+    # OpenAlex relational + GitHub-extracted tables. ``work_github_urls``
+    # is the highest-signal addition for cross-corpus joins — every row
+    # is a (research paper, GitHub repo) edge our pipeline can use to
+    # anchor a Person's contributions to their published work.
+    "openalex_work_authors": (
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
+        "work_authors",
+    ),
+    "openalex_work_institutions": (
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
+        "work_institutions",
+    ),
+    "openalex_work_references": (
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
+        "work_references",
+    ),
+    "openalex_work_github_urls": (
+        _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
+        "work_github_urls",
+    ),
     # EPFL Graph
     "epfl_graph_disciplines": (
         _DATA_ROOT / "index/epfl_graph/duckdb/epfl_graph.duckdb",
         "categories",
+    ),
+    # 39k discipline → concept edges. Browses the same EPFL discipline
+    # taxonomy as ``epfl_graph_disciplines`` but at the concept level
+    # (Wikipedia-grounded sub-topics), so the row count matches the
+    # number of (category, concept) pairs.
+    "epfl_graph_concepts": (
+        _DATA_ROOT / "index/epfl_graph/duckdb/epfl_graph.duckdb",
+        "category_concepts",
     ),
     # ETH-Z Research Collection
     "ethz_research_collection_articles": (
@@ -429,10 +457,56 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "index/snsf/duckdb/snsf.duckdb",
         "grants",
     ),
+    # SNSF — research outputs broken out per type. Every row is keyed
+    # by ``grant_number`` so the row browser can pivot from any output
+    # back to the funding grant that produced it. ``persons`` is the
+    # 146k researcher registry every grant + output references.
+    "snsf_persons": (_DATA_ROOT / "index/snsf/duckdb/snsf.duckdb", "persons"),
+    "snsf_output_publications": (
+        _DATA_ROOT / "index/snsf/duckdb/snsf.duckdb",
+        "output_publications",
+    ),
+    "snsf_output_datasets": (
+        _DATA_ROOT / "index/snsf/duckdb/snsf.duckdb",
+        "output_datasets",
+    ),
+    "snsf_output_academic_events": (
+        _DATA_ROOT / "index/snsf/duckdb/snsf.duckdb",
+        "output_academic_events",
+    ),
+    "snsf_output_knowledge_transfers": (
+        _DATA_ROOT / "index/snsf/duckdb/snsf.duckdb",
+        "output_knowledge_transfers",
+    ),
+    "snsf_output_public_communications": (
+        _DATA_ROOT / "index/snsf/duckdb/snsf.duckdb",
+        "output_public_communications",
+    ),
+    "snsf_output_collaborations": (
+        _DATA_ROOT / "index/snsf/duckdb/snsf.duckdb",
+        "output_collaborations",
+    ),
+    "snsf_output_use_inspired": (
+        _DATA_ROOT / "index/snsf/duckdb/snsf.duckdb",
+        "output_use_inspired",
+    ),
     # SwissUBase — studies is the largest non-empty table.
     "swissubase_entities": (
         _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
         "studies",
+    ),
+    # SwissUBase author + institution registries. Cross-walked into the
+    # studies via ``study_persons`` / ``study_institutions`` join
+    # tables — kept here for direct lookup ("which Swiss social-sciences
+    # ORCIDs appear in our corpus?", "which institutions submit studies
+    # via SwissUBase?").
+    "swissubase_persons": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "persons",
+    ),
+    "swissubase_institutions": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "institutions",
     ),
     # Zenodo — ``zenodo_records`` is hand-tuned in ``_BACKING`` above
     # (it joins ``record_communities`` to expose a per-record community
@@ -461,8 +535,13 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "institutions": ("EPFL", "ETH", "MIT", "Switzerland"),
     "sources": ("Nature", "Science", "IEEE", "ACM"),
     "topics": ("artificial intelligence", "genetics", "climate", "robotics"),
+    "openalex_work_authors": ("W2", "A5", "first", "corresponding"),
+    "openalex_work_institutions": ("EPFL", "ETH", "MIT", "I"),
+    "openalex_work_references": ("W2", "W3", "W4", "W5"),
+    "openalex_work_github_urls": ("torvalds", "tensorflow", "pytorch", "epfl"),
     # EPFL Graph
     "epfl_graph_disciplines": ("physics", "computer", "biology", "mathematics"),
+    "epfl_graph_concepts": ("machine", "neural", "protein", "quantum"),
     # ETH-Z Research Collection
     "ethz_research_collection_articles": (
         "deep learning",
@@ -501,8 +580,28 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "snsf_epfl": ("EPFL", "machine learning", "physics", "Lausanne"),
     "snsf_ethz": ("ETH", "Zurich", "robotics", "quantum"),
     "snsf_switzerland": ("Swiss", "professor", "biology", "chemistry"),
+    "snsf_persons": ("Patrick", "Müller", "EPFL", "ETH"),
+    "snsf_output_publications": (
+        "machine learning", "quantum", "nature", "epfl",
+    ),
+    "snsf_output_datasets": ("dataset", "zenodo", "10.5281", "swiss"),
+    "snsf_output_academic_events": ("conference", "workshop", "ICML", "NeurIPS"),
+    "snsf_output_knowledge_transfers": (
+        "patent", "spin-off", "industry", "transfer",
+    ),
+    "snsf_output_public_communications": (
+        "media", "talk", "press", "interview",
+    ),
+    "snsf_output_collaborations": (
+        "Switzerland", "Germany", "United States", "industry",
+    ),
+    "snsf_output_use_inspired": ("application", "industry", "use", "EPFL"),
     # SwissUBase
     "swissubase_entities": ("survey", "FORS", "Switzerland", "households"),
+    "swissubase_persons": ("Müller", "Schmidt", "Patrick", "Anna"),
+    "swissubase_institutions": (
+        "FORS", "Lausanne", "Bern", "Switzerland",
+    ),
     # Zenodo
     "zenodo_records": ("dataset", "epfl", "10.5281", "machine learning"),
     "zenodo_communities": ("epfl", "swiss", "open", "research"),
