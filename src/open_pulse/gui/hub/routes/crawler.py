@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse
 
-from ..auth import require_auth
+from ..auth import require_auth, require_writable
 
 router = APIRouter(prefix="/api/crawler", tags=["crawler"])
 
@@ -220,21 +220,21 @@ def get_job(job_id: str) -> dict[str, Any]:
     return _passthrough("GET", f"/api/v1/crawl/{job_id}")
 
 
-@router.post("/jobs/{job_id}/pause", dependencies=[Depends(require_auth)])
+@router.post("/jobs/{job_id}/pause", dependencies=[Depends(require_auth), Depends(require_writable)])
 def pause_job(job_id: str) -> dict[str, Any]:
     return _passthrough("POST", f"/api/v1/crawl/{job_id}/pause")
 
 
-@router.post("/jobs/{job_id}/resume", dependencies=[Depends(require_auth)])
+@router.post("/jobs/{job_id}/resume", dependencies=[Depends(require_auth), Depends(require_writable)])
 def resume_job(job_id: str) -> dict[str, Any]:
     return _passthrough("POST", f"/api/v1/crawl/{job_id}/resume")
 
 
-@router.post("/jobs/{job_id}/cancel", dependencies=[Depends(require_auth)])
+@router.post("/jobs/{job_id}/cancel", dependencies=[Depends(require_auth), Depends(require_writable)])
 def cancel_job(job_id: str) -> dict[str, Any]:
     return _passthrough("POST", f"/api/v1/crawl/{job_id}/cancel")
 
 
-@router.delete("/jobs/{job_id}", dependencies=[Depends(require_auth)])
+@router.delete("/jobs/{job_id}", dependencies=[Depends(require_auth), Depends(require_writable)])
 def delete_job(job_id: str) -> dict[str, Any]:
     return _passthrough("DELETE", f"/api/v1/crawl/{job_id}")

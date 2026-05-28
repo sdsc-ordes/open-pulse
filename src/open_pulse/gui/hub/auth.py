@@ -93,3 +93,26 @@ def maybe_require_auth(
     if _SETTINGS.public_knowledge:
         return
     require_auth(request, response, creds, op_hub_session)
+
+
+def require_writable() -> None:
+    """Block every mutating endpoint when HUB_READONLY=true.
+
+    The dependency goes alongside ``require_auth`` on routes that change
+    server-side state — stack up/down, container start/stop/restart,
+    projects apply, pipeline run/stop, crawler job control. Read-only
+    queries (databases/duckdb/query, ai/chat, dashboards) skip this
+    dependency so the hub stays usable in observer mode.
+
+    Raises HTTP 403 with a stable JSON shape so a UI button click and a
+    direct curl both get the same readable error.
+    """
+    if _SETTINGS.read_only:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Hub is running in read-only mode (HUB_READONLY=true). "
+                "Mutating endpoints are disabled — run the change from "
+                "the operator CLI instead."
+            ),
+        )

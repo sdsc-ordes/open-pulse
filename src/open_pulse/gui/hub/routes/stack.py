@@ -8,7 +8,7 @@ import docker
 from docker.errors import NotFound
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from ..auth import require_auth
+from ..auth import require_auth, require_writable
 
 router = APIRouter(prefix="/api/stack", tags=["stack"])
 
@@ -51,7 +51,8 @@ def list_profiles() -> dict[str, Any]:
     return {"profiles": PROFILES}
 
 
-@router.post("/up", dependencies=[Depends(require_auth)])
+@router.post("/up",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 def stack_up(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     profiles = list(payload.get("profiles") or [])
     with_grimoire = bool(payload.get("with_grimoire", False))
@@ -76,7 +77,8 @@ def stack_up(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, 
     }
 
 
-@router.post("/down", dependencies=[Depends(require_auth)])
+@router.post("/down",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 def stack_down(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     with_grimoire = bool(payload.get("with_grimoire", False))
     remove_volumes = bool(payload.get("remove_volumes", False))
