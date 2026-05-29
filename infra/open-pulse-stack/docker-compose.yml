@@ -1,6 +1,6 @@
 services:
   neo4j:
-    image: neo4j:2025.05.1
+    image: neo4j:2026.04.0
     container_name: neo4j-open-pulse
     restart: unless-stopped
     ports:
