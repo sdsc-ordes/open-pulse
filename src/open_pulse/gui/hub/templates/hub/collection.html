@@ -74,21 +74,24 @@
     background: #e5e7eb;
   }
 
-  /* Horizontal-scroll affordances above the table. Two layers:
-     - the twin scrollbar (``.duckdb-htop``) spans the full table width
-       so it lines up exactly with the bottom scrollbar of the table-
-       wrap below — the same way the page's vertical scrollbar lines
-       up with the page edge.
-     - the ‹ and › buttons float as small chips OVER the table area
-       (not over the scrollbar), pinned to the table-wrap edges, so
-       the scrollbar above and below stay full-width and the buttons
-       feel anchored to the table they control. */
+  /* Horizontal-scroll affordances ABOVE the table. The row is a
+     flex strip — ‹ button, twin scrollbar (flexes to fill), ›
+     button — sitting fully outside the table-wrap. Earlier we
+     tried absolute-positioning the buttons over the table to keep
+     the top scrollbar pixel-aligned with the bottom one, but in
+     practice the buttons landed on top of the first data row,
+     which clobbered click targets and looked like a render bug.
+     The flex layout costs ~64 px from the top scrollbar's
+     width — small enough that the top + bottom bars still read
+     as "the same control" without overlapping the table. */
   .duckdb-hscroll-row {
-    position: relative;        /* anchor for the absolute-positioned buttons */
-    margin: 6px 0 -2px;        /* tuck the bar right against the table */
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 0;
   }
   .duckdb-htop {
-    width: 100%;
+    flex: 1 1 auto;
     overflow-x: scroll;
     overflow-y: hidden;
     height: 10px;              /* matches the native bottom scrollbar height */
@@ -136,34 +139,29 @@
     height: 1px;   /* invisible content; only the width matters */
   }
 
-  /* ‹/› chip buttons. Absolute-positioned over the table so they
-     don't steal width from the scrollbar above. Small circular
-     glyphs that fade in on hover; disabled state goes nearly
-     invisible so the active edge of the scrollable region is
-     obvious. The button anchors to the .duckdb-hscroll-row's
-     bottom so it sits on the top edge of the table itself. */
+  /* ‹/› chip buttons that flank the twin scrollbar in the row
+     above the table. Compact rectangular chips with the same
+     thin border treatment as the rest of the hub's secondary
+     controls (search input, pagination buttons). Hover fills
+     with --accent so the active affordance is obvious;
+     :disabled goes near-invisible to signal the scroll
+     extreme has been reached. */
   .duckdb-hscroll-btn {
-    position: absolute;
-    top: 100%;                  /* sits flush against the table top */
-    transform: translateY(8px); /* drop just below the scrollbar */
-    width: 26px;
-    height: 26px;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 22px;
     padding: 0;
     border: 1px solid var(--border-strong);
-    border-radius: 50%;
+    border-radius: 4px;
     background: var(--surface-opaque, var(--surface));
     color: var(--fg);
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1;
     cursor: pointer;
-    z-index: 3;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
     opacity: 0.85;
     transition: opacity 0.15s ease, background-color 0.15s ease,
                 color 0.15s ease, border-color 0.15s ease;
   }
-  .duckdb-hscroll-btn.left  { left: -6px; }
-  .duckdb-hscroll-btn.right { right: -6px; }
   .duckdb-hscroll-btn:hover:not(:disabled) {
     opacity: 1;
     background: var(--accent);
@@ -385,7 +383,7 @@
          a Windows user with a no-shift-wheel mouse can navigate
          wide tables ergonomically. #}
       <div class="duckdb-hscroll-row" x-show="meta.columns && meta.columns.length" x-cloak>
-        <button type="button" class="btn btn-ghost btn-tiny duckdb-hscroll-btn"
+        <button type="button" class="duckdb-hscroll-btn"
                 @click="scrollByColumn(-1)"
                 :disabled="!canScrollLeft"
                 aria-label="Scroll one column left"
@@ -393,7 +391,7 @@
         <div class="duckdb-htop" @scroll="onHScrollTop()">
           <div class="duckdb-htop-inner" :style="'width: ' + (hScrollWidth || 0) + 'px'"></div>
         </div>
-        <button type="button" class="btn btn-ghost btn-tiny duckdb-hscroll-btn"
+        <button type="button" class="duckdb-hscroll-btn"
                 @click="scrollByColumn(+1)"
                 :disabled="!canScrollRight"
                 aria-label="Scroll one column right"
