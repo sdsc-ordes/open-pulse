@@ -1,16 +1,28 @@
-"""Single-password gate for the hub.
+"""Role-aware password gate for the hub.
 
-The hub is single-tenant — anyone who knows the shared HUB_AUTH password
-can read / control / launch / stop services. We use HTTP Basic with a fixed
-username (``admin``) so any browser can prompt natively, plus a tiny cookie
-session so the password isn't in every request after first login.
+Two passwords, two roles:
+
+  * ``HUB_AUTH``         — admin. Full UI, every mutating endpoint
+                           allowed (subject to HUB_READONLY).
+  * ``HUB_AUTH_READER``  — reader. Same read endpoints as admin, but
+                           ``require_writable`` rejects with 403 and
+                           the sidebar drops the operator-only tabs
+                           (Stack, Settings, Quests, GrimoireLab
+                           Projects). Optional — leave empty to keep
+                           admin-only behaviour.
+
+A successful login (form or Basic) issues a session cookie whose
+server-side entry stamps the role. ``require_writable`` checks the
+role on every protected route; the template context exposes it as
+``request.state.user_role`` so the sidebar / per-page UI can hide
+controls a reader can't use.
 """
 
 from __future__ import annotations
 
 import hmac
 import secrets
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -20,9 +32,11 @@ from .config import Settings, load_settings
 _SETTINGS = load_settings()
 _basic = HTTPBasic(auto_error=False)
 
-# In-memory session store: cookie value -> any (we only need existence).
+Role = Literal["admin", "reader"]
+
+# In-memory session store: cookie value -> role.
 # The hub is single-process and short-lived; no need for Redis here.
-_SESSIONS: set[str] = set()
+_SESSIONS: dict[str, Role] = {}
 _COOKIE_NAME = "op_hub_session"
 
 
@@ -30,13 +44,38 @@ def _const_eq(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
+def _match_role(password: str) -> Role | None:
+    """Return the role the password authenticates as, or None on mismatch.
+
+    Admin wins ties — if somebody set HUB_AUTH and HUB_AUTH_READER to the
+    same value (don't), we honour the higher-privilege match. The reader
+    arm is skipped when ``auth_token_reader`` is empty so the legacy
+    single-password deploy stays untouched.
+    """
+    if _const_eq(password, _SETTINGS.auth_token):
+        return "admin"
+    if _SETTINGS.auth_token_reader and _const_eq(
+        password, _SETTINGS.auth_token_reader
+    ):
+        return "reader"
+    return None
+
+
 def get_settings() -> Settings:
     return _SETTINGS
 
 
-def issue_session(response: Response) -> str:
+def session_role(token: str | None) -> Role | None:
+    """Look up the role attached to a session cookie value, or None if
+    the cookie is missing / expired / forged."""
+    if not token:
+        return None
+    return _SESSIONS.get(token)
+
+
+def issue_session(response: Response, role: Role = "admin") -> str:
     token = secrets.token_urlsafe(32)
-    _SESSIONS.add(token)
+    _SESSIONS[token] = role
     response.set_cookie(
         _COOKIE_NAME,
         token,
@@ -49,7 +88,7 @@ def issue_session(response: Response) -> str:
 
 def clear_session(response: Response, token: str | None) -> None:
     if token:
-        _SESSIONS.discard(token)
+        _SESSIONS.pop(token, None)
     response.delete_cookie(_COOKIE_NAME)
 
 
@@ -61,15 +100,22 @@ def require_auth(
 ) -> None:
     """Accept either a valid session cookie or correct Basic credentials.
 
-    On a successful Basic auth, we also issue a session cookie so subsequent
-    requests skip the credential check.
+    Sets ``request.state.user_role`` (``"admin"`` or ``"reader"``) so
+    downstream routes + templates can branch on it. On a successful
+    Basic auth, we also issue a session cookie so subsequent requests
+    skip the credential check.
     """
-    if op_hub_session and op_hub_session in _SESSIONS:
+    role = session_role(op_hub_session)
+    if role is not None:
+        request.state.user_role = role
         return
 
-    if creds is not None and _const_eq(creds.password, _SETTINGS.auth_token):
-        issue_session(response)
-        return
+    if creds is not None:
+        matched = _match_role(creds.password)
+        if matched is not None:
+            issue_session(response, matched)
+            request.state.user_role = matched
+            return
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -93,3 +139,45 @@ def maybe_require_auth(
     if _SETTINGS.public_knowledge:
         return
     require_auth(request, response, creds, op_hub_session)
+
+
+def require_writable(
+    request: Request,
+    op_hub_session: Annotated[str | None, Cookie()] = None,
+) -> None:
+    """Block every mutating endpoint when either:
+
+      - ``HUB_READONLY=true`` is set on the hub (global kill-switch),
+      - the calling session is a reader (logged in with HUB_AUTH_READER).
+
+    Composed with ``require_auth`` on routes that change server-side
+    state — stack up/down, container start/stop/restart, projects
+    apply, pipeline run/stop, crawler job control. Read-only queries
+    (databases/duckdb/query, ai/chat, dashboards) skip this dependency
+    so the hub stays usable in observer mode.
+
+    Returns 403 with a stable JSON shape so a UI button click and a
+    direct curl both get the same readable error.
+    """
+    if _SETTINGS.read_only:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Hub is running in read-only mode (HUB_READONLY=true). "
+                "Mutating endpoints are disabled — run the change from "
+                "the operator CLI instead."
+            ),
+        )
+    # `request.state.user_role` is populated by require_auth running
+    # earlier in the dependency chain on every protected route. Fall
+    # back to a cookie lookup so this dep also works when wired alone.
+    role = getattr(request.state, "user_role", None) or session_role(op_hub_session)
+    if role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Reader sessions can't trigger mutating endpoints. "
+                "Sign out and log in with the admin password to make "
+                "this change."
+            ),
+        )

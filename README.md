@@ -98,6 +98,7 @@ leading-slash arguments).
 | `extractor` | GME metadata extractor + Selenium |
 | `sparql` | Oxigraph + sparql-proxy |
 | `hub` | Open Pulse Hub dashboard (port 9090) |
+| `edge` | Caddy TLS-terminating reverse proxy on `:80` + `:443`. Auto Let's Encrypt cert (`HUB_PUBLIC_HOST` is the ACME identifier). Forwards `/` to the hub and `/sparql/*` to the sparql-proxy, so production deploys can serve everything under one HTTPS URL. |
 | `grimoirelab` | GrimoireLab DB & worker (within main compose) |
 | `orchestration` | Portainer |
 
@@ -164,7 +165,8 @@ quest:
 ## Open Pulse Hub
 
 Single-page control plane at <http://localhost:9090> when `--profile hub` is
-up. Pages:
+up, or at `https://<HUB_PUBLIC_HOST>/` once the `edge` profile is up too
+(see the profile table above). Pages:
 
 - **Overview** — live stat cards, service tiles, quick links
 - **Stack** — bring profiles up / down via the deploy CLI over the socket
@@ -172,13 +174,47 @@ up. Pages:
 - **Pipeline** — discover quest YAMLs and run them
 - **Projects** — query SPARQL → preview → POST to the projects.json applier
 - **Databases** — DuckDB · SPARQL · Cypher consoles, saved queries in SQLite
+- **Knowledge** — paginated browser over every DuckDB store the GME builds
+  (github · openalex · snsf · zenodo · communities · oamonitor · …)
 - **Logs** — per-container tail with auto-refresh
+
+The hub also proxies the upstream API surfaces so external users only need
+the hub URL — no direct port exposure for the GME or crawler:
+
+- `/api/crawler/docs`         — Swagger UI for the Open Pulse Crawler
+- `/api/crawler/api/v1/*`     — every crawler endpoint, bearer auto-injected
+- `/api/extractor/docs`       — Swagger UI for the GME
+- `/api/extractor/v2/*`       — every GME endpoint, bearer auto-injected
+- `/sparql/`                  — YASGUI + Oxigraph (via the `edge` proxy)
 
 Top marquee polls aggregated stats every 10s. Light + dark theme toggle in
 the sidebar (light mirrors the existing projects-ui's design tokens). State
 persists in `data/hub/app.db` (SQLite) and `data/hub/scratch.duckdb`.
 
-Set `HUB_AUTH` (any string) in `.env` to gate the dashboard.
+### Auth
+
+The hub is a single-tenant app gated by password(s) in `infra/.env`. Two
+roles, two env vars:
+
+| Env var | Role | Sidebar / UI |
+| --- | --- | --- |
+| `HUB_AUTH` | **admin** — required | Full UI; every mutating endpoint allowed |
+| `HUB_AUTH_READER` | **reader** — optional | Basic sidebar only (Status · Services · Logs · Resources · Knowledge); mutating endpoints return 403 |
+
+`https://<HUB_PUBLIC_HOST>/` serves a custom HTML login form that accepts
+either password; the server stamps the role on the session cookie. Direct
+API clients (curl, the v2 SDK, anything sending `Accept: application/json`)
+keep getting the bare `401 + WWW-Authenticate: Basic` so existing
+automation isn't affected.
+
+Two extra knobs for production deploys:
+
+- `HUB_READONLY=true` — global kill-switch. Mutating endpoints return 403
+  even for admin sessions; the sidebar drops Stack + Settings tabs. Use
+  during change-freezes or for a public read-only deploy.
+- `HUB_MEM_LIMIT=2g` — bump from the 512m default when many DuckDB
+  stores (snsf, openalex, swissubase, …) are loaded. The cumulative
+  connection pool blows past 512m with the GME 2.1.0 inventory.
 
 ## Health Command Defaults
 

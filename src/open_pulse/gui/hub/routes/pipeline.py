@@ -24,7 +24,7 @@ import zipfile
 
 from fastapi.responses import FileResponse
 
-from ..auth import get_settings, require_auth
+from ..auth import get_settings, require_auth, require_writable
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
@@ -497,7 +497,7 @@ def read_quest(
     }
 
 
-@router.post("/run", dependencies=[Depends(require_auth)])
+@router.post("/run", dependencies=[Depends(require_auth), Depends(require_writable)])
 def run_quest(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     """Run a quest YAML inside the cli container and return its output."""
     path = (payload.get("path") or "").strip()
@@ -893,7 +893,7 @@ def _build_quest_yaml(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return yaml.safe_dump(doc, sort_keys=False, default_flow_style=False), doc
 
 
-@router.post("/create", dependencies=[Depends(require_auth)])
+@router.post("/create", dependencies=[Depends(require_auth), Depends(require_writable)])
 def create_quest(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
@@ -957,7 +957,7 @@ def create_quest(
     }
 
 
-@router.delete("/quest", dependencies=[Depends(require_auth)])
+@router.delete("/quest", dependencies=[Depends(require_auth), Depends(require_writable)])
 def delete_quest(
     path: str = Query(..., description="Absolute path of the quest YAML to delete."),
 ) -> dict[str, Any]:
@@ -983,7 +983,7 @@ def delete_quest(
     return {"path": path, "deleted": True}
 
 
-@router.post("/run-stop", dependencies=[Depends(require_auth)])
+@router.post("/run-stop", dependencies=[Depends(require_auth), Depends(require_writable)])
 def run_stop(
     run_id: str = Query(
         ..., description="Run ID returned by POST /run with detach=true."
@@ -1119,7 +1119,7 @@ def download_archive(name: str) -> FileResponse:
     )
 
 
-@router.delete("/archives/{name}", dependencies=[Depends(require_auth)])
+@router.delete("/archives/{name}", dependencies=[Depends(require_auth), Depends(require_writable)])
 def delete_archive(name: str) -> dict[str, Any]:
     """Remove an archive from the archives directory.
 

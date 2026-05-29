@@ -27,7 +27,17 @@ def _env_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     auth_token: str
-    """Single shared password. Set via HUB_AUTH; required."""
+    """Admin password — full UI + every mutating endpoint. Set via
+    HUB_AUTH; required."""
+
+    auth_token_reader: str
+    """Reader password — login succeeds with this string but the
+    session is stamped as ``reader``, which means: (a) every mutating
+    endpoint returns 403 (same gate as HUB_READONLY), and (b) the
+    sidebar hides operator-only tabs (Stack, Settings, Quests,
+    GrimoireLab Projects). Set via HUB_AUTH_READER; leave empty
+    (default) to disable the reader role entirely — admin-only
+    deploys keep their current behaviour."""
 
     data_dir: Path
     """Where the hub keeps its SQLite app DB and DuckDB scratch files."""
@@ -102,6 +112,18 @@ class Settings:
     """When true, /hub/** is reachable without auth. Everything else
     (admin, databases, projects, …) keeps the single-password gate."""
 
+    read_only: bool
+    """When true, the hub refuses every mutating endpoint (stack up/down,
+    container start/stop/restart, projects apply, pipeline run/stop,
+    crawler job pause/resume/cancel/delete) with HTTP 403, and the
+    sidebar drops the Stack + Settings tabs. Read-only views — services
+    list, logs, dashboards, knowledge graph queries — keep working.
+
+    Set ``HUB_READONLY=true`` in production deploys (e.g. openpulse.epfl.ch)
+    so a leaked hub password can't be used to wreck the stack or apply
+    a malicious projects.json. Operators still hold the CLI for any
+    legitimate change."""
+
     qdrant_url: str
     """Base URL of the vector store. Defaults to the gme-qdrant sidecar
     so resolvers can read the per-provider collections (github_repos,
@@ -162,6 +184,7 @@ def load_settings() -> Settings:
 
     return Settings(
         auth_token=auth,
+        auth_token_reader=os.environ.get("HUB_AUTH_READER", "").strip(),
         data_dir=Path(os.environ.get("HUB_DATA_DIR", "/data/hub")),
         applier_url=os.environ.get("HUB_APPLIER_URL", "http://projects-applier:8000"),
         sparql_url=os.environ.get("HUB_SPARQL_URL", "http://sparql-proxy:7878"),
@@ -206,6 +229,7 @@ def load_settings() -> Settings:
         neo4j_user=(_parse_user_pass(os.environ.get("NEO4J_AUTH", ""))[0]),
         neo4j_password=(_parse_user_pass(os.environ.get("NEO4J_AUTH", ""))[1]),
         public_knowledge=_env_bool("HUB_PUBLIC_KNOWLEDGE", default=False),
+        read_only=_env_bool("HUB_READONLY", default=False),
         qdrant_url=os.environ.get("HUB_QDRANT_URL", "http://gme-qdrant:6333"),
         qdrant_api_key=os.environ.get("HUB_QDRANT_API_KEY", "").strip(),
         **_llm_settings(),

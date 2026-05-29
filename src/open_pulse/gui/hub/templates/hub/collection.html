@@ -23,6 +23,156 @@
    cells and the per-column type dropdown in the header. Scoped under
    .tree-table so it doesn't bleed elsewhere on the page. #}
 <link rel="stylesheet" href="/static/css/tree-table.css" />
+
+{# Skeleton-loading placeholders for the stats card + first rows
+   fetch. Page-local since these only appear on the collection view;
+   keeps the global stylesheet small. The pulse animation is a
+   2-stop opacity ramp — soft enough not to distract, fast enough
+   to read as "loading" rather than "broken".
+
+   Width classes (.w-30 .. .w-100) drive the per-line randomisation
+   so the skeleton doesn't look like a mechanical block — closer to
+   what a real row of data looks like. #}
+<style>
+  @keyframes op-skel-pulse {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 0.20; }
+  }
+  .duckdb-skel-line {
+    height: 12px;
+    background: var(--surface-2, #1f2937);
+    border-radius: 6px;
+    animation: op-skel-pulse 1.4s ease-in-out infinite;
+  }
+  .duckdb-skel-line.h-lg { height: 22px; }
+  .duckdb-skel-line.w-30  { width: 30%; }
+  .duckdb-skel-line.w-40  { width: 40%; }
+  .duckdb-skel-line.w-50  { width: 50%; }
+  .duckdb-skel-line.w-60  { width: 60%; }
+  .duckdb-skel-line.w-70  { width: 70%; }
+  .duckdb-skel-line.w-80  { width: 80%; }
+  .duckdb-skel-line.w-90  { width: 90%; }
+  .duckdb-skel-line.w-95  { width: 95%; }
+  .duckdb-skel-line.w-100 { width: 100%; }
+  .duckdb-skel-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 0 4px;
+  }
+  /* Stagger pulse phases so the lines don't blink in lock-step;
+     reads as "asynchronous loading" rather than a single spinner. */
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(2) { animation-delay: 0.15s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(3) { animation-delay: 0.30s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(4) { animation-delay: 0.45s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(5) { animation-delay: 0.60s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(6) { animation-delay: 0.75s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(7) { animation-delay: 0.90s; }
+  /* Light-theme override: the dark surface-2 default is invisible on
+     the white background; pick a slightly tinted gray that reads. */
+  html:not([data-theme="dark"]) .duckdb-skel-line {
+    background: #e5e7eb;
+  }
+
+  /* Horizontal-scroll affordances ABOVE the table. The row is a
+     flex strip — ‹ button, twin scrollbar (flexes to fill), ›
+     button — sitting fully outside the table-wrap. Earlier we
+     tried absolute-positioning the buttons over the table to keep
+     the top scrollbar pixel-aligned with the bottom one, but in
+     practice the buttons landed on top of the first data row,
+     which clobbered click targets and looked like a render bug.
+     The flex layout costs ~64 px from the top scrollbar's
+     width — small enough that the top + bottom bars still read
+     as "the same control" without overlapping the table. */
+  .duckdb-hscroll-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 0;
+  }
+  .duckdb-htop {
+    flex: 1 1 auto;
+    overflow-x: scroll;
+    overflow-y: hidden;
+    height: 10px;              /* matches the native bottom scrollbar height */
+    /* Firefox: thin scrollbar; Chromium reads the ::-webkit-scrollbar
+       rules below. Track is transparent so the bar reads as a thin
+       line of accent against the card background, matching the
+       browser's native vertical scrollbar on the right of the page. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .duckdb-htop::-webkit-scrollbar { height: 10px; }
+  .duckdb-htop::-webkit-scrollbar-track { background: transparent; }
+  .duckdb-htop::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .duckdb-htop::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-faint);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  /* Apply the same style to the table's BOTTOM scrollbar so the two
+     horizontal scrollbars (top + bottom) and the vertical one all
+     look like the same family of control. */
+  .duckdb-table-wrap {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .duckdb-table-wrap::-webkit-scrollbar { height: 10px; }
+  .duckdb-table-wrap::-webkit-scrollbar-track { background: transparent; }
+  .duckdb-table-wrap::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .duckdb-table-wrap::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-faint);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  .duckdb-htop-inner {
+    height: 1px;   /* invisible content; only the width matters */
+  }
+
+  /* ‹/› chip buttons that flank the twin scrollbar in the row
+     above the table. Compact rectangular chips with the same
+     thin border treatment as the rest of the hub's secondary
+     controls (search input, pagination buttons). Hover fills
+     with --accent so the active affordance is obvious;
+     :disabled goes near-invisible to signal the scroll
+     extreme has been reached. */
+  .duckdb-hscroll-btn {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--surface-opaque, var(--surface));
+    color: var(--fg);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.85;
+    transition: opacity 0.15s ease, background-color 0.15s ease,
+                color 0.15s ease, border-color 0.15s ease;
+  }
+  .duckdb-hscroll-btn:hover:not(:disabled) {
+    opacity: 1;
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+  }
+  .duckdb-hscroll-btn:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+  }
+</style>
 <div style="display: flex; flex-direction: column; gap: 18px;">
 
   <div class="card">
@@ -119,6 +269,33 @@
       </div>
     </div>
 
+    {# Skeleton placeholder that takes the same visual space as the
+       stats card above. Shows while ``loadStats()`` is in flight so
+       the user sees the page structure immediately instead of a
+       blank gap — important on the heavier DuckDB tables (snsf
+       outputs, openalex work_*) where /stats can take 1–3s cold. #}
+    <div class="card duckdb-skel-card" x-show="!stats.length" x-cloak>
+      <div class="card-title" style="margin-bottom: 10px;">At a glance</div>
+      <div class="duckdb-stats">
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-60" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-40 h-lg"></div>
+        </div>
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-70" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-50 h-lg"></div>
+        </div>
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-50" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-40 h-lg"></div>
+        </div>
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-60" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-30 h-lg"></div>
+        </div>
+      </div>
+    </div>
+
     {# ── Rows table card ─── #}
     <div class="card">
 
@@ -183,7 +360,46 @@
         </div>
       </div>
 
-      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap tree-table" x-cloak>
+      {# Skeleton rows while the first /rows fetch is in flight. Once
+         meta.columns lands the real table replaces this block. #}
+      <div x-show="loading && !meta.columns" x-cloak class="duckdb-skel-rows">
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-90"></div>
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-80"></div>
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-95"></div>
+        <p class="card-meta" style="margin-top: 12px; text-align: center;">
+          loading rows from the DuckDB store…
+        </p>
+      </div>
+
+      {# Horizontal-scroll affordances — see ``_measureHScroll`` /
+         ``scrollByColumn`` in the Alpine component. Twin scrollbar at
+         the TOP mirrors the position of the real bottom one (saves
+         scrolling the whole page down to reach it on long tables);
+         the ‹/› buttons next to it step by one column at a time so
+         a Windows user with a no-shift-wheel mouse can navigate
+         wide tables ergonomically. #}
+      <div class="duckdb-hscroll-row" x-show="meta.columns && meta.columns.length" x-cloak>
+        <button type="button" class="duckdb-hscroll-btn"
+                @click="scrollByColumn(-1)"
+                :disabled="!canScrollLeft"
+                aria-label="Scroll one column left"
+                title="Scroll one column left">‹</button>
+        <div class="duckdb-htop" @scroll="onHScrollTop()">
+          <div class="duckdb-htop-inner" :style="'width: ' + (hScrollWidth || 0) + 'px'"></div>
+        </div>
+        <button type="button" class="duckdb-hscroll-btn"
+                @click="scrollByColumn(+1)"
+                :disabled="!canScrollRight"
+                aria-label="Scroll one column right"
+                title="Scroll one column right">›</button>
+      </div>
+
+      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap tree-table"
+           x-cloak @scroll="onTableScroll()">
         <table class="data duckdb-table">
           <thead>
             <tr>
@@ -461,6 +677,147 @@ function collectionRows(init) {
         });
         offset += th.offsetWidth;
       }
+      // Same nextTick that fires _measurePins is the right moment to
+      // measure the table's full scrollWidth — the cells just got
+      // their final widths from the browser layout. Update the twin
+      // scroll bar's inner width + the ‹›-button visibility.
+      this._measureHScroll();
+    },
+
+    // ── Horizontal scroll helpers ────────────────────────────────
+    // Two ergonomic improvements over the default browser scrollbar:
+    //   1. A twin scrollbar pinned ABOVE the table — mirrors the bottom
+    //      one so users can drag horizontally without scrolling the
+    //      page down first. Critical on Windows + non-trackpad mice
+    //      where shift-scroll-wheel isn't muscle memory.
+    //   2. ‹/› buttons that step exactly one column at a time using
+    //      the live width of the next visible <th>. Snaps cleanly to
+    //      column boundaries instead of the arbitrary 50-px jump the
+    //      browser's keyboard arrows use.
+    hScrollWidth: 0,
+    canScrollLeft: false,
+    canScrollRight: false,
+    _hScrollSyncing: false,
+
+    _hScroll() {
+      // Resolve the table-wrap div from the current Alpine root. We
+      // can't rely on ``this.$refs.tablewrap`` because the wrap is
+      // gated by ``x-show`` and Alpine doesn't update refs through
+      // x-cloak boundaries before nextTick fires.
+      return document.querySelector('.duckdb-table-wrap.tree-table');
+    },
+    _hScrollTop() {
+      return document.querySelector('.duckdb-htop');
+    },
+
+    _measureHScroll() {
+      const tw = this._hScroll();
+      if (!tw) return;
+      this.hScrollWidth = tw.scrollWidth;
+      this._updateHScrollState();
+    },
+
+    _updateHScrollState() {
+      const tw = this._hScroll();
+      if (!tw) return;
+      this.canScrollLeft  = tw.scrollLeft > 1;
+      this.canScrollRight = tw.scrollLeft + tw.clientWidth < tw.scrollWidth - 1;
+    },
+
+    onTableScroll() {
+      // Forward the table's horizontal position into the twin
+      // scrollbar at the top. The ``_hScrollSyncing`` re-entry guard
+      // stops the scroll events from ping-ponging.
+      if (this._hScrollSyncing) return;
+      const tw = this._hScroll();
+      const top = this._hScrollTop();
+      if (!tw || !top) return;
+      this._hScrollSyncing = true;
+      top.scrollLeft = tw.scrollLeft;
+      this._hScrollSyncing = false;
+      this._updateHScrollState();
+    },
+    onHScrollTop() {
+      if (this._hScrollSyncing) return;
+      const tw = this._hScroll();
+      const top = this._hScrollTop();
+      if (!tw || !top) return;
+      this._hScrollSyncing = true;
+      tw.scrollLeft = top.scrollLeft;
+      this._hScrollSyncing = false;
+      this._updateHScrollState();
+    },
+
+    scrollByColumn(direction) {
+      // Each click slides the table by exactly ONE column width
+      // against the pinned strip. The previous version anchored on
+      // "the first column whose right edge crosses the pinned strip"
+      // — which meant when you were mid-scroll, advancing to that
+      // column's right neighbour only nudged the bar by the
+      // remaining-clipped-pixels of the current column (often < 30 px)
+      // and felt like nothing moved.
+      //
+      // Fixed anchor: use the first column that is FULLY past the
+      // pinned strip (offsetLeft >= viewportStart). Mid-scroll skips
+      // the half-clipped column and treats the next aligned column
+      // as the anchor — so click › always reveals one full column of
+      // new content on the right while removing one column on the
+      // left; click ‹ does the reverse.
+      const tw = this._hScroll();
+      if (!tw) return;
+      const thead = tw.querySelector('thead');
+      if (!thead) {
+        tw.scrollBy({ left: direction * 160, behavior: 'smooth' });
+        setTimeout(() => this.onTableScroll(), 250);
+        return;
+      }
+      const pinnedWidth = Array.from(thead.querySelectorAll('th.pinned-col'))
+        .reduce((sum, th) => sum + th.offsetWidth, 0);
+      const ths = Array.from(thead.querySelectorAll('th:not(.pinned-col)'));
+      if (!ths.length) return;
+
+      // X coord in the table's content where the non-pinned viewport
+      // begins (right edge of the sticky pinned strip).
+      const viewportStart = tw.scrollLeft + pinnedWidth;
+      const EPS = 1;
+
+      // The "anchor" — index of the first non-pinned column whose
+      // LEFT edge is at or past the pinned strip. Mid-scroll, this
+      // is the first column that's fully (not partially) past the
+      // overlay; perfectly snapped, it's exactly the column at the
+      // overlay's right edge.
+      let anchorIdx = ths.findIndex(th => th.offsetLeft >= viewportStart - EPS);
+      // Past the right end? Treat the last column as anchor.
+      if (anchorIdx === -1) anchorIdx = ths.length - 1;
+
+      let targetIdx;
+      if (direction > 0) {
+        // Reveal one new column on the right by advancing the anchor.
+        targetIdx = Math.min(anchorIdx + 1, ths.length - 1);
+      } else {
+        // Going back: if the anchor is exactly snapped against the
+        // overlay, retreat by one column; otherwise jump back to the
+        // column immediately BEFORE the anchor (which is currently
+        // clipped behind the overlay) — that snaps it fully into view
+        // and is the natural "undo" for a forward click that happened
+        // from mid-scroll.
+        const exactlySnapped =
+          Math.abs(ths[anchorIdx].offsetLeft - viewportStart) < EPS;
+        targetIdx = exactlySnapped
+          ? Math.max(anchorIdx - 1, 0)
+          : Math.max(anchorIdx - 1, 0);
+      }
+
+      const target = ths[targetIdx];
+      const newScrollLeft = Math.max(0, target.offsetLeft - pinnedWidth);
+
+      tw.scrollTo({ left: newScrollLeft, behavior: 'smooth' });
+      // Sync the twin scrollbar + button-disabled state after the
+      // smooth scroll settles. 250 ms beats the default ~200 ms
+      // smooth-scroll duration in every browser we target.
+      setTimeout(() => {
+        this.onTableScroll();
+      }, 250);
     },
     cycleSort(col) {
       // none → asc → desc → none
