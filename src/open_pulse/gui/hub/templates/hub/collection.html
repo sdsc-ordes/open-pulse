@@ -73,6 +73,56 @@
   html:not([data-theme="dark"]) .duckdb-skel-line {
     background: #e5e7eb;
   }
+
+  /* Horizontal-scroll row that sits between the pagination strip and
+     the actual table. Three children, hugged to the same horizontal
+     bounds as the table-wrap: a ‹ button, the twin scrollbar (which
+     stretches to fill), and a › button. The buttons stay clickable
+     even at the scroll extremes (just visually dimmed via :disabled)
+     because the user might want a "snap to start/end" affordance on
+     either edge. */
+  .duckdb-hscroll-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 0;
+  }
+  .duckdb-hscroll-btn {
+    flex: 0 0 auto;
+    min-width: 28px;
+    padding: 2px 8px;
+    font-size: 16px;
+    line-height: 1;
+    color: var(--fg);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .duckdb-hscroll-btn:hover:not(:disabled) {
+    background: var(--surface-2, rgba(255, 255, 255, 0.05));
+  }
+  .duckdb-hscroll-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  /* The twin scrollbar. ``overflow-x: scroll`` forces the bar to
+     render even when content fits — otherwise it would disappear
+     and the user would lose the affordance after typing a filter
+     that narrows the visible width. The inner div carries an
+     explicit width (set via Alpine from ``hScrollWidth``) that
+     mirrors the table's full scrollWidth. */
+  .duckdb-htop {
+    flex: 1 1 auto;
+    overflow-x: scroll;
+    overflow-y: hidden;
+    height: 14px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .duckdb-htop-inner {
+    height: 1px;   /* invisible content; only the width matters */
+  }
 </style>
 <div style="display: flex; flex-direction: column; gap: 18px;">
 
@@ -276,7 +326,31 @@
         </p>
       </div>
 
-      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap tree-table" x-cloak>
+      {# Horizontal-scroll affordances — see ``_measureHScroll`` /
+         ``scrollByColumn`` in the Alpine component. Twin scrollbar at
+         the TOP mirrors the position of the real bottom one (saves
+         scrolling the whole page down to reach it on long tables);
+         the ‹/› buttons next to it step by one column at a time so
+         a Windows user with a no-shift-wheel mouse can navigate
+         wide tables ergonomically. #}
+      <div class="duckdb-hscroll-row" x-show="meta.columns && meta.columns.length" x-cloak>
+        <button type="button" class="btn btn-ghost btn-tiny duckdb-hscroll-btn"
+                @click="scrollByColumn(-1)"
+                :disabled="!canScrollLeft"
+                aria-label="Scroll one column left"
+                title="Scroll one column left">‹</button>
+        <div class="duckdb-htop" @scroll="onHScrollTop()">
+          <div class="duckdb-htop-inner" :style="'width: ' + (hScrollWidth || 0) + 'px'"></div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-tiny duckdb-hscroll-btn"
+                @click="scrollByColumn(+1)"
+                :disabled="!canScrollRight"
+                aria-label="Scroll one column right"
+                title="Scroll one column right">›</button>
+      </div>
+
+      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap tree-table"
+           x-cloak @scroll="onTableScroll()">
         <table class="data duckdb-table">
           <thead>
             <tr>
@@ -554,6 +628,110 @@ function collectionRows(init) {
         });
         offset += th.offsetWidth;
       }
+      // Same nextTick that fires _measurePins is the right moment to
+      // measure the table's full scrollWidth — the cells just got
+      // their final widths from the browser layout. Update the twin
+      // scroll bar's inner width + the ‹›-button visibility.
+      this._measureHScroll();
+    },
+
+    // ── Horizontal scroll helpers ────────────────────────────────
+    // Two ergonomic improvements over the default browser scrollbar:
+    //   1. A twin scrollbar pinned ABOVE the table — mirrors the bottom
+    //      one so users can drag horizontally without scrolling the
+    //      page down first. Critical on Windows + non-trackpad mice
+    //      where shift-scroll-wheel isn't muscle memory.
+    //   2. ‹/› buttons that step exactly one column at a time using
+    //      the live width of the next visible <th>. Snaps cleanly to
+    //      column boundaries instead of the arbitrary 50-px jump the
+    //      browser's keyboard arrows use.
+    hScrollWidth: 0,
+    canScrollLeft: false,
+    canScrollRight: false,
+    _hScrollSyncing: false,
+
+    _hScroll() {
+      // Resolve the table-wrap div from the current Alpine root. We
+      // can't rely on ``this.$refs.tablewrap`` because the wrap is
+      // gated by ``x-show`` and Alpine doesn't update refs through
+      // x-cloak boundaries before nextTick fires.
+      return document.querySelector('.duckdb-table-wrap.tree-table');
+    },
+    _hScrollTop() {
+      return document.querySelector('.duckdb-htop');
+    },
+
+    _measureHScroll() {
+      const tw = this._hScroll();
+      if (!tw) return;
+      this.hScrollWidth = tw.scrollWidth;
+      this._updateHScrollState();
+    },
+
+    _updateHScrollState() {
+      const tw = this._hScroll();
+      if (!tw) return;
+      this.canScrollLeft  = tw.scrollLeft > 1;
+      this.canScrollRight = tw.scrollLeft + tw.clientWidth < tw.scrollWidth - 1;
+    },
+
+    onTableScroll() {
+      // Forward the table's horizontal position into the twin
+      // scrollbar at the top. The ``_hScrollSyncing`` re-entry guard
+      // stops the scroll events from ping-ponging.
+      if (this._hScrollSyncing) return;
+      const tw = this._hScroll();
+      const top = this._hScrollTop();
+      if (!tw || !top) return;
+      this._hScrollSyncing = true;
+      top.scrollLeft = tw.scrollLeft;
+      this._hScrollSyncing = false;
+      this._updateHScrollState();
+    },
+    onHScrollTop() {
+      if (this._hScrollSyncing) return;
+      const tw = this._hScroll();
+      const top = this._hScrollTop();
+      if (!tw || !top) return;
+      this._hScrollSyncing = true;
+      tw.scrollLeft = top.scrollLeft;
+      this._hScrollSyncing = false;
+      this._updateHScrollState();
+    },
+
+    scrollByColumn(direction) {
+      // Step by the width of the next-visible header cell (skip cells
+      // already hidden behind the pinned-column overlay). Falls back
+      // to 160 px when the header isn't measurable.
+      const tw = this._hScroll();
+      if (!tw) return;
+      const thead = tw.querySelector('thead');
+      let step = 160;
+      if (thead) {
+        const pinnedWidth = Array.from(thead.querySelectorAll('th.pinned-col'))
+          .reduce((sum, th) => sum + th.offsetWidth, 0);
+        const ths = Array.from(thead.querySelectorAll('th:not(.pinned-col)'));
+        for (const th of ths) {
+          // Position of the th relative to the wrap's scrollable area.
+          const leftRel = th.offsetLeft;
+          const rightRel = leftRel + th.offsetWidth;
+          if (direction > 0 && leftRel > tw.scrollLeft + pinnedWidth) {
+            step = leftRel - (tw.scrollLeft + pinnedWidth);
+            break;
+          }
+          if (direction < 0 && rightRel >= tw.scrollLeft + pinnedWidth
+              && rightRel <= tw.scrollLeft + tw.clientWidth) {
+            step = rightRel - (tw.scrollLeft + pinnedWidth);
+            break;
+          }
+        }
+      }
+      tw.scrollBy({ left: direction * step, behavior: 'smooth' });
+      // Sync after the smooth scroll settles. 250ms beats the default
+      // 200ms smooth-scroll duration in every browser we target.
+      setTimeout(() => {
+        this.onTableScroll();
+      }, 250);
     },
     cycleSort(col) {
       // none → asc → desc → none
