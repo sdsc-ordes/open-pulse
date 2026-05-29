@@ -968,10 +968,53 @@ def _json_safe(v: Any) -> Any:
     return str(v)
 
 
-def _connect(db_path: Path) -> duckdb.DuckDBPyConnection:
+# Persistent parent connections — one per DuckDB file. Each ``_connect``
+# returns a fresh CURSOR off the parent, which is the cheap operation
+# (microseconds). Without this pool every request paid the cold-open
+# cost (~3s for snsf.duckdb's 12 tables / 1M rows, ~1s for openalex's
+# 11 tables / 3M rows) on its own, which made tile drilldowns feel
+# slow even when the actual query was sub-millisecond.
+#
+# Read-only opens are safe to share across threads — DuckDB serialises
+# query execution internally per connection, and cursors from the same
+# parent run independently. The parent stays alive for the process
+# lifetime; an on-disk file swap (rare; we only rebuild DuckDB stores
+# behind a hub restart) requires the hub to restart anyway.
+_PARENT_CONNS: dict[Path, duckdb.DuckDBPyConnection] = {}
+_PARENT_LOCK = threading.Lock()
+
+
+class _CursorContext:
+    """Yield a fresh cursor off the cached parent; close on exit.
+
+    Implements the same ``with _connect(...) as con:`` contract callers
+    already use — the only difference is that exit closes the cursor
+    (cheap) instead of the parent file connection (~seconds on cold
+    re-open). Drop-in replacement.
+    """
+
+    def __init__(self, parent: duckdb.DuckDBPyConnection) -> None:
+        self._cur = parent.cursor()
+
+    def __enter__(self) -> duckdb.DuckDBPyConnection:
+        return self._cur
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        try:
+            self._cur.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _connect(db_path: Path) -> _CursorContext:
     if not db_path.is_file():
         raise FileNotFoundError(f"DuckDB file missing: {db_path}")
-    return duckdb.connect(str(db_path), read_only=True)
+    with _PARENT_LOCK:
+        parent = _PARENT_CONNS.get(db_path)
+        if parent is None:
+            parent = duckdb.connect(str(db_path), read_only=True)
+            _PARENT_CONNS[db_path] = parent
+    return _CursorContext(parent)
 
 
 def _source_expr(b: Backing) -> str:
