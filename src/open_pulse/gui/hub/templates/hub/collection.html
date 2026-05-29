@@ -74,54 +74,105 @@
     background: #e5e7eb;
   }
 
-  /* Horizontal-scroll row that sits between the pagination strip and
-     the actual table. Three children, hugged to the same horizontal
-     bounds as the table-wrap: a ‹ button, the twin scrollbar (which
-     stretches to fill), and a › button. The buttons stay clickable
-     even at the scroll extremes (just visually dimmed via :disabled)
-     because the user might want a "snap to start/end" affordance on
-     either edge. */
+  /* Horizontal-scroll affordances above the table. Two layers:
+     - the twin scrollbar (``.duckdb-htop``) spans the full table width
+       so it lines up exactly with the bottom scrollbar of the table-
+       wrap below — the same way the page's vertical scrollbar lines
+       up with the page edge.
+     - the ‹ and › buttons float as small chips OVER the table area
+       (not over the scrollbar), pinned to the table-wrap edges, so
+       the scrollbar above and below stay full-width and the buttons
+       feel anchored to the table they control. */
   .duckdb-hscroll-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 4px 0 0;
+    position: relative;        /* anchor for the absolute-positioned buttons */
+    margin: 6px 0 -2px;        /* tuck the bar right against the table */
   }
-  .duckdb-hscroll-btn {
-    flex: 0 0 auto;
-    min-width: 28px;
-    padding: 2px 8px;
-    font-size: 16px;
-    line-height: 1;
-    color: var(--fg);
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .duckdb-hscroll-btn:hover:not(:disabled) {
-    background: var(--surface-2, rgba(255, 255, 255, 0.05));
-  }
-  .duckdb-hscroll-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-  /* The twin scrollbar. ``overflow-x: scroll`` forces the bar to
-     render even when content fits — otherwise it would disappear
-     and the user would lose the affordance after typing a filter
-     that narrows the visible width. The inner div carries an
-     explicit width (set via Alpine from ``hScrollWidth``) that
-     mirrors the table's full scrollWidth. */
   .duckdb-htop {
-    flex: 1 1 auto;
+    width: 100%;
     overflow-x: scroll;
     overflow-y: hidden;
-    height: 14px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    height: 10px;              /* matches the native bottom scrollbar height */
+    /* Firefox: thin scrollbar; Chromium reads the ::-webkit-scrollbar
+       rules below. Track is transparent so the bar reads as a thin
+       line of accent against the card background, matching the
+       browser's native vertical scrollbar on the right of the page. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .duckdb-htop::-webkit-scrollbar { height: 10px; }
+  .duckdb-htop::-webkit-scrollbar-track { background: transparent; }
+  .duckdb-htop::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .duckdb-htop::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-faint);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  /* Apply the same style to the table's BOTTOM scrollbar so the two
+     horizontal scrollbars (top + bottom) and the vertical one all
+     look like the same family of control. */
+  .duckdb-table-wrap {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .duckdb-table-wrap::-webkit-scrollbar { height: 10px; }
+  .duckdb-table-wrap::-webkit-scrollbar-track { background: transparent; }
+  .duckdb-table-wrap::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .duckdb-table-wrap::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-faint);
+    background-clip: padding-box;
+    border: 2px solid transparent;
   }
   .duckdb-htop-inner {
     height: 1px;   /* invisible content; only the width matters */
+  }
+
+  /* ‹/› chip buttons. Absolute-positioned over the table so they
+     don't steal width from the scrollbar above. Small circular
+     glyphs that fade in on hover; disabled state goes nearly
+     invisible so the active edge of the scrollable region is
+     obvious. The button anchors to the .duckdb-hscroll-row's
+     bottom so it sits on the top edge of the table itself. */
+  .duckdb-hscroll-btn {
+    position: absolute;
+    top: 100%;                  /* sits flush against the table top */
+    transform: translateY(8px); /* drop just below the scrollbar */
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 50%;
+    background: var(--surface-opaque, var(--surface));
+    color: var(--fg);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 3;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    opacity: 0.85;
+    transition: opacity 0.15s ease, background-color 0.15s ease,
+                color 0.15s ease, border-color 0.15s ease;
+  }
+  .duckdb-hscroll-btn.left  { left: -6px; }
+  .duckdb-hscroll-btn.right { right: -6px; }
+  .duckdb-hscroll-btn:hover:not(:disabled) {
+    opacity: 1;
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+  }
+  .duckdb-hscroll-btn:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
   }
 </style>
 <div style="display: flex; flex-direction: column; gap: 18px;">
