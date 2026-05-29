@@ -76,7 +76,8 @@ docker compose -f docker-compose.yml \
 | `crawler` | `open-pulse-crawler` |
 | `extractor` | `git-metadata-extractor` + `open-pulse-selenium` |
 | `sparql` | `oxigraph-open-pulse` + `sparql-proxy-open-pulse` |
-| `hub` | `open-pulse-hub` (dashboard at port 9090) |
+| `hub` | `open-pulse-hub` (dashboard on `HUB_PORT`, default 7507) |
+| `edge` | `openpulse-edge-proxy` — Caddy on `:80` + `:443`. Terminates TLS via Let's Encrypt (HTTP-01 challenge on `:80`) and reverse-proxies `/` → `hub:8000`, `/sparql/*` → `sparql-proxy:7878`. Caddyfile + cert state live under `infra/services/edge-proxy/`. |
 | `grimoirelab` | `grimoirelab-db` + `grimoirelab-worker` (the main-compose lightweight pair) |
 | `orchestration` | `portainer` |
 
