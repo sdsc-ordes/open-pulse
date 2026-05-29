@@ -749,14 +749,20 @@ function collectionRows(init) {
     },
 
     scrollByColumn(direction) {
-      // Snap the table so that exactly ONE non-pinned column moves
-      // past the pinned strip per click. Earlier we stepped by "the
-      // distance to the next column boundary" which only nudged the
-      // bar a few pixels when the current column was almost fully
-      // visible. Now we always land on a column edge: clicking →
-      // makes the next column become the first one against the
-      // pinned strip; clicking ← makes the previous column the new
-      // first-against-pinned. No partial-column resting positions.
+      // Each click slides the table by exactly ONE column width
+      // against the pinned strip. The previous version anchored on
+      // "the first column whose right edge crosses the pinned strip"
+      // — which meant when you were mid-scroll, advancing to that
+      // column's right neighbour only nudged the bar by the
+      // remaining-clipped-pixels of the current column (often < 30 px)
+      // and felt like nothing moved.
+      //
+      // Fixed anchor: use the first column that is FULLY past the
+      // pinned strip (offsetLeft >= viewportStart). Mid-scroll skips
+      // the half-clipped column and treats the next aligned column
+      // as the anchor — so click › always reveals one full column of
+      // new content on the right while removing one column on the
+      // left; click ‹ does the reverse.
       const tw = this._hScroll();
       if (!tw) return;
       const thead = tw.querySelector('thead');
@@ -775,31 +781,31 @@ function collectionRows(init) {
       const viewportStart = tw.scrollLeft + pinnedWidth;
       const EPS = 1;
 
-      // Index of the column currently sitting at (or straddling)
-      // the left edge of the viewport — the first one whose right
-      // edge is still visible past the pinned strip.
-      let currentIdx = ths.findIndex(th =>
-        (th.offsetLeft + th.offsetWidth) > viewportStart + EPS
-      );
-      if (currentIdx === -1) currentIdx = ths.length - 1;
-
-      // Decide the target column to snap against the pinned strip.
-      const exactlySnapped =
-        Math.abs(ths[currentIdx].offsetLeft - viewportStart) < EPS;
+      // The "anchor" — index of the first non-pinned column whose
+      // LEFT edge is at or past the pinned strip. Mid-scroll, this
+      // is the first column that's fully (not partially) past the
+      // overlay; perfectly snapped, it's exactly the column at the
+      // overlay's right edge.
+      let anchorIdx = ths.findIndex(th => th.offsetLeft >= viewportStart - EPS);
+      // Past the right end? Treat the last column as anchor.
+      if (anchorIdx === -1) anchorIdx = ths.length - 1;
 
       let targetIdx;
       if (direction > 0) {
-        // Always advance one column whether or not currentIdx is
-        // exactly snapped — a partial-view currentIdx with a click
-        // forward feels right when the user sees the next column appear.
-        targetIdx = Math.min(currentIdx + 1, ths.length - 1);
+        // Reveal one new column on the right by advancing the anchor.
+        targetIdx = Math.min(anchorIdx + 1, ths.length - 1);
       } else {
-        // If the current column is mid-scroll, the natural "back"
-        // is to snap IT fully into view first. If it's already
-        // exactly snapped, go one column further back.
+        // Going back: if the anchor is exactly snapped against the
+        // overlay, retreat by one column; otherwise jump back to the
+        // column immediately BEFORE the anchor (which is currently
+        // clipped behind the overlay) — that snaps it fully into view
+        // and is the natural "undo" for a forward click that happened
+        // from mid-scroll.
+        const exactlySnapped =
+          Math.abs(ths[anchorIdx].offsetLeft - viewportStart) < EPS;
         targetIdx = exactlySnapped
-          ? Math.max(currentIdx - 1, 0)
-          : currentIdx;
+          ? Math.max(anchorIdx - 1, 0)
+          : Math.max(anchorIdx - 1, 0);
       }
 
       const target = ths[targetIdx];
