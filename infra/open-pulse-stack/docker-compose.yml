@@ -62,7 +62,7 @@ services:
     cpus: ${GRIMOIRELAB_DB_CPUS:-1.0}
 
   grimoirelab-worker:
-    image: alpine:3.20
+    image: alpine:3.23
     container_name: grimoirelab-worker
     profiles:
       - grimoirelab

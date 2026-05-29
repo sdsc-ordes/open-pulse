@@ -121,7 +121,7 @@ services:
       - ${GRIMOIRE_DATA_DIR:-${OPEN_PULSE_DATA_DIR:-./data}/grimoirelab}/projects-conf:/workspace/output
 
   prepare-opensearch:
-    image: alpine:3.21
+    image: alpine:3.23
     restart: on-failure:3
     working_dir: /workspace
     command:
