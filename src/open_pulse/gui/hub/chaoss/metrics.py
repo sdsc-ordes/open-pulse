@@ -40,6 +40,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from ..knowledge import opensearch as os_mod, stores
+from ..knowledge.stores import _from_gh_url, _to_gh_url
 
 log = logging.getLogger(__name__)
 
@@ -364,7 +365,7 @@ def _metric_contributors(
         f"// Distinct users with an inbound CONTRIBUTES_TO edge into the\n"
         f"// repository. The crawler aggregates per-user contribution so\n"
         f"// this is an all-time count, not windowed.\n"
-        f"MATCH (u:User)-[:CONTRIBUTES_TO]->(r:Repo {{full_name: '{full}'}})\n"
+        f"MATCH (u:User)-[:CONTRIBUTES_TO]->(r:Repo {{full_name: '{_to_gh_url(full)}'}})\n"
         f"RETURN count(DISTINCT u) AS contributors"
     )
     try:
@@ -826,7 +827,7 @@ def _metric_technical_fork(
         "// crawler has actually visited — typically smaller than the\n"
         "// GitHub-reported total because not every fork is interesting\n"
         "// enough to enqueue.\n"
-        f"MATCH (fork:Repo)-[:FORK_OF]->(r:Repo {{full_name: '{full}'}})\n"
+        f"MATCH (fork:Repo)-[:FORK_OF]->(r:Repo {{full_name: '{_to_gh_url(full)}'}})\n"
         "RETURN count(DISTINCT fork) AS observed_forks"
     )
     try:
@@ -1140,18 +1141,23 @@ def _metric_project_popularity(
         "// a separate repository that lists this one in its manifest.\n"
         "// The crawler resolves manifests opportunistically, so this\n"
         "// is a lower bound — the *observed* dependent count.\n"
-        f"MATCH (dep:Repo)-[:DEPENDS_ON]->(r:Repo {{full_name: '{full}'}})\n"
+        f"MATCH (dep:Repo)-[:DEPENDS_ON]->(r:Repo {{full_name: '{_to_gh_url(full)}'}})\n"
         "RETURN dep.full_name AS dependent\n"
         "ORDER BY dependent\n"
         "LIMIT 20"
     )
     try:
         rows = stores.neo4j_run(cypher)
-        dependent_names = [r["dependent"] for r in rows if r.get("dependent")]
+        # ``dep.full_name`` arrives URL-prefixed; strip back to the bare
+        # ``owner/repo`` form for human-readable display in the examples
+        # list below.
+        dependent_names = [
+            _from_gh_url(r["dependent"]) for r in rows if r.get("dependent")
+        ]
         # Count again without the LIMIT for an accurate total.
         count_cypher = (
             "// Total inbound DEPENDS_ON count (no limit).\n"
-            f"MATCH (dep:Repo)-[:DEPENDS_ON]->(r:Repo {{full_name: '{full}'}})\n"
+            f"MATCH (dep:Repo)-[:DEPENDS_ON]->(r:Repo {{full_name: '{_to_gh_url(full)}'}})\n"
             "RETURN count(DISTINCT dep) AS n"
         )
         count_rows = stores.neo4j_run(count_cypher)

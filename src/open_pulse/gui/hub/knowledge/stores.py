@@ -28,6 +28,39 @@ logging.getLogger("neo4j").setLevel(logging.ERROR)
 _SPARQL_TIMEOUT = 6.0
 _NEO4J_TIMEOUT = 6.0
 
+# Neo4j now stores GitHub identifiers as full URLs (``Repo.full_name`` /
+# ``User.login`` / ``Org.login`` all carry ``https://github.com/...``).
+# Callers of this module still hand around bare slugs (``"owner/repo"``,
+# ``"caviri"``) — that's the contract every resolver upstream expects —
+# so we normalise at the boundary: prefix on the way in (Cypher
+# parameters), strip on the way out (returned dicts). The pair below is
+# idempotent so calling it twice is safe.
+_GH_URL_PREFIX = "https://github.com/"
+
+
+def _to_gh_url(value: str | None) -> str:
+    """Prefix a bare GitHub slug/login with ``https://github.com/``.
+
+    Idempotent: a value that's already a URL passes through unchanged.
+    Empty / ``None`` returns the empty string.
+    """
+    if not value:
+        return ""
+    return value if value.startswith("https://") else _GH_URL_PREFIX + value
+
+
+def _from_gh_url(value: str | None) -> str:
+    """Strip the ``https://github.com/`` prefix to recover the bare slug.
+
+    Idempotent: a value that's already bare (or some other URL) passes
+    through unchanged. Empty / ``None`` returns the empty string.
+    """
+    if not value:
+        return ""
+    if value.startswith(_GH_URL_PREFIX):
+        return value[len(_GH_URL_PREFIX):]
+    return value
+
 
 def sparql_select(query: str) -> list[dict[str, Any]]:
     """Run a SPARQL SELECT against the configured store.
@@ -171,7 +204,15 @@ def neo4j_repo_neighbours(slug: str, *, limit: int = 25) -> list[dict[str, Any]]
         "       m.name AS name "
         "LIMIT $limit"
     )
-    return neo4j_run(cypher, {"slug": slug, "limit": limit})
+    rows = neo4j_run(cypher, {"slug": _to_gh_url(slug), "limit": limit})
+    # Strip the URL prefix so callers keep seeing bare slugs/logins —
+    # the prefix is internal to Neo4j storage, not part of this API.
+    for row in rows:
+        if row.get("full_name"):
+            row["full_name"] = _from_gh_url(row["full_name"])
+        if row.get("login"):
+            row["login"] = _from_gh_url(row["login"])
+    return rows
 
 
 def neo4j_user_or_org_neighbours(
@@ -193,7 +234,13 @@ def neo4j_user_or_org_neighbours(
         "       m.name AS name "
         "LIMIT $limit"
     )
-    return neo4j_run(cypher, {"login": login, "limit": limit})
+    rows = neo4j_run(cypher, {"login": _to_gh_url(login), "limit": limit})
+    for row in rows:
+        if row.get("full_name"):
+            row["full_name"] = _from_gh_url(row["full_name"])
+        if row.get("login"):
+            row["login"] = _from_gh_url(row["login"])
+    return rows
 
 
 def neo4j_rel_label(rel: str) -> str:
@@ -224,14 +271,14 @@ def neo4j_user_org_profile(login: str) -> dict[str, Any] | None:
         "       count(DISTINCT cr) AS contributed_to "
         "LIMIT 1"
     )
-    rows = neo4j_run(cypher, {"login": login})
+    rows = neo4j_run(cypher, {"login": _to_gh_url(login)})
     if not rows:
         return None
     row = rows[0]
     return {
         "kind": row.get("kind") or "",
         "name": (row.get("name") or "").strip(),
-        "login": row.get("login") or login,
+        "login": _from_gh_url(row.get("login")) or login,
         "owned_repos": int(row.get("owned_repos") or 0),
         "org_memberships": int(row.get("org_memberships") or 0),
         "members": int(row.get("members") or 0),
@@ -270,26 +317,27 @@ def neo4j_repo_community(slugs: list[str], *, limit: int = 25) -> dict[str, Any]
         "ORDER BY n_repos DESC, login "
         "LIMIT $limit"
     )
-    c_rows = neo4j_run(contributors_cypher, {"slugs": slugs, "limit": limit})
-    o_rows = neo4j_run(owner_cypher, {"slugs": slugs, "limit": limit})
+    url_slugs = [_to_gh_url(s) for s in slugs]
+    c_rows = neo4j_run(contributors_cypher, {"slugs": url_slugs, "limit": limit})
+    o_rows = neo4j_run(owner_cypher, {"slugs": url_slugs, "limit": limit})
     return {
         "contributors": [
             {
-                "login": r.get("login") or "",
+                "login": _from_gh_url(r.get("login")),
                 "name": (r.get("name") or "").strip(),
                 "n_repos": int(r.get("n_repos") or 0),
-                "repos": list(r.get("repos") or []),
+                "repos": [_from_gh_url(s) for s in (r.get("repos") or [])],
             }
             for r in c_rows
             if r.get("login")
         ],
         "owners": [
             {
-                "login": r.get("login") or "",
+                "login": _from_gh_url(r.get("login")),
                 "name": (r.get("name") or "").strip(),
                 "kind": r.get("kind") or "",
                 "n_repos": int(r.get("n_repos") or 0),
-                "repos": list(r.get("repos") or []),
+                "repos": [_from_gh_url(s) for s in (r.get("repos") or [])],
             }
             for r in o_rows
             if r.get("login")
@@ -321,13 +369,17 @@ def neo4j_repo_stats(slugs: list[str]) -> dict[str, dict[str, Any]]:
         "       CASE WHEN o:Org THEN 'Org' WHEN o:User THEN 'User' ELSE '' END AS owner_kind, "
         "       r IS NOT NULL AS indexed"
     )
-    rows = neo4j_run(cypher, {"slugs": slugs})
+    # Neo4j stores ``full_name`` as a URL; preserve the caller's bare-slug
+    # keys in the output dict by passing URLs in and inverting back out.
+    url_slugs = [_to_gh_url(s) for s in slugs]
+    rows = neo4j_run(cypher, {"slugs": url_slugs})
     out: dict[str, dict[str, Any]] = {}
     for row in rows:
-        out[row["slug"]] = {
+        bare_slug = _from_gh_url(row["slug"])
+        out[bare_slug] = {
             "indexed": bool(row.get("indexed")),
             "contributors": int(row.get("contributors") or 0),
-            "owner_login": row.get("owner_login") or "",
+            "owner_login": _from_gh_url(row.get("owner_login")),
             "owner_name": row.get("owner_name") or "",
             "owner_kind": row.get("owner_kind") or "",
         }
