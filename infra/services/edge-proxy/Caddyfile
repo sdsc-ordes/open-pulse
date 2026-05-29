@@ -1,0 +1,70 @@
+# Caddyfile for the openpulse.epfl.ch edge reverse-proxy.
+#
+# Terminates TLS on 443 (with Let's Encrypt auto-cert, courtesy of port
+# 80 being open in the EPFL DMZ since 2026-05-28), redirects bare HTTP
+# to HTTPS, and proxies every request to the hub container on the
+# compose network. The hub already implements path-prefixed proxies for
+# the crawler (`/api/crawler/*`) and the metadata extractor
+# (`/api/extractor/*`), so this single reverse_proxy gives us the whole
+# control plane under one domain without per-service routing here.
+#
+# Caddy stores its ACME state under /data (mounted as a host volume in
+# compose), so cert renewals survive container recreates.
+#
+# Operational notes:
+#   - `email` is the ACME contact (cert expiry warnings, ToS). EPFL's
+#     IT-Infra team is on infra/.env; the project owner is the human
+#     accountable for cert renewal failures.
+#   - `auto_https` is left at the default (on). Caddy picks HTTP-01
+#     via :80 automatically since port 80 is exposed in the host's
+#     compose ports block.
+#   - Compression is broad (zstd → gzip fallback). The hub serves
+#     HTML + JSON + JS; both compress well.
+#   - `header X-Forwarded-*` is set so the hub sees the real client
+#     IP and original scheme/host. Without these the hub would log
+#     every request as coming from the docker bridge IP.
+
+{
+	email carlos.vivarrios@epfl.ch
+}
+
+openpulse.epfl.ch {
+	encode zstd gzip
+
+	# ── /sparql/* → SPARQL proxy (Caddy with admin/reader basic auth) ──
+	# The sparql-proxy container already enforces its own basic auth
+	# (reader on /query, admin on /update + /store). All we do at this
+	# layer is strip our `/sparql/` prefix and forward the rest verbatim
+	# so https://openpulse.epfl.ch/sparql/query?query=… and
+	# https://openpulse.epfl.ch/sparql/update both reach the right
+	# upstream paths. YASGUI (the SPARQL UI the proxy ships at `/`) is
+	# served from https://openpulse.epfl.ch/sparql/ — no further config
+	# needed because the YASGUI bundle uses relative URLs.
+	handle_path /sparql/* {
+		reverse_proxy sparql-proxy:7878 {
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-Host  {host}
+			header_up X-Real-IP         {remote_host}
+		}
+	}
+
+	# ── everything else → hub (auth-gated control plane + path proxies
+	#                          for /api/crawler/* and /api/extractor/*) ──
+	reverse_proxy hub:8000 {
+		# Real client + original scheme propagated to the hub's access
+		# log and any future redirect-URL builders. Set these explicitly
+		# even though Caddy already forwards X-Forwarded-For by default —
+		# making the contract explicit keeps the source-of-truth obvious.
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host  {host}
+		header_up X-Real-IP         {remote_host}
+
+		# Pass through long-lived bodies (extract jobs can take >15 min
+		# in hybrid mode); the hub itself enforces an outbound timeout
+		# against the GME, so we just need to not cut the wire here.
+		transport http {
+			read_timeout 30m
+			write_timeout 30m
+		}
+	}
+}
