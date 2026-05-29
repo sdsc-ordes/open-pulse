@@ -370,6 +370,24 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         / "index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
         "persons",
     ),
+    # ETH-Z Research Collection relational joins — let the row browser
+    # pivot from article ↔ author ↔ org ↔ host without leaving the
+    # collection. Same shape as the infoscience tables below.
+    "ethz_research_collection_article_persons": (
+        _DATA_ROOT
+        / "index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
+        "article_persons",
+    ),
+    "ethz_research_collection_article_orgs": (
+        _DATA_ROOT
+        / "index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
+        "article_orgs",
+    ),
+    "ethz_research_collection_article_links": (
+        _DATA_ROOT
+        / "index/ethz-research-collection/duckdb/ethz_research_collection.duckdb",
+        "article_links",
+    ),
     # Hugging Face
     "hf_datasets": (
         _DATA_ROOT / "index/huggingface/duckdb/huggingface.duckdb",
@@ -399,6 +417,23 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
     "infoscience_persons": (
         _DATA_ROOT / "index/infoscience/duckdb/infoscience.duckdb",
         "persons",
+    ),
+    # Infoscience relational joins — article ↔ author / org / external
+    # host. ``article_links`` carries hostnames + URLs of every reference
+    # the article points at (preprint mirror, dataset DOI, GitHub repo),
+    # which is the table the Hub's `connected/<ref>` traversal queries
+    # when surfacing a paper's full footprint.
+    "infoscience_article_persons": (
+        _DATA_ROOT / "index/infoscience/duckdb/infoscience.duckdb",
+        "article_persons",
+    ),
+    "infoscience_article_orgs": (
+        _DATA_ROOT / "index/infoscience/duckdb/infoscience.duckdb",
+        "article_orgs",
+    ),
+    "infoscience_article_links": (
+        _DATA_ROOT / "index/infoscience/duckdb/infoscience.duckdb",
+        "article_links",
     ),
     # ORCID
     "orcid_epfl_educations": (
@@ -522,6 +557,25 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "index/zenodo/duckdb/zenodo.duckdb",
         "creators",
     ),
+    # Zenodo relational + file inventory. ``files`` is the per-record
+    # asset list (checksums, sizes, download URLs); ``record_creators``
+    # and ``record_communities`` are the N:M joins powering the
+    # author / community lists already aggregated into the headline
+    # ``zenodo_records`` view. Exposed separately so consumers can hit
+    # them directly for cross-record analytics (e.g. "every record by
+    # creator X", "every record in community Y").
+    "zenodo_files": (
+        _DATA_ROOT / "index/zenodo/duckdb/zenodo.duckdb",
+        "files",
+    ),
+    "zenodo_record_creators": (
+        _DATA_ROOT / "index/zenodo/duckdb/zenodo.duckdb",
+        "record_creators",
+    ),
+    "zenodo_record_communities": (
+        _DATA_ROOT / "index/zenodo/duckdb/zenodo.duckdb",
+        "record_communities",
+    ),
 }
 
 
@@ -551,6 +605,9 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     ),
     "ethz_research_collection_organizations": ("Department", "Institute", "Laboratory"),
     "ethz_research_collection_persons": ("Müller", "Schmidt", "Anna", "Wolfgang"),
+    "ethz_research_collection_article_persons": ("first", "corresponding", "co-author", "second"),
+    "ethz_research_collection_article_orgs": ("Department", "Institute", "ETH", "Zurich"),
+    "ethz_research_collection_article_links": ("doi.org", "github.com", "arxiv", "zenodo"),
     # Hugging Face
     "hf_datasets": ("imagenet", "translation", "audio", "code"),
     "hf_models": ("llama", "bert", "diffusion", "whisper"),
@@ -560,6 +617,9 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "infoscience_articles": ("deep learning", "epfl", "physics", "quantum"),
     "infoscience_organizations": ("Laboratory", "Institute", "Lab", "Group"),
     "infoscience_persons": ("Patrick", "Anna", "Müller", "Martin"),
+    "infoscience_article_persons": ("first", "corresponding", "co-author", "second"),
+    "infoscience_article_orgs": ("Laboratory", "Institute", "EPFL", "Lausanne"),
+    "infoscience_article_links": ("doi.org", "github.com", "arxiv", "zenodo"),
     # ORCID
     "orcid_epfl_educations": ("EPFL", "Lausanne", "PhD", "Master"),
     "orcid_epfl_employments": ("Professor", "PostDoc", "EPFL", "Researcher"),
@@ -606,6 +666,9 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "zenodo_records": ("dataset", "epfl", "10.5281", "machine learning"),
     "zenodo_communities": ("epfl", "swiss", "open", "research"),
     "zenodo_creators": ("EPFL", "Müller", "Patrick", "Anna"),
+    "zenodo_files": (".pdf", ".csv", ".zip", "dataset"),
+    "zenodo_record_creators": ("first", "corresponding", "co-author", "1"),
+    "zenodo_record_communities": ("epfl", "cern", "ethz", "openlab"),
 }
 
 
