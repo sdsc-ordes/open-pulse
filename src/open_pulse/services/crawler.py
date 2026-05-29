@@ -138,13 +138,18 @@ class CrawlerService:
         :class:`CrawlerJobFailedError` on ``FAILED``.
 
         ``timeout`` is the polling deadline (this is the *client* side
-        budget — the crawler itself keeps running regardless). Set to
-        ``None`` or ``<= 0`` to wait indefinitely; long crawls (heavy
-        BFS with PR/issue scanning, multiple hops) can't easily predict
-        their runtime, so opting out of the timeout altogether is the
-        right call when "estará cuando esté" is the acceptance criterion.
+        budget — the crawler itself keeps running regardless). Pass
+        ``None`` to wait indefinitely; long crawls (heavy BFS with
+        PR/issue scanning, multiple hops) can't easily predict their
+        runtime, so opting out of the timeout altogether is the right
+        call when "estará cuando esté" is the acceptance criterion. A
+        ``<= 0`` value is an *immediate* deadline — it raises
+        :class:`CrawlerJobTimeoutError` on the first non-terminal poll.
+        The pipeline config layer maps a user-supplied ``timeout_seconds
+        <= 0`` to ``None`` before it ever reaches here, so the "wait
+        forever" UX is preserved at the boundary that owns it.
         """
-        no_timeout = timeout is None or timeout <= 0
+        no_timeout = timeout is None
         deadline = float("inf") if no_timeout else time.monotonic() + timeout
         consecutive_failures = 0
         while True:
