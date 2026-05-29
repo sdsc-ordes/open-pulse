@@ -215,12 +215,16 @@ class MetadataExtractorService:
 
         Returns the final job dict on ``completed``. Raises
         :class:`ExtractJobFailedError` on ``failed`` and
-        :class:`ExtractJobTimeoutError` on deadline. Pass ``None`` or
-        ``<= 0`` to opt out of the client-side timeout — the GME job
-        keeps running regardless of our polling budget, so this is the
-        right call for long-running runtimes (``llm``, heavy ``hybrid``).
+        :class:`ExtractJobTimeoutError` on deadline. Pass ``None`` to
+        opt out of the client-side timeout — the GME job keeps running
+        regardless of our polling budget, so this is the right call for
+        long-running runtimes (``llm``, heavy ``hybrid``). A ``<= 0``
+        value is an *immediate* deadline (raises on the first
+        non-terminal poll); the pipeline config layer maps a user
+        ``v2_timeout_seconds <= 0`` to ``None`` before it reaches here,
+        so the "wait forever" UX is preserved where it's configured.
         """
-        no_timeout = timeout is None or timeout <= 0
+        no_timeout = timeout is None
         deadline = float("inf") if no_timeout else time.monotonic() + timeout
         consecutive_failures = 0
         while True:

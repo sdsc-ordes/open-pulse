@@ -37,10 +37,10 @@ jobs:
         working-directory: docs-site
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@a0ea98b2dc7d387a59324835f7421c1d5f8357b4  # v6.0.5
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093  # v6.0.8
         with:
           version: 9
 
