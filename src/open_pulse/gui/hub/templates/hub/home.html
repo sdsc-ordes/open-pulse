@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+{% block title %}Hub · Open Pulse{% endblock %}
+{% block heading %}Hub{% endblock %}
+{% block subheading %}
+  Every resource the data plane knows about, addressable by its URL.
+  Type the address after <span class="kbd">/hub/</span> and the page
+  will appear.
+{% endblock %}
+{% block headeractions %}
+  <a class="btn btn-ghost" href="/hub/wanted">Backlog →</a>
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 24px;">
+
+  {# ── Search bar with typeahead from Qdrant text-match ────────── #}
+  <div class="card" x-data="hubSearch()" @keydown.escape="closeSuggestions()">
+    <div class="card-title">Look up an entity</div>
+    <form @submit.prevent="submit()" style="position: relative; display: flex; gap: 8px; margin-top: 10px;">
+      <input
+        type="text"
+        x-model="value"
+        @input.debounce.180ms="autocomplete()"
+        @keydown.arrow-down.prevent="moveSelection(1)"
+        @keydown.arrow-up.prevent="moveSelection(-1)"
+        @focus="if (value.trim().length >= 2) autocomplete()"
+        @blur.debounce.150ms="closeSuggestions()"
+        placeholder="Type a title, repo, author, ORCID, DOI… (or paste a URL)"
+        autofocus
+        autocomplete="off"
+        style="flex: 1; padding: 8px 12px; font-size: 14px; background: var(--surface-sunk); border: 1px solid var(--border); border-radius: 6px; color: var(--fg); font-family: ui-monospace, 'SF Mono', Consolas, monospace;"
+      />
+      <button class="btn btn-primary" type="submit" :disabled="!value.trim()">Open</button>
+
+      {# Suggestion dropdown — anchored under the input. #}
+      <div x-show="suggestions.length > 0 || loading"
+           x-cloak
+           style="position: absolute; top: calc(100% + 6px); left: 0; right: 80px; max-height: 360px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--shadow); z-index: 40;">
+        <div x-show="loading" class="card-meta" style="padding: 8px 12px;">searching…</div>
+        <template x-for="(s, i) in suggestions" :key="s.hub_url">
+          <a :href="s.hub_url"
+             @mousedown.prevent="window.location.href = s.hub_url"
+             @mouseenter="selected = i"
+             :class="i === selected ? 'is-active' : ''"
+             class="hub-suggest-row"
+             style="display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; text-decoration: none; color: inherit; border-bottom: 1px solid var(--border);">
+            <span x-show="s.source_type"
+                  class="pill pill-info"
+                  style="font-size: 10px; padding: 1px 6px;"
+                  x-text="s.source_type"></span>
+            <span class="mono" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" x-text="s.title"></span>
+            <span class="card-meta" style="font-size: 11px;" x-text="s.badge"></span>
+          </a>
+        </template>
+        <div x-show="!loading && suggestions.length === 0 && value.trim().length >= 2"
+             class="card-meta" style="padding: 8px 12px;">
+          no matches — pressing <span class="kbd">↵</span> opens
+          <span class="mono" x-text="'/hub/' + value"></span> directly
+        </div>
+      </div>
+    </form>
+    <p class="card-meta" style="margin: 10px 0 0;">
+      Type to search across GitHub, HuggingFace, Zenodo, Infoscience, ROR,
+      OpenAlex, ETHZ, and ORCID. Or paste a URL directly — scheme and
+      <span class="kbd">www.</span> are stripped automatically. Unknown
+      URLs queue in the <a href="/hub/wanted">backlog</a>.
+    </p>
+  </div>
+
+  {# ── Pinned examples ──────────────────────────────────────────── #}
+  <div>
+    <div class="card-title" style="margin-bottom: 8px;">Try one</div>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+      {% for url, label in examples %}
+        <a class="btn btn-ghost" href="/hub/{{ url }}" style="text-decoration: none;">
+          <span style="color: var(--fg-muted); margin-right: 6px;">{{ label }}:</span>
+          <span class="mono">{{ url }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── Collection grid — first per UX feedback. Each tile is the
+        primary click target into /hub/c/<name>; a secondary ↗ link
+        in the corner opens the upstream source homepage. #}
+  <div>
+    <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;">
+      <div class="card-title">Sources</div>
+      <span class="card-meta">point counts from gme-qdrant · refreshed every minute</span>
+    </div>
+    {% if not collections %}
+      <div class="card tone-warn">
+        <div class="card-title">Qdrant unreachable</div>
+        <p style="margin: 6px 0 0;">
+          The hub can't reach gme-qdrant right now. Bring up
+          <span class="kbd">--profile extractor</span> to start it.
+        </p>
+      </div>
+    {% else %}
+      <div class="grid-stats">
+        {% for c in collections %}
+          {% set tier = c.heat_tier if c.heat_tier is defined else 0 %}
+          {% set frac = c.fraction if c.fraction is defined else 0 %}
+          {# Wrapper holds two anchors as siblings: the main tile link
+             and a small ↗ to the source homepage positioned over it.
+             Browsers + screen readers don't permit anchors-inside-
+             anchors, hence the sibling pattern. #}
+          <div style="position: relative;">
+            <a class="card tone-info hub-tile t{{ tier }}"
+               href="/hub/c/{{ c.name }}"
+               title="{{ c.label }} · {{ c.description or c.name }} — click to explore"
+               aria-label="Explore {{ c.label }} ({{ '{:,}'.format(c.count) if c.count is not none else 'unknown' }} entries)">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                {% if c.logo_url %}
+                  <img src="{{ c.logo_url }}" alt="" width="16" height="16"
+                       loading="lazy"
+                       style="border-radius: 3px; flex-shrink: 0;">
+                {% endif %}
+                <div class="card-title" style="margin: 0; flex: 1;">{{ c.label }}</div>
+              </div>
+              <div class="stat-value {% if c.count is none %}muted{% endif %}">
+                {% if c.count is none %}—{% else %}{{ '{:,}'.format(c.count) }}{% endif %}
+              </div>
+              <div class="card-meta mono" style="margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                {% if c.host %}{{ c.host }} · {% endif %}{{ c.name }}
+              </div>
+              <div class="hub-tile-heat t{{ tier }}"
+                   style="width: {{ (frac * 100) | round(1) }}%;"
+                   aria-hidden="true"></div>
+            </a>
+            {% if c.homepage %}
+              <a href="{{ c.homepage }}"
+                 target="_blank" rel="noopener"
+                 class="hub-tile-ext"
+                 title="Open {{ c.host }} in a new tab">↗</a>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  {# ── Top across the network — leaderboards, after the source grid
+        per UX feedback. Lazy-loaded so they don't slow the first
+        paint of the sources. #}
+  <div>
+    <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;">
+      <div class="card-title">Top across the network</div>
+      <span class="card-meta">aggregated from Neo4j + Qdrant · cached for an hour in DuckDB</span>
+    </div>
+    <div class="grid-tiles" x-data>
+      {% for topic, msg in [
+        ('github_orgs', 'crunching org repo counts…'),
+        ('contributors', 'finding most-active contributors…'),
+        ('languages', 'sampling primary languages…'),
+        ('countries', 'sampling ROR countries…'),
+        ('repos_by_contributors', 'ranking repos by community…'),
+        ('publication_years', 'sampling Infoscience publication years…'),
+      ] %}
+        <div x-data="hubTopPanel('{{ topic }}')" x-init="load()">
+          <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 10px;">
+            <span class="hub-spinner"></span><span class="card-meta">{{ msg }}</span>
+          </div>
+          <div x-show="!loading" x-html="html"></div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .hub-spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    display: inline-block;
+    animation: hub-spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes hub-spin { to { transform: rotate(360deg); } }
+</style>
+<script>
+function hubSearch() {
+  return {
+    value: '',
+    suggestions: [],
+    selected: -1,
+    loading: false,
+    _seq: 0,
+
+    // Strip scheme / www / trailing slash; keep the address bar pretty
+    // even when the user pastes a full URL.
+    normalize(raw) {
+      return String(raw || '').trim()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .replace(/\/+$/, '');
+    },
+
+    async autocomplete() {
+      const q = this.value.trim();
+      if (q.length < 2) {
+        this.suggestions = [];
+        this.selected = -1;
+        this.loading = false;
+        return;
+      }
+      const seq = ++this._seq;
+      this.loading = true;
+      try {
+        const r = await fetch(
+          `/api/hub/autocomplete?q=${encodeURIComponent(q)}&limit=12`,
+          { credentials: 'include' },
+        );
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        // Drop stale responses — the user kept typing while we waited.
+        if (seq !== this._seq) return;
+        this.suggestions = j.suggestions || [];
+        this.selected = this.suggestions.length ? 0 : -1;
+      } catch (_) {
+        this.suggestions = [];
+        this.selected = -1;
+      } finally {
+        if (seq === this._seq) this.loading = false;
+      }
+    },
+
+    moveSelection(delta) {
+      if (!this.suggestions.length) return;
+      const n = this.suggestions.length;
+      this.selected = ((this.selected + delta) % n + n) % n;
+    },
+
+    closeSuggestions() {
+      this.suggestions = [];
+      this.selected = -1;
+    },
+
+    submit() {
+      // Highlighted suggestion wins; else the raw value is treated as
+      // a URL and we land on /hub/<value> (which may itself queue into
+      // the wanted backlog if it doesn't resolve).
+      if (this.selected >= 0 && this.suggestions[this.selected]) {
+        window.location.href = this.suggestions[this.selected].hub_url;
+        return;
+      }
+      const v = this.normalize(this.value);
+      if (!v) return;
+      window.location.href = '/hub/' + v;
+    },
+  };
+}
+
+// Lazy-loaded leaderboard panel for /api/hub/stats/<topic>. Each
+// instance fetches once on init and renders the returned HTML.
+function hubTopPanel(topic) {
+  return {
+    topic: topic,
+    loading: true,
+    html: '',
+    async load() {
+      try {
+        const r = await fetch(`/api/hub/stats/${this.topic}`, { credentials: 'include' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        this.html = (await r.text()).trim();
+      } catch (e) {
+        console.warn(`top stats ${this.topic} failed:`, e);
+        this.html = '';
+      } finally {
+        this.loading = false;
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

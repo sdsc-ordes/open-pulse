@@ -21,8 +21,10 @@ from open_pulse.services.container import ServiceContainer
 from open_pulse.tasks import FunctionTask
 
 from .apply_grimoire_projects import run_apply_grimoire_projects
+from .archive_outputs import run_archive_outputs
 from .config import QuestFileConfig, RetryConfig, StepConfig
 from .crawler import run_crawler
+from .frontier_extend import run_frontier_extend
 from .metadata_extractor import run_metadata_extractor
 from .neo4j_upload import run_neo4j_upload
 from .sparql_upload import run_sparql_upload
@@ -31,12 +33,17 @@ logger = logging.getLogger(__name__)
 
 StepFunc = Callable[[dict[str, object]], None]
 
+# Ordering matters: archive_outputs is last so it runs AFTER any step
+# that writes into the directory it archives (typically the
+# metadata_extractor + sparql_upload pair).
 STEP_REGISTRY: dict[str, StepFunc] = {
     "crawler": run_crawler,
+    "frontier_extend": run_frontier_extend,
     "neo4j_upload": run_neo4j_upload,
     "metadata_extractor": run_metadata_extractor,
     "sparql_upload": run_sparql_upload,
     "apply_grimoire_projects": run_apply_grimoire_projects,
+    "archive_outputs": run_archive_outputs,
 }
 
 STEP_NAMES: tuple[str, ...] = tuple(STEP_REGISTRY)
@@ -124,10 +131,12 @@ def build_tasks(config: QuestFileConfig) -> tuple[FunctionTask, ...]:
     quest = config.quest
     step_configs: dict[str, StepConfig] = {
         "crawler": quest.steps.crawler,
+        "frontier_extend": quest.steps.frontier_extend,
         "neo4j_upload": quest.steps.neo4j_upload,
         "metadata_extractor": quest.steps.metadata_extractor,
         "sparql_upload": quest.steps.sparql_upload,
         "apply_grimoire_projects": quest.steps.apply_grimoire_projects,
+        "archive_outputs": quest.steps.archive_outputs,
     }
 
     tasks: list[FunctionTask] = []
@@ -233,10 +242,12 @@ def run_single_step(
     quest = config.quest
     step_configs: dict[str, StepConfig] = {
         "crawler": quest.steps.crawler,
+        "frontier_extend": quest.steps.frontier_extend,
         "neo4j_upload": quest.steps.neo4j_upload,
         "metadata_extractor": quest.steps.metadata_extractor,
         "sparql_upload": quest.steps.sparql_upload,
         "apply_grimoire_projects": quest.steps.apply_grimoire_projects,
+        "archive_outputs": quest.steps.archive_outputs,
     }
     services = ServiceContainer.from_quest_config(quest)
     func = STEP_REGISTRY[step_name]

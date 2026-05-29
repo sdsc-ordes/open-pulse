@@ -1,0 +1,9 @@
+{# Fragment returned when a metric blows up before producing a result. #}
+<div style="display: flex; flex-direction: column; gap: 8px;">
+  <div style="font-size: 14px;">⚠ failed to compute</div>
+  <code style="font-size: 11px; word-break: break-word; color: var(--danger, #c43);">{{ error }}</code>
+  <p class="card-meta" style="font-size: 11px; margin: 0;">
+    The dependency that failed is logged on the server. Reload after a
+    moment, or check the relevant store's health in <a href="/status">/status</a>.
+  </p>
+</div>

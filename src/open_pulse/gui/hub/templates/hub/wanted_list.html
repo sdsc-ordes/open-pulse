@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Backlog · Open Pulse Hub{% endblock %}
+{% block heading %}Wanted URLs{% endblock %}
+{% block subheading %}
+  Resources visitors have asked about but we don't enrich yet.
+{% endblock %}
+
+{% block content %}
+{% if not rows %}
+  <div class="card tone-info">
+    <div class="card-title">Empty backlog</div>
+    <p style="margin: 6px 0 0; color: var(--fg-muted);">
+      Nothing queued yet. Hit a <span class="kbd">/hub/&lt;url&gt;</span> we don't know
+      and it'll show up here.
+    </p>
+  </div>
+{% else %}
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>URL</th>
+          <th style="width: 160px;">Host</th>
+          <th style="width: 70px;">Hits</th>
+          <th style="width: 180px;">First seen</th>
+          <th style="width: 180px;">Last seen</th>
+          <th style="width: 200px; text-align: right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td style="word-break: break-all;">
+              <a href="/hub/{{ r.host }}/{{ r.path }}">{{ r.url }}</a>
+            </td>
+            <td><span class="card-meta">{{ r.host }}</span></td>
+            <td><span class="pill pill-neutral">{{ r.hits }}</span></td>
+            <td class="mono" style="font-size: 12px;">{{ r.first_seen }}</td>
+            <td class="mono" style="font-size: 12px;">{{ r.last_seen }}</td>
+            <td style="text-align: right;" x-data="{busy: false, msg: ''}">
+              <button class="btn btn-primary"
+                      :disabled="busy"
+                      @click="busy=true; fetch('/api/hub/enrich/{{ r.host }}/{{ r.path }}', {method:'POST'}).then(r=>r.json()).then(j => {msg = (j.crawler_job_id || j.gme_job_id) ? 'queued' : (j.crawler_error || j.gme_error || 'failed'); busy=false})">
+                <span x-show="!busy">enrich</span>
+                <span x-show="busy">…</span>
+              </button>
+              <button class="btn btn-ghost"
+                      onclick="fetch('/api/hub/wanted/{{ r.id }}/resolve', {method:'POST'}).then(() => location.reload())">
+                resolve
+              </button>
+              <button class="btn btn-danger"
+                      onclick="fetch('/api/hub/wanted/{{ r.id }}', {method:'DELETE'}).then(() => location.reload())">
+                delete
+              </button>
+              <div class="card-meta" x-show="msg" x-text="msg" style="font-size: 11px; margin-top: 2px;"></div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

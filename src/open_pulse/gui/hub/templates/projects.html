@@ -3,6 +3,10 @@
 {% block subheading %}Filter the SPARQL store by facet, pick a template, or write SPARQL by hand — then push the result to the GrimoireLab applier.{% endblock %}
 
 {% block content %}
+{# Shared tree-aware table renderer for the Repos panel. Mixed into the
+   Alpine x-data via spread; CSS is scoped under .tree-table. #}
+<link rel="stylesheet" href="/static/css/tree-table.css" />
+<script src="/static/js/tree-table.js"></script>
 <div x-data="projectsBuilder()" x-init="init()" class="space-y-4">
 
   <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 16px;">
@@ -125,15 +129,28 @@
 
       <div class="card">
         <div class="flex items-baseline">
-          <div class="card-title">Repos</div>
-          <span class="pill pill-info ml-2" x-text="repos.length"></span>
-          <span class="ml-auto card-meta" x-text="repos.length ? '' : 'run a query to populate'"></span>
+          <div class="card-title">Results</div>
+          <span class="pill pill-info ml-2"
+                x-text="rows.length + ' row' + (rows.length === 1 ? '' : 's')"></span>
+          <span class="pill ml-2"
+                x-show="repoColumn"
+                :title="'Apply → will push the ' + repoColumn + ' column as the repo list'"
+                x-text="'apply: ?' + repoColumn + ' · ' + repos.length"></span>
+          <span class="ml-auto card-meta"
+                x-text="rows.length ? '' : 'run a query to populate'"></span>
         </div>
-        <div style="border: 1px solid var(--border); border-radius: 8px; max-height: 320px; overflow: auto; background: var(--surface-soft); margin-top: 8px;">
-          <template x-for="r in repos" :key="r">
-            <div style="padding: 6px 12px; font: 12px ui-monospace, monospace; color: var(--fg); border-bottom: 1px solid var(--border);" x-text="r"></div>
-          </template>
-        </div>
+        {# Tree-aware table: object/array cells expand into nested
+           tables; per-column type dropdown sits in the level-0 <th>.
+           Delegated handlers route header clicks to sort and dropdown
+           changes to the cell-type override. #}
+        <div x-show="rows.length"
+             class="tree-table"
+             style="border: 1px solid var(--border); border-radius: 8px;
+                    max-height: 480px; overflow: auto;
+                    background: var(--surface-soft); margin-top: 8px;"
+             @change="onCellTypeChange"
+             @click="onHeaderClick"
+             x-html="renderTreeTable()"></div>
       </div>
 
     </div>
@@ -241,10 +258,16 @@ ORDER BY ?repo`;
 
 function projectsBuilder() {
   return {
+    // Tree-table renderer mixin: columns / rows / truncated / sortColumn /
+    // sortDir / cellTypes / treeMaxDepth + every render/sort method.
+    // Spread first so page-specific entries below override safely.
+    ...window.treeTable(),
+
     endpoint: '{{ default_sparql }}',
     user: '', password: '',
     query: DEFAULT_QUERY,
     repos: [],
+    repoColumn: null,
     title: 'Open Pulse SPARQL',
     status: '',
     loading: false,
@@ -385,9 +408,7 @@ function projectsBuilder() {
         }
         const j = await r.json();
         this.query = j.query;
-        this.repos = j.repos;
-        this.filterStatus = j.count + ' repo' + (j.count === 1 ? '' : 's');
-        this.status = this.filterStatus;
+        this._ingestTable(j);
         this.activeTemplate = null;
       } catch (e) {
         this.filterStatus = '⚠ ' + e.message;
@@ -428,6 +449,27 @@ function projectsBuilder() {
       this.paramValues = {};
     },
 
+    // Single sink for /sparql/query and /build-from-filters responses.
+    // Both return the same {columns, rows, repos, repo_column, count}
+    // shape (see routes/projects.py::_parse_bindings_to_table), so the
+    // ingest is identical. cellTypes is cleared every time because
+    // different queries produce different schemas — a 'url' override
+    // for a column called ``?repo`` shouldn't survive a switch to a
+    // query whose ``?repo`` is now an integer count.
+    _ingestTable(j) {
+      this.columns   = j.columns || [];
+      this.rows      = j.rows || [];
+      this.repos     = j.repos || [];
+      this.repoColumn = j.repo_column || null;
+      this.cellTypes = {};
+      this.clearSort();
+      const n = (j.row_count !== undefined) ? j.row_count : this.rows.length;
+      const status = `${n} row${n === 1 ? '' : 's'}`
+                    + (this.repos.length ? ` · ${this.repos.length} repo URL${this.repos.length === 1 ? '' : 's'}` : '');
+      this.status = status;
+      this.filterStatus = status;
+    },
+
     previewJson() {
       const slug = (this.title || 'open_pulse_sparql').toLowerCase()
         .replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'') || 'open_pulse_sparql';
@@ -451,8 +493,7 @@ function projectsBuilder() {
           throw new Error('HTTP ' + r.status + ' — ' + t);
         }
         const j = await r.json();
-        this.repos = j.repos;
-        this.status = j.count + ' repo' + (j.count === 1 ? '' : 's');
+        this._ingestTable(j);
       } catch (e) {
         this.status = '⚠ ' + e.message;
       } finally {

@@ -52,7 +52,11 @@
          so the seam between copies has the same spacing as any inter-item
          gap. Translating the track by -50% (= one copy width) makes the wrap
          visually continuous instead of snapping. -->
-    <div class="marquee" x-data="marqueeBar()" x-init="refresh(); setInterval(refresh, 10000)">
+    <div class="marquee"
+         x-data="marqueeBar()"
+         x-init="refresh(); refreshHistory();
+                 setInterval(refresh, 10000);
+                 setInterval(refreshHistory, 60000)">
       <div class="marquee-track">
         <template x-for="copy in 6" :key="copy">
           <div class="marquee-list" :aria-hidden="copy === 1 ? 'false' : 'true'">
@@ -61,6 +65,19 @@
                 <span class="marquee-dot" :class="item.tone"></span>
                 <span class="marquee-label" x-text="item.label"></span>
                 <span class="marquee-value" x-text="item.value"></span>
+                {# Sparkline — rendered only when the item carries a
+                   ``spark`` series. The SVG path is built reactively
+                   from the series so it tracks the latest history
+                   without needing a redraw library. #}
+                <template x-if="item.spark && item.spark.points">
+                  <svg class="marquee-spark" viewBox="0 0 60 14"
+                       preserveAspectRatio="none" aria-hidden="true">
+                    <polyline :points="item.spark.points"
+                              fill="none" stroke="currentColor"
+                              stroke-width="1.2" stroke-linecap="round"
+                              stroke-linejoin="round" />
+                  </svg>
+                </template>
               </span>
             </template>
           </div>
@@ -70,11 +87,15 @@
 
     <div class="flex flex-1">
       <aside class="sidebar">
-        <div class="sidebar-brand">
+        {# Brand block doubles as a "home" link — visitors expect the
+           product name in the top-left to click back to the overview.
+           The <a> reset is inline so we don't have to touch app.css. #}
+        <a href="/" class="sidebar-brand" title="Back to overview"
+           style="text-decoration: none; color: inherit;">
           <span class="brand-pulse"></span>
-          <span class="brand-name">open-pulse</span>
+          <span class="brand-name">OpenPulse</span>
           <span class="brand-tag">hub</span>
-        </div>
+        </a>
         <nav class="sidebar-nav">
           {# User-facing surfaces — what people open day-to-day. Overview here
              is the trends view (charts over time); the live snapshot moved
@@ -82,21 +103,43 @@
              open-pulse-ontology docs (configurable via HUB_ONTOLOGY_URL). #}
           {% set nav_explore = [
             ('/', 'overview', 'Overview', 'M3 17l4-6 5 4 4-7 5 9'),
+            ('/hub', 'hub', 'Hub', 'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z'),
             ('/databases', 'databases', 'Query', 'M4 7c0-2 4-3 8-3s8 1 8 3v10c0 2-4 3-8 3s-8-1-8-3z M4 7c0 2 4 3 8 3s8-1 8-3 M4 12c0 2 4 3 8 3s8-1 8-3'),
+            ('/canvas', 'canvas', 'Canvas', 'M3 5h18v14H3z M7 9h2 M11 9h2 M15 9h2 M7 13h6 M7 17h10'),
+            ('/chaoss', 'chaoss', 'CHAOSS metrics', 'M12 3v2 M12 19v2 M3 12h2 M19 12h2 M5.6 5.6l1.4 1.4 M17 17l1.4 1.4 M5.6 18.4l1.4-1.4 M17 7l1.4-1.4 M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z M12 11v3 M10.5 12.5h3'),
           ] %}
           {# Admin / operations — orchestration, observability, configuration.
              Status leads the admin block (was the old Overview tile view).
              GrimoireLab Projects sits with admin tools because it builds
              the projects.json that the GrimoireLab applier reloads. #}
-          {% set nav_admin = [
+          {# Sidebar items split into two tiers:
+             - "basic": always visible. Read-only safe — anyone with a
+               valid session can browse these. Reader role + HUB_READONLY
+               deploys see only this tier.
+             - "expert": operator-only. The matching routes carry
+               ``require_writable`` so even if a reader manages to hit
+               them directly the server refuses with 403. Hiding them
+               in the nav just keeps the UI honest.
+
+             ``request.state.user_role`` is stamped by ``require_auth``
+             on every protected page. Default to "admin" for legacy
+             single-password deploys that pre-date the reader role. #}
+          {% set _role = request.state.user_role if request.state and request.state.user_role else 'admin' %}
+          {% set _is_admin = _role == 'admin' %}
+          {% set _is_expert = _is_admin and not hub_read_only %}
+          {% set nav_admin_basic = [
             ('/status', 'status', 'Status', 'M3 12l9-9 9 9M5 10v10h14V10'),
-            ('/stack', 'stack', 'Stack', 'M3 5l9-3 9 3-9 3-9-3z M3 12l9 3 9-3 M3 19l9 3 9-3'),
             ('/services', 'services', 'Services', 'M4 6h16M4 12h16M4 18h16'),
+            ('/logs', 'logs', 'Logs', 'M4 6h16M4 10h16M4 14h12M4 18h8'),
+            ('/admin', 'admin', 'Resources', 'M3 13l4-4 4 4 5-7 5 9 M3 21h18'),
+          ] %}
+          {% set nav_admin_expert = [
             ('/pipeline', 'pipeline', 'Quests', 'M4 6h6M4 12h12M4 18h8 M14 6l4 4-4 4'),
             ('/projects', 'projects', 'GrimoireLab Projects', 'M3 7l9-4 9 4-9 4-9-4z M3 12l9 4 9-4 M3 17l9 4 9-4'),
-            ('/logs', 'logs', 'Logs', 'M4 6h16M4 10h16M4 14h12M4 18h8'),
+            ('/stack', 'stack', 'Stack', 'M3 5l9-3 9 3-9 3-9-3z M3 12l9 3 9-3 M3 19l9 3 9-3'),
             ('/settings', 'settings', 'Settings', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'),
           ] %}
+          {% set nav_admin = nav_admin_basic + nav_admin_expert if _is_expert else nav_admin_basic %}
 
           <div class="sidebar-group">
             <div class="sidebar-group-label">Explore</div>
@@ -120,17 +163,26 @@
           <div class="sidebar-group">
             <div class="sidebar-group-label">Dashboards</div>
             {% for d in dashboards %}
-              <a href="{{ d.url }}" target="_blank" rel="noopener" class="sidebar-link sidebar-link-ext sidebar-link-dash">
+              <a href="{{ d.url }}" target="_blank" rel="noopener" class="sidebar-link sidebar-link-ext sidebar-link-dash" title="{{ d.summary }}">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h7v7H3z M14 4h7v4h-7z M14 10h7v10h-7z M3 14h7v6H3z" />
                 </svg>
-                <div class="dash-meta">
-                  <div class="dash-head">
-                    <span x-cloak class="dash-name">{{ d.name }}</span>
-                    <span class="dash-tech">{{ d.tech }}</span>
-                  </div>
-                  <div class="dash-summary">{{ d.summary }}</div>
-                </div>
+                <span class="dash-name">{{ d.name }}</span>
+                <span class="dash-tech">{{ d.tech }}</span>
+                <span class="ext-arrow">↗</span>
+              </a>
+            {% endfor %}
+          </div>
+
+          <div class="sidebar-group">
+            <div class="sidebar-group-label">API docs</div>
+            {% for a in api_docs %}
+              <a href="{{ a.url }}" target="_blank" rel="noopener" class="sidebar-link sidebar-link-ext sidebar-link-dash" title="{{ a.name }} — OpenAPI / Swagger UI">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 6l-5 6 5 6 M16 6l5 6-5 6 M14 4l-4 16" />
+                </svg>
+                <span class="dash-name">{{ a.name }}</span>
+                <span class="dash-tech">{{ a.tech }}</span>
                 <span class="ext-arrow">↗</span>
               </a>
             {% endfor %}
@@ -161,15 +213,23 @@
       </aside>
 
       <main class="main">
-        <header class="page-header">
-          <div class="page-heading">
-            <h1>{% block heading %}{% endblock %}</h1>
-            <p>{% block subheading %}{% endblock %}</p>
-          </div>
-          <div class="page-actions">
-            {% block headeractions %}{% endblock %}
-          </div>
-        </header>
+        {# .page-chrome is the sticky strip under the marquee that
+           contains the page heading + an optional breadcrumb. They
+           scroll as a single block so the breadcrumb always sits
+           exactly under the header. Pages without a breadcrumb just
+           leave the block empty. #}
+        <div class="page-chrome">
+          <header class="page-header">
+            <div class="page-heading">
+              <h1>{% block heading %}{% endblock %}</h1>
+              <p>{% block subheading %}{% endblock %}</p>
+            </div>
+            <div class="page-actions">
+              {% block headeractions %}{% endblock %}
+            </div>
+          </header>
+          {% block breadcrumb %}{% endblock %}
+        </div>
         <div class="page-body">
           {% block content %}{% endblock %}
         </div>
@@ -182,22 +242,73 @@
         items: [
           {label:'loading…', value:'', tone:'neutral'},
         ],
+        // History-derived series per label — populated by refreshHistory(),
+        // consumed by refresh() when it rebuilds ``items``. Each entry is
+        // a string of ``x,y`` polyline points already scaled to the SVG's
+        // 60×14 viewBox, so the template only has to set ``:points``.
+        sparks: {},
+
         async refresh() {
           try {
             const r = await fetch('/api/stats/');
             if (!r.ok) return;
             const j = await r.json();
             const items = [
-              { label: 'services',       value: `${j.services.healthy}/${j.services.total} healthy`, tone: j.services.healthy === j.services.total ? 'ok' : 'warn' },
-              { label: 'running',        value: String(j.services.running), tone: 'ok' },
+              { label: 'services',       value: `${j.services.healthy}/${j.services.total} healthy`, tone: j.services.healthy === j.services.total ? 'ok' : 'warn',
+                spark: this.sparks.services_healthy },
+              { label: 'running',        value: String(j.services.running), tone: 'ok',
+                spark: this.sparks.services_running },
               { label: 'longest uptime', value: j.services.uptime_max_human || '—', tone: 'neutral' },
-              { label: 'sparql repos',   value: j.sparql.repos === null ? '—' : String(j.sparql.repos), tone: j.sparql.repos === null ? 'warn' : 'ok' },
-              { label: 'neo4j nodes',    value: j.neo4j.nodes === null ? '—' : String(j.neo4j.nodes), tone: j.neo4j.nodes === null ? 'warn' : 'ok' },
-              { label: 'neo4j rels',     value: j.neo4j.rels  === null ? '—' : String(j.neo4j.rels),  tone: j.neo4j.rels  === null ? 'warn' : 'ok' },
+              { label: 'sparql repos',   value: j.sparql.repos === null ? '—' : String(j.sparql.repos), tone: j.sparql.repos === null ? 'warn' : 'ok',
+                spark: this.sparks.sparql_repos },
+              { label: 'neo4j nodes',    value: j.neo4j.nodes === null ? '—' : String(j.neo4j.nodes), tone: j.neo4j.nodes === null ? 'warn' : 'ok',
+                spark: this.sparks.neo4j_nodes },
+              { label: 'neo4j rels',     value: j.neo4j.rels  === null ? '—' : String(j.neo4j.rels),  tone: j.neo4j.rels  === null ? 'warn' : 'ok',
+                spark: this.sparks.neo4j_rels },
               { label: 'updated',        value: new Date(j.generated_at).toLocaleTimeString(), tone: 'neutral' },
             ];
             this.items = items;
           } catch (e) { /* keep last */ }
+        },
+
+        // Pulls the last 6h of history (10-min buckets ≈ 36 points)
+        // and turns each numeric series into a polyline-points string
+        // mapped into the 60×14 SVG viewBox. Cheap to do once a minute;
+        // the marquee's 10s refresh just re-uses the cached strings.
+        async refreshHistory() {
+          try {
+            const r = await fetch('/api/stats/history?range=6h&bucket_seconds=600');
+            if (!r.ok) return;
+            const j = await r.json();
+            const samples = j.samples || [];
+            const keys = [
+              'services_healthy', 'services_running',
+              'sparql_repos', 'neo4j_nodes', 'neo4j_rels',
+            ];
+            const out = {};
+            for (const key of keys) {
+              const vals = samples
+                .map(s => (s[key] === null || s[key] === undefined) ? null : Number(s[key]))
+                .filter(v => v !== null);
+              if (vals.length < 2) continue;
+              const min = Math.min(...vals);
+              const max = Math.max(...vals);
+              const span = (max - min) || 1;
+              // Build "x,y x,y …" — x spans 0..60 across all samples,
+              // y inverted into 1..13 so the line clears the top + bottom.
+              const n = vals.length;
+              const pts = vals.map((v, i) => {
+                const x = (i / (n - 1)) * 60;
+                const y = 13 - ((v - min) / span) * 12;
+                return `${x.toFixed(1)},${y.toFixed(1)}`;
+              }).join(' ');
+              out[key] = { points: pts };
+            }
+            this.sparks = out;
+            // Re-render so the next 10s tick picks the new series up
+            // without waiting a full minute.
+            this.refresh();
+          } catch (e) { /* keep last cache */ }
         },
       };
     }

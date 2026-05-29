@@ -25,9 +25,15 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_HTTP_TIMEOUT = 30.0
+_HTTP_TIMEOUT = 60.0
 _DEFAULT_POLL_INTERVAL = 5.0
 _DEFAULT_TIMEOUT = 3600.0
+# When the crawler is saturated (e.g. multiple concurrent jobs chewing
+# through large queues) status GETs can stall well past the per-request
+# timeout. A single ReadTimeout shouldn't blow up an in-flight pipeline
+# step — the job on the other side is still alive. Tolerate a small
+# burst of transient HTTP errors before giving up.
+_MAX_TRANSIENT_POLL_FAILURES = 5
 
 
 class CrawlerJobFailedError(RuntimeError):
@@ -72,9 +78,19 @@ class CrawlerService:
 
     # -- Job lifecycle -----------------------------------------------------
 
-    def submit_crawl(self, request: dict[str, object]) -> str:
-        """Start a crawl job and return its ``job_id``."""
-        url = f"{self.endpoint}/api/v1/crawl"
+    def submit_crawl(
+        self, request: dict[str, object], *, use_graphql: bool = True
+    ) -> str:
+        """Start a crawl job and return its ``job_id``.
+
+        ``use_graphql`` selects the endpoint variant. Both accept the
+        same ``CrawlRequest`` body schema; GraphQL is the project
+        default because it batches what REST does in N round-trips
+        into a single multi-resource query (lower GitHub rate-limit
+        cost for the same payload).
+        """
+        path = "/api/v1/crawl/graphql" if use_graphql else "/api/v1/crawl"
+        url = f"{self.endpoint}{path}"
         resp = self._client.post(url, json=request, headers=self._bearer_headers())
         if resp.status_code != 202:
             raise RuntimeError(
@@ -114,17 +130,55 @@ class CrawlerService:
         job_id: str,
         *,
         poll_interval: float = _DEFAULT_POLL_INTERVAL,
-        timeout: float = _DEFAULT_TIMEOUT,
+        timeout: float | None = _DEFAULT_TIMEOUT,
     ) -> dict[str, object]:
         """Poll ``get_status`` until the job leaves a non-terminal state.
 
         Returns the final status dict on ``COMPLETED``.  Raises
-        :class:`CrawlerJobFailedError` on ``FAILED`` and
-        :class:`CrawlerJobTimeoutError` if the deadline elapses first.
+        :class:`CrawlerJobFailedError` on ``FAILED``.
+
+        ``timeout`` is the polling deadline (this is the *client* side
+        budget — the crawler itself keeps running regardless). Pass
+        ``None`` to wait indefinitely; long crawls (heavy BFS with
+        PR/issue scanning, multiple hops) can't easily predict their
+        runtime, so opting out of the timeout altogether is the right
+        call when "estará cuando esté" is the acceptance criterion. A
+        ``<= 0`` value is an *immediate* deadline — it raises
+        :class:`CrawlerJobTimeoutError` on the first non-terminal poll.
+        The pipeline config layer maps a user-supplied ``timeout_seconds
+        <= 0`` to ``None`` before it ever reaches here, so the "wait
+        forever" UX is preserved at the boundary that owns it.
         """
-        deadline = time.monotonic() + timeout
+        no_timeout = timeout is None
+        deadline = float("inf") if no_timeout else time.monotonic() + timeout
+        consecutive_failures = 0
         while True:
-            status = self.get_status(job_id)
+            try:
+                status = self.get_status(job_id)
+            except httpx.HTTPError as exc:
+                # Transient network/timeout errors during polling are common
+                # when the crawler is busy. Treat the first few as warnings
+                # and keep polling — the job is still running on the other
+                # side. Only escalate when we've burned through the budget.
+                consecutive_failures += 1
+                logger.warning(
+                    "crawler: poll for job %s failed (%d/%d): %s",
+                    job_id,
+                    consecutive_failures,
+                    _MAX_TRANSIENT_POLL_FAILURES,
+                    exc,
+                )
+                if consecutive_failures >= _MAX_TRANSIENT_POLL_FAILURES:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise CrawlerJobTimeoutError(
+                        f"crawler job {job_id} did not complete within {timeout:.0f}s "
+                        f"(last poll error: {exc})"
+                    ) from exc
+                time.sleep(poll_interval)
+                continue
+
+            consecutive_failures = 0
             state = status.get("status")
             if state == "completed":
                 return status

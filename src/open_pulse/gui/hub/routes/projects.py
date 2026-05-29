@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from ..auth import get_settings, require_auth
+from ..auth import get_settings, require_auth, require_writable
 from ..queries import (
     FACETS,
     build_filtered_query,
@@ -41,6 +41,97 @@ def _slugify(s: str) -> str:
     s = re.sub(r"\s+", "_", s)
     s = re.sub(r"[^a-z0-9_]", "", s)
     return s or "open_pulse_sparql"
+
+
+# Numeric XSD datatypes the SPARQL store returns. Cast cells with these
+# datatypes back to int/float so the tree-table renderer can sort them
+# numerically and the column-type 'auto' detection picks the right
+# shape. Everything else stays as a string (URIs, dates, plain literals).
+_XSD_INT_TYPES = frozenset(
+    {
+        "http://www.w3.org/2001/XMLSchema#integer",
+        "http://www.w3.org/2001/XMLSchema#int",
+        "http://www.w3.org/2001/XMLSchema#long",
+        "http://www.w3.org/2001/XMLSchema#nonNegativeInteger",
+    }
+)
+_XSD_FLOAT_TYPES = frozenset(
+    {
+        "http://www.w3.org/2001/XMLSchema#decimal",
+        "http://www.w3.org/2001/XMLSchema#double",
+        "http://www.w3.org/2001/XMLSchema#float",
+    }
+)
+# Columns we treat as "the repo URL" when present. First match wins.
+# Lets the GrimoireLab Apply → workflow keep accepting both the
+# canonical ``?repo`` and a few common synonyms users write by hand.
+_REPO_COL_CANDIDATES = ("repo", "repository", "project", "url")
+
+
+def _parse_bindings_to_table(
+    head_vars: list[str], bindings: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Turn a SPARQL SELECT response into the tree-table contract.
+
+    Returns ``{columns, rows, repos, repo_column, row_count}``:
+
+      columns      list of var names, in select order
+      rows         list of value lists (one per binding); numeric XSD
+                   types cast to int/float, everything else as string
+      repos        flat list of repo URLs, derived from whichever
+                   _REPO_COL_CANDIDATES var is present (back-compat
+                   with the Apply → workflow)
+      repo_column  which var supplied the repos list (or None if no
+                   recognisable column exists in this query)
+      row_count    len(rows) — the table size, distinct from
+                   len(repos) which is the post-dedup URL count
+    """
+    rows: list[list[Any]] = []
+    for b in bindings:
+        row: list[Any] = []
+        for v in head_vars:
+            cell = b.get(v)
+            if cell is None:
+                row.append(None)
+                continue
+            val = cell.get("value")
+            t = cell.get("datatype") or ""
+            if t in _XSD_INT_TYPES:
+                try:
+                    val = int(val)
+                except (TypeError, ValueError):
+                    pass
+            elif t in _XSD_FLOAT_TYPES:
+                try:
+                    val = float(val)
+                except (TypeError, ValueError):
+                    pass
+            row.append(val)
+        rows.append(row)
+
+    repo_col: str | None = None
+    for candidate in _REPO_COL_CANDIDATES:
+        if candidate in head_vars:
+            repo_col = candidate
+            break
+    repos: list[str] = []
+    if repo_col is not None:
+        col_idx = head_vars.index(repo_col)
+        repos = sorted(
+            {
+                r[col_idx]
+                for r in rows
+                if isinstance(r[col_idx], str)
+                and r[col_idx].startswith(("http://", "https://"))
+            }
+        )
+    return {
+        "columns": head_vars,
+        "rows": rows,
+        "repos": repos,
+        "repo_column": repo_col,
+        "row_count": len(rows),
+    }
 
 
 @router.post("/sparql/query", dependencies=[Depends(require_auth)])
@@ -82,19 +173,18 @@ async def run_sparql(
             detail=f"SPARQL endpoint returned HTTP {resp.status_code}: {resp.text[:200]}",
         )
     body = resp.json()
-    bindings = (body.get("results") or {}).get("bindings") or []
-    repos = sorted(
-        {
-            r["repo"]["value"]
-            for r in bindings
-            if isinstance(r.get("repo", {}).get("value"), str)
-            and r["repo"]["value"].startswith(("http://", "https://"))
-        }
+    table = _parse_bindings_to_table(
+        (body.get("head") or {}).get("vars") or [],
+        (body.get("results") or {}).get("bindings") or [],
     )
-    return {"count": len(repos), "repos": repos}
+    # ``count`` retained for back-compat with the marquee/status line —
+    # it's the number of repo URLs the Apply → workflow would push, not
+    # the row count of the result set.
+    return {"count": len(table["repos"]), **table}
 
 
-@router.post("/build", dependencies=[Depends(require_auth)])
+@router.post("/build",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 def build(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     """Wrap a repo list in the GrimoireLab projects.json envelope (no I/O)."""
     repos = list(payload.get("repos") or [])
@@ -103,7 +193,8 @@ def build(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any
     return {slug: {"meta": {"title": title}, "git": repos}}
 
 
-@router.post("/apply", dependencies=[Depends(require_auth)])
+@router.post("/apply",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 async def apply(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     """Forward a projects.json payload to the applier sidecar.
 
@@ -187,6 +278,14 @@ async def facets(refresh: bool = False) -> dict[str, Any]:
     """
     settings = get_settings()
     endpoint = settings.sparql_url
+    # The sparql-proxy in front of Oxigraph requires Basic Auth. Resolve
+    # the credentials the hub container was booted with (SPARQL_AUTH,
+    # parsed in the settings loader) and thread them into every per-facet
+    # query — without this the proxy returns 401 and every facet card
+    # shows "⚠ HTTP 401".
+    auth: tuple[str, str] | None = None
+    if settings.sparql_user and settings.sparql_password:
+        auth = (settings.sparql_user, settings.sparql_password)
     now = time.time()
     if (
         not refresh
@@ -198,7 +297,7 @@ async def facets(refresh: bool = False) -> dict[str, Any]:
 
     async def _facet_values(client: httpx.AsyncClient, facet) -> dict[str, Any]:
         try:
-            body = await _run_sparql(client, endpoint, facet.values_query)
+            body = await _run_sparql(client, endpoint, facet.values_query, auth=auth)
         except Exception as exc:  # noqa: BLE001 — surface the error per facet
             return {
                 "key": facet.key,
@@ -237,6 +336,13 @@ async def facets(refresh: bool = False) -> dict[str, Any]:
             *(_facet_values(client, f) for f in FACETS),
             return_exceptions=False,
         )
+        # Decorate Wikidata IRIs (e.g. ``http://www.wikidata.org/entity/Q428691``)
+        # with their human-readable label. We batch every Q-id we
+        # found across all facets into one ``wbgetentities`` call and
+        # cache the result in process memory — 15 disciplines + a
+        # handful of others means one HTTP round-trip on the first
+        # uncached load, then nothing.
+        await _decorate_wikidata_labels(client, results)
 
     payload = {"endpoint": endpoint, "facets": list(results)}
     _FACETS_CACHE["data"] = payload
@@ -245,7 +351,85 @@ async def facets(refresh: bool = False) -> dict[str, Any]:
     return payload
 
 
-@router.post("/build-from-filters", dependencies=[Depends(require_auth)])
+# In-process cache of Wikidata Q-id → English label. Discipline
+# values in our SPARQL store are stored as opaque Wikidata IRIs;
+# resolving them to a label here keeps the data clean (we don't
+# duplicate Wikidata into our triples) without making the UI render
+# raw Q-numbers.
+_WIKIDATA_LABEL_CACHE: dict[str, str] = {}
+_WIKIDATA_IRI_PREFIX = "http://www.wikidata.org/entity/"
+
+
+async def _decorate_wikidata_labels(
+    client: httpx.AsyncClient,
+    facets_payload: list[dict[str, Any]],
+) -> None:
+    """For every facet value whose ``value`` is a Wikidata entity IRI,
+    add a ``label`` field with its English label. Cached.
+    """
+    # Collect every Q-id that needs resolving, minus what we already
+    # have in the cache.
+    needed: set[str] = set()
+    for facet in facets_payload:
+        for v in facet.get("values") or []:
+            iri = v.get("value") or ""
+            if iri.startswith(_WIKIDATA_IRI_PREFIX):
+                qid = iri[len(_WIKIDATA_IRI_PREFIX) :]
+                if qid and qid not in _WIKIDATA_LABEL_CACHE:
+                    needed.add(qid)
+    if needed:
+        # The MediaWiki API allows up to 50 IDs per call. Batch.
+        chunks = [list(needed)[i : i + 50] for i in range(0, len(needed), 50)]
+        for chunk in chunks:
+            try:
+                # Wikidata's API rejects requests whose User-Agent
+                # doesn't identify the tool + contact (per their bot
+                # policy at meta.wikimedia.org/wiki/User-Agent_policy).
+                # httpx's default ``python-httpx/X.Y`` returns 403
+                # against the action API — give it a proper UA.
+                r = await client.get(
+                    "https://www.wikidata.org/w/api.php",
+                    params={
+                        "action": "wbgetentities",
+                        "ids": "|".join(chunk),
+                        "props": "labels",
+                        "languages": "en",
+                        "format": "json",
+                    },
+                    timeout=8.0,
+                    headers={
+                        "User-Agent": (
+                            "open-pulse-hub/1.0 "
+                            "(+https://github.com/sdsc-ordes/open-pulse; "
+                            "open-pulse@epfl.ch) httpx"
+                        ),
+                        "Accept": "application/json",
+                    },
+                )
+                if r.status_code != 200:
+                    continue
+                payload = r.json()
+            except Exception:  # noqa: BLE001 — never fatal
+                continue
+            for qid, ent in (payload.get("entities") or {}).items():
+                label = (
+                    ((ent.get("labels") or {}).get("en") or {}).get("value")
+                ) or qid
+                _WIKIDATA_LABEL_CACHE[qid] = label
+
+    # Now annotate every facet value in place.
+    for facet in facets_payload:
+        for v in facet.get("values") or []:
+            iri = v.get("value") or ""
+            if iri.startswith(_WIKIDATA_IRI_PREFIX):
+                qid = iri[len(_WIKIDATA_IRI_PREFIX) :]
+                lbl = _WIKIDATA_LABEL_CACHE.get(qid)
+                if lbl:
+                    v["label"] = lbl
+
+
+@router.post("/build-from-filters",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 async def build_from_filters(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
@@ -287,24 +471,20 @@ async def build_from_filters(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    bindings = (body.get("results") or {}).get("bindings") or []
-    repos: list[str] = []
-    for b in bindings:
-        cell = b.get("repo") or {}
-        v = cell.get("value")
-        if isinstance(v, str) and v.startswith(("http://", "https://")):
-            repos.append(v)
-    repos = sorted(set(repos))
-
+    table = _parse_bindings_to_table(
+        (body.get("head") or {}).get("vars") or [],
+        (body.get("results") or {}).get("bindings") or [],
+    )
     return {
         "query": query,
         "selections": cleaned,
-        "count": len(repos),
-        "repos": repos,
+        "count": len(table["repos"]),
+        **table,
     }
 
 
-@router.post("/build-by-owner", dependencies=[Depends(require_auth)])
+@router.post("/build-by-owner",
+             dependencies=[Depends(require_auth), Depends(require_writable)])
 def build_by_owner(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:

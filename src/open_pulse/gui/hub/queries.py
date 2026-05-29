@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 PREFIXES = """\
 PREFIX schema: <http://schema.org/>
 PREFIX rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX pulse:  <https://open-pulse.epfl.ch/ontology#>
+PREFIX org:    <http://www.w3.org/ns/org#>
 """
 
 
@@ -242,13 +244,40 @@ FACETS: tuple[Facet, ...] = (
     Facet(
         key="organization",
         label="Organization",
-        description="Authors and publishers as schema:Organization (or anything with schema:name).",
-        predicate_path="(schema:author|schema:publisher)/schema:name",
+        description=(
+            "Owning organisation per ``pulse:ownedBy``, filtered to nodes "
+            "typed as ``org:Organization`` (GitHub orgs only — user-owned "
+            "repos are excluded since their pulse:ownedBy points at a "
+            "schema:Person)."
+        ),
+        predicate_path="pulse:ownedBy",
         values_query=PREFIXES
         + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
-        (schema:author|schema:publisher)/schema:name ?value .
+        pulse:ownedBy ?org .
+  ?org  a            org:Organization ;
+        schema:name  ?value .
+}
+GROUP BY ?value
+ORDER BY DESC(?count) ?value""",
+    ),
+    Facet(
+        key="owner_user",
+        label="Owner (personal)",
+        description=(
+            "GitHub users that own one or more repositories — the "
+            "``pulse:ownedBy`` target is a ``schema:Person`` (personal "
+            "account), not an organisation."
+        ),
+        predicate_path="pulse:ownedBy",
+        values_query=PREFIXES
+        + """\
+SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
+  ?repo a schema:SoftwareSourceCode ;
+        pulse:ownedBy ?user .
+  ?user a            schema:Person ;
+        schema:name  ?value .
 }
 GROUP BY ?value
 ORDER BY DESC(?count) ?value""",
@@ -269,14 +298,14 @@ ORDER BY DESC(?count) ?value""",
     ),
     Facet(
         key="discipline",
-        label="Discipline / Category",
-        description="schema:applicationCategory — discipline-level tags.",
-        predicate_path="schema:applicationCategory",
+        label="Discipline",
+        description="pulse:discipline — discipline / research-area tag on the repo.",
+        predicate_path="pulse:discipline",
         values_query=PREFIXES
         + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
-        schema:applicationCategory ?value .
+        pulse:discipline ?value .
 }
 GROUP BY ?value
 ORDER BY DESC(?count) ?value""",
@@ -296,30 +325,43 @@ GROUP BY ?value
 ORDER BY DESC(?count) ?value""",
     ),
     Facet(
-        key="keyword",
-        label="Keyword / Topic",
-        description="schema:keywords / topic tags.",
-        predicate_path="schema:keywords",
+        key="org_type",
+        label="Organization type",
+        description=(
+            "``pulse:OrganizationType`` of the owning organisation — "
+            "PrivateCompany / University / ResearchInstitution / "
+            "NonProfitOrganization / GovernmentAgency / CommunitySpace "
+            "/ SoftwareProject / OtherOrganizationType. Counts repos "
+            "(not orgs), so a University with 100 repos contributes "
+            "100 to its bucket."
+        ),
+        predicate_path="pulse:ownedBy/pulse:OrganizationType",
         values_query=PREFIXES
         + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
   ?repo a schema:SoftwareSourceCode ;
-        schema:keywords ?value .
+        pulse:ownedBy ?org .
+  ?org  pulse:OrganizationType ?value .
 }
 GROUP BY ?value
-ORDER BY DESC(?count) ?value
-LIMIT 200""",
+ORDER BY DESC(?count) ?value""",
     ),
     Facet(
         key="repo_type",
         label="Repository type",
-        description="rdf:type — the schema.org class(es) asserted on the resource.",
-        predicate_path="a",
+        description=(
+            "pulse:repositoryType — the kind of artefact the repo "
+            "publishes (Software, Documentation, EducationalResource, "
+            "Data). rdf:type was less useful because every repo is "
+            "schema:SoftwareSourceCode regardless of what it actually "
+            "ships."
+        ),
+        predicate_path="pulse:repositoryType",
         values_query=PREFIXES
         + """\
 SELECT ?value (COUNT(DISTINCT ?repo) AS ?count) WHERE {
-  ?repo a ?value .
-  FILTER(STRSTARTS(STR(?value), "http://schema.org/"))
+  ?repo a schema:SoftwareSourceCode ;
+        pulse:repositoryType ?value .
 }
 GROUP BY ?value
 ORDER BY DESC(?count) ?value""",

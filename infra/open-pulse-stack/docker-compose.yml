@@ -104,7 +104,32 @@ services:
       # is empty — keep the validation in the service, not in compose's
       # parse-time interpolation (which fires for every profile).
       API_TOKEN: "${CRAWLER_API_TOKEN:-}"
+      # GitHub PAT(s). Renamed from ``GITHUB_TOKEN`` to the
+      # ``CRAWLER_*`` namespace so it stops shadowing the gh CLI's
+      # magic ``GITHUB_TOKEN`` env (same motivation as the GME rename
+      # in Imaging-Plaza/git-metadata-extractor PR #57). The
+      # ``_POOL`` variant carries the full comma-separated list used
+      # by the round-robin; the bare ``CRAWLER_GITHUB_TOKEN`` is the
+      # single-PAT fallback used by legacy / external lib call sites
+      # that 401 on commas.
+      CRAWLER_GITHUB_TOKEN: "${CRAWLER_GITHUB_TOKEN:-}"
+      CRAWLER_GITHUB_TOKEN_POOL: "${CRAWLER_GITHUB_TOKEN:-}"
+      # Bridge for the pr-9 crawler image, which still reads ``GITHUB_TOKEN``
+      # in ``open_pulse_crawler/api.py`` (lines 549, 649) and aborts jobs
+      # with "GITHUB_TOKEN environment variable is not set" if it is empty.
+      # Until the image is updated to honor the ``CRAWLER_*`` rename above,
+      # forward the same PAT under both names. Remove once the image picks
+      # up the rename and re-reads ``CRAWLER_GITHUB_TOKEN_POOL`` directly.
       GITHUB_TOKEN: "${CRAWLER_GITHUB_TOKEN:-}"
+      # The pr-9 image's API cache (``open_pulse_crawler/github_client.py``)
+      # defaults to a relative ``data/open-pulse-crawler/cache`` path, which
+      # the ``app`` user cannot create under cwd ``/app`` (owned by root).
+      # Without this override, every GraphQL crawl aborts with
+      # ``PermissionError: [Errno 13] Permission denied: 'data'`` before a
+      # single request is issued. Pointing the cache at /tmp keeps the
+      # speedup of cross-job request memoization without needing a mounted
+      # volume — the trade-off is the cache evaporates on container restart.
+      OPC_CACHE_DIR: "/tmp/open-pulse-crawler/cache"
     ports:
       - "${CRAWLER_PORT:-8000}:8000"
     restart: unless-stopped
@@ -153,7 +178,25 @@ services:
       OPENROUTER_API_KEY: "${EXTRACTOR_OPENROUTER_API_KEY:-}"
       # See the crawler block above — soft default keeps other profiles
       # buildable. Extractor itself errors when this is empty.
-      GITHUB_TOKEN: "${EXTRACTOR_GITHUB_TOKEN:-}"
+      #
+      # GME_GITHUB_TOKEN: comma-separated PATs for the GitHub call sites
+      # the GME makes (REST + GraphQL + gimie). The extractor's
+      # ``src/api.py`` startup runs ``_normalize_github_token_pool()``
+      # before any worker imports: it parses the comma list, exports
+      # ``GME_GITHUB_TOKEN_POOL=<full list>`` for the round-robin pool,
+      # and overwrites ``GME_GITHUB_TOKEN=<first token>`` for legacy
+      # single-token consumers (gimie, validate_github_token). With N
+      # PATs the effective GraphQL ceiling is N × 5 000 pts/h.
+      #
+      # Renamed from ``GITHUB_TOKEN`` in upstream PR #57 — gh CLI
+      # treats ``GITHUB_TOKEN`` as a magic env that overrides
+      # ``gh auth login``, so the GME_ namespace lets the two coexist
+      # in the devcontainer / admin shells.
+      #
+      # Note: do NOT inject ``GME_GITHUB_TOKEN_POOL`` from here — the
+      # app derives it. Setting it externally risks it drifting out of
+      # sync with ``GME_GITHUB_TOKEN`` after a future restart.
+      GME_GITHUB_TOKEN: "${EXTRACTOR_GITHUB_TOKEN:-}"
       GITLAB_TOKEN: "${EXTRACTOR_GITLAB_TOKEN:-}"
       INFOSCIENCE_TOKEN: "${EXTRACTOR_INFOSCIENCE_TOKEN:-}"
       MODEL: "${EXTRACTOR_MODEL:-gpt-4o-mini}"
@@ -285,11 +328,12 @@ services:
       - "${SPARQL_PROXY_PORT:-7878}:7878"
     environment:
       # Paths to protect with the reader/admin Basic Auth block in the
-      # Caddyfile. Default `__off__` is a sentinel that matches no real
-      # request, so reads pass through anonymously. Set to e.g.
-      # `/query /query/*` in your .env to require auth on reads (admin
-      # OR reader credentials accepted).
-      SPARQL_READ_AUTH_PATHS: "${SPARQL_READ_AUTH_PATHS:-__off__}"
+      # Caddyfile. Default is **read-gated** so the YASGUI UI on
+      # ``/`` and the ``/query`` endpoint require the admin credential
+      # (``SPARQL_AUTH``) — or a reader credential when
+      # ``SPARQL_READER_AUTH`` is set. Override to ``__off__`` in
+      # ``infra/.env`` to expose reads anonymously (matches no path).
+      SPARQL_READ_AUTH_PATHS: "${SPARQL_READ_AUTH_PATHS:-/ /query /query/*}"
     volumes:
       - ../services/sparql-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ../services/sparql-proxy/users:/etc/caddy/users:ro
@@ -329,7 +373,10 @@ services:
       HUB_APPLIER_URL: "${HUB_APPLIER_URL:-http://projects-applier:8000}"
       HUB_SPARQL_URL: "${HUB_SPARQL_URL:-http://sparql-proxy:7878}"
       HUB_NEO4J_URL: "${HUB_NEO4J_URL:-bolt://neo4j:7687}"
-      HUB_KIBITER_URL: "${HUB_KIBITER_URL:-http://localhost:7508}"
+      HUB_KIBITER_URL: "${HUB_KIBITER_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7508}"
+      # Single host knob the URL defaults below derive from. Override individual
+      # HUB_*_BROWSER_URL / HUB_*_DOCS_URL values to bypass this.
+      HUB_PUBLIC_HOST: "${HUB_PUBLIC_HOST:-localhost}"
       # OpenSearch (used by /api/databases/opensearch/* and the marquee stats)
       HUB_OPENSEARCH_URL: "${HUB_OPENSEARCH_URL:-https://opensearch-node1:9200}"
       HUB_OPENSEARCH_USERNAME: "${HUB_OPENSEARCH_USERNAME:-${OPENSEARCH_USERNAME:-admin}}"
@@ -346,11 +393,24 @@ services:
       SPARQL_AUTH: "${SPARQL_AUTH:-}"
       # Used by /api/projects/build-by-owner to query Neo4j directly.
       NEO4J_AUTH: "${NEO4J_AUTH:-}"
-      # User-facing dashboard URLs (host-published ports / external links)
-      HUB_NEO4J_BROWSER_URL: "${HUB_NEO4J_BROWSER_URL:-http://localhost:7474}"
-      HUB_SPARQL_BROWSER_URL: "${HUB_SPARQL_BROWSER_URL:-http://localhost:7878}"
-      HUB_OPENSEARCH_DASHBOARDS_URL: "${HUB_OPENSEARCH_DASHBOARDS_URL:-http://localhost:5601}"
-      HUB_ONTOLOGY_URL: "${HUB_ONTOLOGY_URL:-https://github.com/sdsc-ordes/open-pulse-ontology}"
+      # User-facing dashboard URLs (host-published ports / external links).
+      # Default to HUB_PUBLIC_HOST so an operator only has to set one var;
+      # set an explicit URL here to override on a per-service basis.
+      HUB_NEO4J_BROWSER_URL: "${HUB_NEO4J_BROWSER_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7503}"
+      HUB_SPARQL_BROWSER_URL: "${HUB_SPARQL_BROWSER_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7502}"
+      HUB_OPENSEARCH_DASHBOARDS_URL: "${HUB_OPENSEARCH_DASHBOARDS_URL:-http://${HUB_PUBLIC_HOST:-localhost}:7508}"
+      HUB_ONTOLOGY_URL: "${HUB_ONTOLOGY_URL:-https://sdsc-ordes.github.io/open-pulse-ontology/versions/v2.1.2/index.html}"
+      # Swagger UIs are proxied through the hub (auth-gated) by default, so
+      # the upstream pages don't need to be reachable anonymously. Set a full
+      # URL to bypass the hub proxy.
+      HUB_CRAWLER_DOCS_URL: "${HUB_CRAWLER_DOCS_URL:-/api/crawler/docs}"
+      HUB_EXTRACTOR_DOCS_URL: "${HUB_EXTRACTOR_DOCS_URL:-/api/extractor/docs}"
+      # Public URL Swagger UI's "Try it out" hits — used in the rewritten
+      # `servers` field. Defaults to ${HUB_PUBLIC_HOST}:${PORT}.
+      HUB_CRAWLER_PUBLIC_URL: "${HUB_CRAWLER_PUBLIC_URL:-}"
+      HUB_EXTRACTOR_PUBLIC_URL: "${HUB_EXTRACTOR_PUBLIC_URL:-}"
+      # Used by the openapi proxy to fetch the spec in-network.
+      HUB_EXTRACTOR_URL: "${HUB_EXTRACTOR_URL:-http://git-metadata-extractor:1234}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${OPEN_PULSE_DATA_DIR:-./data}/hub:/data/hub
@@ -363,3 +423,54 @@ services:
       start_period: 10s
     mem_limit: ${HUB_MEM_LIMIT:-512m}
     cpus: ${HUB_CPUS:-1.0}
+
+  # ── edge-proxy ───────────────────────────────────────────────────────
+  # Public TLS-terminating reverse proxy for openpulse.epfl.ch.
+  #
+  # Listens on 80 + 443 (the only two ports the EPFL DMZ opens for public
+  # browser traffic — every other 75xx port is restricted to operators on
+  # the EPFL net / VPN) and forwards every request to the hub. The hub
+  # already implements path-prefixed proxies for the crawler API
+  # (`/api/crawler/*`) and the metadata extractor (`/api/extractor/*`),
+  # so there's no per-service routing here — one reverse_proxy block
+  # gives external users the whole control plane under one URL.
+  #
+  # Caddy auto-obtains a Let's Encrypt certificate via HTTP-01 challenge
+  # on port 80 (DNS resolves openpulse.epfl.ch to this host's public
+  # IP). Cert state lives in /data, mounted as a host volume so renewals
+  # survive container recreates.
+  #
+  # Profile: `edge`. Bring up alongside the rest with
+  # `docker compose --profile edge --profile hub --profile crawler … up -d`.
+  edge-proxy:
+    image: caddy:2.8-alpine
+    container_name: openpulse-edge-proxy
+    profiles:
+      - edge
+    restart: unless-stopped
+    # No depends_on: the hub lives in the `hub` profile, so compose
+    # can't validate the link when only `--profile edge` is active.
+    # Caddy retries upstream connections automatically — if the hub is
+    # down the proxy returns 502 until it's back, which is what we want.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ../services/edge-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${OPEN_PULSE_DATA_DIR:-./data}/edge-proxy/data:/data
+      - ${OPEN_PULSE_DATA_DIR:-./data}/edge-proxy/config:/config
+    healthcheck:
+      # Caddy serves a permanent 308 HTTP→HTTPS redirect on :80 which
+      # wget --spider follows into a real TLS handshake and chokes on
+      # SNI (localhost ≠ openpulse.epfl.ch) — every check failed even
+      # though external traffic worked fine. Hit Caddy's admin API on
+      # :2019 instead: it returns the running config as JSON over plain
+      # HTTP and only answers when the server process is alive.
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:2019/config/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: ${EDGE_PROXY_MEM_LIMIT:-128m}
+    cpus: ${EDGE_PROXY_CPUS:-0.5}
