@@ -120,14 +120,21 @@ developer-friendly but tend to collide with other things on a shared
 host. The mapping below is the **firewall-friendly EPFL layout** we
 landed on:
 
-| Host port | Container             | Internal port | Env var              |
-| --------- | --------------------- | ------------- | -------------------- |
-| **7502**  | `sparql-proxy`        | 7878          | `SPARQL_PROXY_PORT`  |
-| **7503**  | `neo4j` (Browser/HTTP)| 7474          | `NEO4J_HTTP_PORT`    |
-| **7504**  | `neo4j` (Bolt)        | 7687          | `NEO4J_BOLT_PORT`    |
-| **7507**  | `open-pulse-hub`      | 8000          | `HUB_PORT`           |
-| **7508**  | `grimoirelab nginx`   | 8000          | hard-coded in compose|
-| **7509**  | `portainer`           | 9000          | `PORTAINER_PORT`     |
+| Host port | Container               | Internal port | Env var              |
+| --------- | ----------------------- | ------------- | -------------------- |
+| **80**    | `openpulse-edge-proxy`  | 80            | hard-coded (Caddy)   |
+| **443**   | `openpulse-edge-proxy`  | 443           | hard-coded (Caddy)   |
+| **7502**  | `sparql-proxy`          | 7878          | `SPARQL_PROXY_PORT`  |
+| **7503**  | `neo4j` (Browser/HTTP)  | 7474          | `NEO4J_HTTP_PORT`    |
+| **7504**  | `neo4j` (Bolt)          | 7687          | `NEO4J_BOLT_PORT`    |
+| **7507**  | `open-pulse-hub`        | 8000          | `HUB_PORT`           |
+| **7508**  | `grimoirelab nginx`     | 8000          | hard-coded in compose|
+| **7509**  | `portainer`             | 9000          | `PORTAINER_PORT`     |
+
+Ports **80 + 443** are only published when the `edge` profile is active.
+The hub itself stays reachable on **7507** for operators on the EPFL net
+/ VPN; **80 + 443** are what end users hit at `https://<HUB_PUBLIC_HOST>/`
+with a Let's Encrypt cert auto-issued via HTTP-01 challenge on `:80`.
 
 To pick different ports, edit the corresponding env var in
 `infra/env/.env`:
@@ -618,21 +625,61 @@ see section 5.3.
 
 ### 9.3 The hub
 
-Open the hub in a browser:
+Open the hub in a browser. Two paths:
 
-```
-http://<host>:7507
-```
+- **Direct** (operators on the EPFL net / VPN):
+  ```
+  http://<host>:7507
+  ```
+- **Public HTTPS** (anyone, via the `edge` profile):
+  ```
+  https://<HUB_PUBLIC_HOST>/
+  ```
 
-Log in with:
+Either way the hub serves a custom HTML login form. Type any password
+that matches one of these env vars:
 
-- **Username:** `admin` (the username is free-form; only the password
-  is checked)
-- **Password:** the value of `HUB_AUTH` from `infra/env/.env`
+| Env var | Role | What the role unlocks |
+| --- | --- | --- |
+| `HUB_AUTH` | **admin** — required | Full sidebar; every mutating endpoint allowed (stack up/down, services start/stop, pipeline run, projects apply, crawler control) |
+| `HUB_AUTH_READER` | **reader** — optional | Basic sidebar (Status · Services · Logs · Resources · Knowledge); mutating endpoints return 403 with a clear "reader can't mutate" message |
+
+The server matches the typed password against both env vars and stamps
+the role onto the session cookie. API clients sending
+`Accept: application/json` keep getting the bare `401 + WWW-Authenticate`
+challenge (no UI redirect), so existing curl / SDK automation is unaffected.
 
 The home page should show green tiles for every running service plus a
 marquee at the top with live SPARQL repo / Neo4j node / Neo4j relation
 counts.
+
+#### Production knobs
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `HUB_AUTH` | — (required) | Admin password (see table above) |
+| `HUB_AUTH_READER` | empty | Reader password; leave empty to keep admin-only behaviour |
+| `HUB_READONLY` | `false` | When `true`, every mutating endpoint returns 403 even for admin sessions, and the sidebar drops Stack + Settings. Use during change-freezes or for a public read-only deploy. |
+| `HUB_MEM_LIMIT` | `512m` | Bump to `2g` for production deploys that load the full GME 2.1.0 DuckDB inventory (snsf, openalex, swissubase, …). The cumulative DuckDB connection pool blows past 512m and the kernel OOM-kills the hub mid-request. |
+| `HUB_PUBLIC_HOST` | `localhost` | Hostname the `edge` profile uses as the Let's Encrypt ACME identifier and that the hub embeds in `Server:` redirects. Must resolve to this host's public IP. |
+
+#### Hub-proxied API surfaces
+
+The hub forwards the upstream API surfaces under stable path prefixes, so
+external users only need the hub URL — no direct port exposure for the
+GME or crawler:
+
+| Path | Upstream | Notes |
+| --- | --- | --- |
+| `/api/crawler/docs` | crawler `/docs` (Swagger UI) | Hub-auth gated |
+| `/api/crawler/api/v1/*` | crawler `/api/v1/*` | Bearer auto-injected from `CRAWLER_API_TOKEN` |
+| `/api/extractor/docs` | GME `/docs` (Swagger UI) | Hub-auth gated |
+| `/api/extractor/v2/*` | GME `/v2/*` | Bearer auto-injected from `EXTRACTOR_API_TOKEN` |
+| `/sparql/*` | sparql-proxy `/*` | Served by the `edge` Caddy (skips the hub); admin/reader basic-auth applies as before |
+
+The bearer auto-injection means readers and admins both use the same
+proxied URL — they never have to paste an upstream PAT into Swagger's
+"Authorize" dialog.
 
 ### 9.4 The SPARQL proxy
 
