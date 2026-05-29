@@ -749,35 +749,66 @@ function collectionRows(init) {
     },
 
     scrollByColumn(direction) {
-      // Step by the width of the next-visible header cell (skip cells
-      // already hidden behind the pinned-column overlay). Falls back
-      // to 160 px when the header isn't measurable.
+      // Snap the table so that exactly ONE non-pinned column moves
+      // past the pinned strip per click. Earlier we stepped by "the
+      // distance to the next column boundary" which only nudged the
+      // bar a few pixels when the current column was almost fully
+      // visible. Now we always land on a column edge: clicking →
+      // makes the next column become the first one against the
+      // pinned strip; clicking ← makes the previous column the new
+      // first-against-pinned. No partial-column resting positions.
       const tw = this._hScroll();
       if (!tw) return;
       const thead = tw.querySelector('thead');
-      let step = 160;
-      if (thead) {
-        const pinnedWidth = Array.from(thead.querySelectorAll('th.pinned-col'))
-          .reduce((sum, th) => sum + th.offsetWidth, 0);
-        const ths = Array.from(thead.querySelectorAll('th:not(.pinned-col)'));
-        for (const th of ths) {
-          // Position of the th relative to the wrap's scrollable area.
-          const leftRel = th.offsetLeft;
-          const rightRel = leftRel + th.offsetWidth;
-          if (direction > 0 && leftRel > tw.scrollLeft + pinnedWidth) {
-            step = leftRel - (tw.scrollLeft + pinnedWidth);
-            break;
-          }
-          if (direction < 0 && rightRel >= tw.scrollLeft + pinnedWidth
-              && rightRel <= tw.scrollLeft + tw.clientWidth) {
-            step = rightRel - (tw.scrollLeft + pinnedWidth);
-            break;
-          }
-        }
+      if (!thead) {
+        tw.scrollBy({ left: direction * 160, behavior: 'smooth' });
+        setTimeout(() => this.onTableScroll(), 250);
+        return;
       }
-      tw.scrollBy({ left: direction * step, behavior: 'smooth' });
-      // Sync after the smooth scroll settles. 250ms beats the default
-      // 200ms smooth-scroll duration in every browser we target.
+      const pinnedWidth = Array.from(thead.querySelectorAll('th.pinned-col'))
+        .reduce((sum, th) => sum + th.offsetWidth, 0);
+      const ths = Array.from(thead.querySelectorAll('th:not(.pinned-col)'));
+      if (!ths.length) return;
+
+      // X coord in the table's content where the non-pinned viewport
+      // begins (right edge of the sticky pinned strip).
+      const viewportStart = tw.scrollLeft + pinnedWidth;
+      const EPS = 1;
+
+      // Index of the column currently sitting at (or straddling)
+      // the left edge of the viewport — the first one whose right
+      // edge is still visible past the pinned strip.
+      let currentIdx = ths.findIndex(th =>
+        (th.offsetLeft + th.offsetWidth) > viewportStart + EPS
+      );
+      if (currentIdx === -1) currentIdx = ths.length - 1;
+
+      // Decide the target column to snap against the pinned strip.
+      const exactlySnapped =
+        Math.abs(ths[currentIdx].offsetLeft - viewportStart) < EPS;
+
+      let targetIdx;
+      if (direction > 0) {
+        // Always advance one column whether or not currentIdx is
+        // exactly snapped — a partial-view currentIdx with a click
+        // forward feels right when the user sees the next column appear.
+        targetIdx = Math.min(currentIdx + 1, ths.length - 1);
+      } else {
+        // If the current column is mid-scroll, the natural "back"
+        // is to snap IT fully into view first. If it's already
+        // exactly snapped, go one column further back.
+        targetIdx = exactlySnapped
+          ? Math.max(currentIdx - 1, 0)
+          : currentIdx;
+      }
+
+      const target = ths[targetIdx];
+      const newScrollLeft = Math.max(0, target.offsetLeft - pinnedWidth);
+
+      tw.scrollTo({ left: newScrollLeft, behavior: 'smooth' });
+      // Sync the twin scrollbar + button-disabled state after the
+      // smooth scroll settles. 250 ms beats the default ~200 ms
+      // smooth-scroll duration in every browser we target.
       setTimeout(() => {
         this.onTableScroll();
       }, 250);
