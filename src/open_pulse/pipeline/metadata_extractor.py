@@ -15,10 +15,16 @@ import json
 import logging
 import os
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 from open_pulse.services.container import ServiceContainer
+from open_pulse.services.sparql_store import (
+    DEFAULT_RUNTIME_PUBLISHES_TO_DEFAULT,
+    derive_monthly_graph_uri,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +68,46 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     mode = str(step_cfg.get("mode", "v2"))
     v2_agent_runtime = str(step_cfg.get("v2_agent_runtime", "rule_based"))
     v2_poll = float(step_cfg.get("v2_poll_interval_seconds", 2.0))
-    v2_timeout = float(step_cfg.get("v2_timeout_seconds", 600.0))
+    v2_timeout_raw = step_cfg.get("v2_timeout_seconds", 600.0)
+    # ``None`` or ``<= 0`` waits indefinitely. Useful for long LLM runs
+    # where a single hybrid extraction can sit on the GME for minutes.
+    v2_timeout: float | None = (
+        None
+        if v2_timeout_raw is None or float(v2_timeout_raw) <= 0
+        else float(v2_timeout_raw)
+    )
+    include_internal_fields = bool(step_cfg.get("include_internal_fields", False))
+    # How many v2 submits run in flight at once. Mirrors the GME's
+    # V2_MAX_CONCURRENT_AGENTS default of 6 — going higher than that
+    # just makes requests queue server-side. ``1`` reverts to fully
+    # sequential, useful for debugging single-repo failures.
+    max_workers = int(step_cfg.get("max_workers", 6))
+    if max_workers < 1:
+        max_workers = 1
+    # When True, each successful extraction is pushed to the SPARQL store
+    # right after the local file is written, instead of waiting for a
+    # separate ``sparql_upload`` step at the end. Reads land in Oxigraph
+    # progressively, so long runs become useful before they finish. SPARQL
+    # Graph Store semantics are idempotent (POST same triples = no-op),
+    # so a downstream ``sparql_upload`` still works as a safety net.
+    stream_to_sparql = bool(step_cfg.get("stream_to_sparql", False))
+    stream_named_graph_raw = step_cfg.get("stream_named_graph")
+    stream_named_graph = str(stream_named_graph_raw) if stream_named_graph_raw else None
+    # Auto-derive a monthly URI from ``v2_agent_runtime`` unless the user
+    # supplied an explicit ``stream_named_graph`` literal (explicit wins).
+    if (
+        stream_to_sparql
+        and stream_named_graph is None
+        and bool(step_cfg.get("auto_named_graph", False))
+    ):
+        stream_named_graph = derive_monthly_graph_uri(v2_agent_runtime)
+    # ``publish_to_default`` tri-state: True / False is honored verbatim;
+    # None means "auto" — publish to default only for canonical runtimes.
+    publish_to_default_raw = step_cfg.get("publish_to_default")
+    if isinstance(publish_to_default_raw, bool):
+        publish_to_default = publish_to_default_raw
+    else:
+        publish_to_default = v2_agent_runtime in DEFAULT_RUNTIME_PUBLISHES_TO_DEFAULT
     if mode not in ("v1_gimie", "v2"):
         raise ValueError(
             f"metadata_extractor: unknown mode {mode!r}; expected 'v1_gimie' or 'v2'."
@@ -93,11 +138,26 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     success = 0
     skipped = 0
     failed: list[str] = []
+    # ``streamed`` / ``stream_failed`` track the SPARQL side of the
+    # streaming upload separately from the file write — a SPARQL outage
+    # shouldn't make a repo look "lost" when its JSON is on disk and a
+    # later ``sparql_upload`` can re-publish it idempotently.
+    streamed = 0
+    stream_failed = 0
+    # Worker threads update ``success`` / ``failed`` so the writes need to
+    # be serialised. ``_atomic_write_json`` already targets a unique
+    # per-repo path so concurrent writes don't clash on disk.
+    counters_lock = threading.Lock()
     # `max_repos = 0` is an explicit "no limit" sentinel: it would be silly
     # for the runner to extract zero repos. Anything > 0 is a hard cap.
     cap: int | None = int(max_repos) if max_repos is not None else None
     if cap is not None and cap <= 0:
         cap = None
+
+    # Build the work list up front so the cap + skip_existing filter
+    # applies before we fan out to workers. Doing it inline-inside the
+    # pool would let ``skipped`` rows still consume a worker slot.
+    candidates: list[str] = []
     for i, full_name in enumerate(repos.keys()):
         if cap is not None and i >= cap:
             logger.info("metadata_extractor: hit max_repos=%s, stopping early", cap)
@@ -106,11 +166,17 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
         if skip_existing and out_path.is_file():
             skipped += 1
             continue
+        candidates.append(full_name)
+
+    def _process(full_name: str) -> None:
+        nonlocal success, streamed, stream_failed
+        out_path = output_dir / _safe_filename(full_name)
         try:
             if mode == "v2":
                 payload = services.metadata_extractor.extract_repo_jsonld_v2(
                     full_name,
                     agent_runtime=v2_agent_runtime,
+                    include_internal_fields=include_internal_fields,
                     poll_interval=v2_poll,
                     timeout=v2_timeout,
                 )
@@ -119,7 +185,8 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
                     full_name, force_refresh=force_refresh
                 )
             _atomic_write_json(out_path, payload)
-            success += 1
+            with counters_lock:
+                success += 1
             logger.info(
                 "metadata_extractor [%s]: %s -> %s",
                 mode,
@@ -128,15 +195,83 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("metadata_extractor: %s failed (%s)", full_name, exc)
-            failed.append(full_name)
+            with counters_lock:
+                failed.append(full_name)
+            return
 
-    logger.info(
-        "metadata_extractor: success=%d skipped=%d failed=%d (output_dir=%s)",
-        success,
-        skipped,
-        len(failed),
-        output_dir,
-    )
+        if stream_to_sparql:
+            # Push to the SPARQL store right after the local write. We log
+            # but don't propagate failures: the file is still on disk, so
+            # a downstream ``sparql_upload`` step (or a manual re-run) can
+            # finish the job. Same store=idempotent contract applies.
+            try:
+                n = services.sparql_store.upload(
+                    payload, named_graph=stream_named_graph
+                )
+                with counters_lock:
+                    streamed += 1
+                logger.info(
+                    "metadata_extractor stream: %s -> %d triples (graph=%s)",
+                    full_name,
+                    n,
+                    stream_named_graph or "default",
+                )
+            except Exception as exc:  # noqa: BLE001
+                with counters_lock:
+                    stream_failed += 1
+                logger.warning(
+                    "metadata_extractor stream: %s SPARQL upload failed (%s)",
+                    full_name,
+                    exc,
+                )
+
+    if candidates:
+        # ``as_completed`` drains the futures eagerly so any per-worker
+        # exception (a runaway thread, a deadlock in the service client)
+        # surfaces immediately instead of waiting for pool teardown. The
+        # final ``list(...)`` is just to consume the generator — return
+        # values are None, so we don't keep them.
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            list(as_completed(pool.submit(_process, fn) for fn in candidates))
+
+    if stream_to_sparql and stream_named_graph and streamed > 0 and publish_to_default:
+        # Atomic snapshot promotion at the end of the run. We do this once,
+        # after the pool drains, so default-graph clients see a consistent
+        # view across all of this run's writes rather than a partial.
+        try:
+            services.sparql_store.copy_to_default(stream_named_graph)
+            logger.info(
+                "metadata_extractor: published <%s> to default graph",
+                stream_named_graph,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "metadata_extractor: publish_to_default failed (%s); the "
+                "named graph is up to date, only the default-graph mirror "
+                "lags behind.",
+                exc,
+            )
+
+    if stream_to_sparql:
+        logger.info(
+            "metadata_extractor: success=%d skipped=%d failed=%d "
+            "streamed=%d stream_failed=%d (output_dir=%s graph=%s)",
+            success,
+            skipped,
+            len(failed),
+            streamed,
+            stream_failed,
+            output_dir,
+            stream_named_graph or "default",
+        )
+    else:
+        logger.info(
+            "metadata_extractor: success=%d skipped=%d failed=%d (output_dir=%s)",
+            success,
+            skipped,
+            len(failed),
+            output_dir,
+        )
     if success == 0 and not skipped and failed:
         # All attempted repos failed — fail the step so the runner can retry.
         raise RuntimeError(

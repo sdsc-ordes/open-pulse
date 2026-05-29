@@ -31,6 +31,11 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _HTTP_TIMEOUT = 120.0  # rule-based extraction can take 30s+ on fresh fetches
+# When the extractor is in the middle of a long LLM call, idle status polls
+# get dropped with `Server disconnected` / `Connection reset`. The job
+# itself is still alive on the extractor side — same pattern we fixed in
+# services/crawler.py. Tolerate a small burst before giving up.
+_MAX_TRANSIENT_POLL_FAILURES = 5
 _GIMIE_PATH = "/v1/repository/gimie/json-ld"
 _V2_EXTRACT_PATH = "/v2/extract"
 _V2_JOB_PATH = "/v2/jobs"
@@ -142,17 +147,23 @@ class MetadataExtractorService:
         *,
         agent_runtime: str = "rule_based",
         output_format: str = "jsonld",
+        include_internal_fields: bool = False,
     ) -> str:
         """POST ``/v2/extract`` and return the ``job_id``.
 
         ``agent_runtime`` defaults to ``"rule_based"`` so the GME server
         doesn't need an LLM provider token (e.g. ``RCP_TOKEN``).
+
+        ``include_internal_fields`` keeps GME-internal data (now exposed
+        under the ``gme-internal:`` namespace) in the response — bios,
+        locations, GitHub flags, etc.
         """
         url = self.endpoint + _V2_EXTRACT_PATH
         body: dict[str, Any] = {
             "source_url": _normalize_repo_url(source_url),
             "output_format": output_format,
             "agent_runtime": agent_runtime,
+            "include_internal_fields": include_internal_fields,
         }
         try:
             resp = self._client.post(url, json=body, headers=self._auth_headers())
@@ -198,17 +209,54 @@ class MetadataExtractorService:
         job_id: str,
         *,
         poll_interval: float = _DEFAULT_V2_POLL_INTERVAL,
-        timeout: float = _DEFAULT_V2_TIMEOUT,
+        timeout: float | None = _DEFAULT_V2_TIMEOUT,
     ) -> dict[str, Any]:
         """Poll until job leaves ``pending`` / ``running``.
 
         Returns the final job dict on ``completed``. Raises
         :class:`ExtractJobFailedError` on ``failed`` and
-        :class:`ExtractJobTimeoutError` on deadline.
+        :class:`ExtractJobTimeoutError` on deadline. Pass ``None`` to
+        opt out of the client-side timeout — the GME job keeps running
+        regardless of our polling budget, so this is the right call for
+        long-running runtimes (``llm``, heavy ``hybrid``). A ``<= 0``
+        value is an *immediate* deadline (raises on the first
+        non-terminal poll); the pipeline config layer maps a user
+        ``v2_timeout_seconds <= 0`` to ``None`` before it reaches here,
+        so the "wait forever" UX is preserved where it's configured.
         """
-        deadline = time.monotonic() + timeout
+        no_timeout = timeout is None
+        deadline = float("inf") if no_timeout else time.monotonic() + timeout
+        consecutive_failures = 0
         while True:
-            job = self.get_extract_job(job_id)
+            try:
+                job = self.get_extract_job(job_id)
+            except RuntimeError as exc:
+                # ``get_extract_job`` wraps httpx errors in RuntimeError. We
+                # match the substring so we don't swallow legitimate API
+                # errors (e.g. malformed responses) which use a different
+                # message prefix.
+                msg = str(exc)
+                if "HTTP error polling" not in msg:
+                    raise
+                consecutive_failures += 1
+                logger.warning(
+                    "metadata_extractor: poll for job %s failed (%d/%d): %s",
+                    job_id,
+                    consecutive_failures,
+                    _MAX_TRANSIENT_POLL_FAILURES,
+                    msg,
+                )
+                if consecutive_failures >= _MAX_TRANSIENT_POLL_FAILURES:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise ExtractJobTimeoutError(
+                        f"v2 extract job {job_id} did not complete within {timeout:.0f}s "
+                        f"(last poll error: {exc})"
+                    ) from exc
+                time.sleep(poll_interval)
+                continue
+
+            consecutive_failures = 0
             state = str(job.get("status", "")).lower()
             if state == "completed":
                 return job
@@ -230,6 +278,7 @@ class MetadataExtractorService:
         source_url: str,
         *,
         agent_runtime: str = "rule_based",
+        include_internal_fields: bool = False,
         poll_interval: float = _DEFAULT_V2_POLL_INTERVAL,
         timeout: float = _DEFAULT_V2_TIMEOUT,
     ) -> dict[str, Any]:
@@ -239,7 +288,10 @@ class MetadataExtractorService:
         ``stats``, etc.). The JSON-LD payload is at ``result["output"]``.
         """
         job_id = self.submit_extract(
-            source_url, agent_runtime=agent_runtime, output_format="jsonld"
+            source_url,
+            agent_runtime=agent_runtime,
+            output_format="jsonld",
+            include_internal_fields=include_internal_fields,
         )
         logger.info(
             "metadata_extractor v2: submitted job %s for %s (runtime=%s)",

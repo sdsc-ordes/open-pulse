@@ -20,7 +20,11 @@ import yaml
 from docker.errors import NotFound
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
-from ..auth import get_settings, require_auth
+import zipfile
+
+from fastapi.responses import FileResponse
+
+from ..auth import get_settings, require_auth, require_writable
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
@@ -62,10 +66,12 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 # anything for them.
 PIPELINE_STEPS = (
     "crawler",
+    "frontier_extend",
     "neo4j_upload",
     "metadata_extractor",
     "sparql_upload",
     "apply_grimoire_projects",
+    "archive_outputs",
 )
 
 
@@ -109,6 +115,11 @@ _RE_PIPELINE_DONE = re.compile(
 # so we infer step completion from these substrings instead.
 _STEP_DONE_HINTS: dict[str, tuple[str, ...]] = {
     "crawler": ("crawler: wrote graph to ", "crawler: job "),
+    "frontier_extend": (
+        "frontier_extend: merged graph written to ",
+        "frontier_extend: graph is closed",
+        "frontier_extend: input graph",  # missing-input → step returned cleanly
+    ),
     "neo4j_upload": ("neo4j_upload: ingested ",),
     "metadata_extractor": (
         "metadata_extractor: success=",
@@ -486,7 +497,7 @@ def read_quest(
     }
 
 
-@router.post("/run", dependencies=[Depends(require_auth)])
+@router.post("/run", dependencies=[Depends(require_auth), Depends(require_writable)])
 def run_quest(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     """Run a quest YAML inside the cli container and return its output."""
     path = (payload.get("path") or "").strip()
@@ -689,8 +700,83 @@ def run_by_job(
     return {"found": False, "job_id": job_id}
 
 
+@router.get("/frontier-preview", dependencies=[Depends(require_auth)])
+def frontier_preview(
+    input_dir: str = Query(
+        ".quest-artifacts/crawler-json",
+        description="Directory holding the crawler graph (cli-container path).",
+    ),
+    input_filename: str = Query(
+        "crawler-graph.json", description="Graph filename inside input_dir."
+    ),
+    sample: int = Query(20, ge=0, le=500),
+) -> dict[str, Any]:
+    """Compute the frontier of an existing crawler-graph without crawling.
+
+    Mirrors :func:`open_pulse.pipeline.frontier_extend._compute_frontier`
+    but runs hub-side over the cli container's filesystem. Lets the form
+    show "you'd seed N repos" before launching, so the user isn't
+    operating blind.
+    """
+    cli = _cli_container()
+    workspace = cli.attrs.get("Config", {}).get("WorkingDir") or "/workspace"
+    # Resolve relative inputs against the cli container's cwd. Strip a
+    # leading "./" if present, but preserve a leading "." that's part of
+    # the directory name (e.g. ".quest-artifacts").
+    raw = input_dir.strip()
+    if raw.startswith("./"):
+        raw = raw[2:]
+    if raw.startswith("/"):
+        base = raw.rstrip("/")
+    else:
+        base = f"{workspace.rstrip('/')}/{raw.rstrip('/')}"
+    path = f"{base}/{input_filename}"
+    try:
+        text = _read_file_in_cli(cli, path)
+    except HTTPException:
+        return {
+            "path": path,
+            "exists": False,
+            "frontier_size": 0,
+            "frontier_sample": [],
+        }
+    try:
+        graph = yaml.safe_load(text)  # JSON is a subset of YAML; reuse loader
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"could not parse graph at {path}")
+    if not isinstance(graph, dict):
+        raise HTTPException(status_code=500, detail="graph payload is not an object")
+
+    repos = graph.get("repos") or {}
+    known = set(repos.keys())
+    explored = {
+        k for k, v in repos.items() if isinstance(v, dict) and v.get("is_explored")
+    }
+    mentioned: set[str] = set()
+    for r in repos.values():
+        if isinstance(r, dict):
+            for tgt in r.get("dependents") or []:
+                if isinstance(tgt, str) and tgt:
+                    mentioned.add(tgt)
+    frontier = sorted((mentioned - known) | ((mentioned & known) - explored))
+    return {
+        "path": path,
+        "exists": True,
+        "graph_repo_count": len(known),
+        "graph_explored_count": len(explored),
+        "dependent_edges_total": sum(
+            len(r.get("dependents") or [])
+            for r in repos.values()
+            if isinstance(r, dict)
+        ),
+        "frontier_size": len(frontier),
+        "frontier_sample": frontier[:sample] if sample > 0 else [],
+    }
+
+
 _VALID_STEPS = (
     "crawler",
+    "frontier_extend",
     "neo4j_upload",
     "metadata_extractor",
     "sparql_upload",
@@ -727,6 +813,13 @@ def _build_quest_yaml(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     max_rounds = int(payload.get("max_rounds", 2) or 2)
     max_repos = int(payload.get("max_repos", 8) or 0)
     force_refresh = bool(payload.get("force_refresh", False))
+    crawl_dependents = bool(payload.get("crawl_dependents", False))
+    crawl_dependencies = bool(payload.get("crawl_dependencies", False))
+    min_stars = max(0, int(payload.get("min_stars", 0) or 0))
+    # max_dependents: 0 (or unset) means "no cap" → emit null in YAML so the
+    # crawler keeps its default behaviour. Positive ints become a hard cap.
+    md_raw = payload.get("max_dependents", 0) or 0
+    max_dependents = int(md_raw) if int(md_raw) > 0 else None
 
     quest: dict[str, Any] = {"name": slug}
     if description:
@@ -740,14 +833,50 @@ def _build_quest_yaml(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
     steps: dict[str, Any] = {}
     if enabled_steps.get("crawler", True):
-        steps["crawler"] = {
+        # timeout scales with depth: 1800s at max_rounds=2 was tight even for
+        # ~370 repos and overflowed at max_rounds=3 (~2000 repos, ~43min).
+        # Give each round its own budget instead of one flat ceiling.
+        crawler_timeout = float(payload.get("crawler_timeout_seconds") or 0) or max(
+            1800.0, 1800.0 * max_rounds
+        )
+        crawler_step: dict[str, Any] = {
             "seeds": seeds or ["sdsc-ordes"],
             "max_rounds": max_rounds,
+            "crawl_dependencies": crawl_dependencies,
+            "crawl_dependents": crawl_dependents,
+            "min_stars": min_stars,
+            "max_dependents": max_dependents,
             "poll_interval_seconds": 5.0,
-            "timeout_seconds": 1800.0,
+            "timeout_seconds": crawler_timeout,
         }
+        steps["crawler"] = crawler_step
     else:
         steps["crawler"] = {"enabled": False}
+
+    # frontier_extend: reads the canonical graph and re-seeds the crawler
+    # with repos that appear as dependents but were never explored. Mirrors
+    # the crawler-graph knobs the user already configured.
+    if enabled_steps.get("frontier_extend", False):
+        fe_max_rounds = int(payload.get("frontier_max_rounds", 1) or 1)
+        fe_cap_raw = payload.get("frontier_max_seeds", 0) or 0
+        fe_cap = int(fe_cap_raw) if int(fe_cap_raw) > 0 else None
+        fe_timeout = float(payload.get("frontier_timeout_seconds") or 0) or max(
+            1800.0, 1800.0 * fe_max_rounds
+        )
+        frontier_step: dict[str, Any] = {
+            "enabled": True,
+            "max_rounds": fe_max_rounds,
+            "crawl_dependencies": crawl_dependencies,
+            "crawl_dependents": True,
+            "min_stars": min_stars,
+            "max_dependents": max_dependents,
+            "max_frontier_seeds": fe_cap,
+            "poll_interval_seconds": 5.0,
+            "timeout_seconds": fe_timeout,
+        }
+        steps["frontier_extend"] = frontier_step
+    else:
+        steps["frontier_extend"] = {"enabled": False}
     steps["neo4j_upload"] = {"enabled": bool(enabled_steps.get("neo4j_upload", True))}
     if enabled_steps.get("metadata_extractor", True):
         steps["metadata_extractor"] = {
@@ -764,7 +893,7 @@ def _build_quest_yaml(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return yaml.safe_dump(doc, sort_keys=False, default_flow_style=False), doc
 
 
-@router.post("/create", dependencies=[Depends(require_auth)])
+@router.post("/create", dependencies=[Depends(require_auth), Depends(require_writable)])
 def create_quest(
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
@@ -828,7 +957,7 @@ def create_quest(
     }
 
 
-@router.delete("/quest", dependencies=[Depends(require_auth)])
+@router.delete("/quest", dependencies=[Depends(require_auth), Depends(require_writable)])
 def delete_quest(
     path: str = Query(..., description="Absolute path of the quest YAML to delete."),
 ) -> dict[str, Any]:
@@ -854,7 +983,7 @@ def delete_quest(
     return {"path": path, "deleted": True}
 
 
-@router.post("/run-stop", dependencies=[Depends(require_auth)])
+@router.post("/run-stop", dependencies=[Depends(require_auth), Depends(require_writable)])
 def run_stop(
     run_id: str = Query(
         ..., description="Run ID returned by POST /run with detach=true."
@@ -899,3 +1028,108 @@ def run_stop(
         "exit_code": rc,
         "output": (out or b"").decode("utf-8", "replace").strip(),
     }
+
+
+# ── Archives ────────────────────────────────────────────────────────────────
+#
+# Zips produced by the ``archive_outputs`` pipeline step land in
+# ``data/hub/archives/`` (resolved from the cli's CWD, which is bind-mounted
+# at the same path the hub sees as ``/data/hub/archives``). The hub reads
+# this directory directly — no docker-exec — to list and stream zips.
+
+
+def _archives_dir() -> Path:
+    """Where archive zips land on the hub side.
+
+    The path is symmetric: ``archive_outputs`` writes to
+    ``data/hub/archives`` relative to the cli's CWD; that lands at
+    ``/data/hub/archives`` inside both containers via the same bind
+    mount. Settings' ``data_dir`` resolves to ``/data/hub`` for the hub.
+    """
+    settings = get_settings()
+    p = settings.data_dir / "archives"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _safe_archive_name(name: str) -> str:
+    """Sanitize a user-supplied archive filename.
+
+    The download endpoint takes the name as a path segment; we treat it
+    as a single basename (no directory traversal, no shell chars beyond
+    the safe set). Refusing rather than rewriting so a malformed request
+    returns 400, not a silently-different file.
+    """
+    if not name or "/" in name or "\\" in name or ".." in name or name.startswith("."):
+        raise HTTPException(status_code=400, detail="invalid archive name")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        raise HTTPException(status_code=400, detail="invalid archive name")
+    if not name.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="archive name must end in .zip")
+    return name
+
+
+@router.get("/archives", dependencies=[Depends(require_auth)])
+def list_archives() -> dict[str, Any]:
+    """List every ``.zip`` in the archives directory, newest first.
+
+    Each entry: ``name``, ``size_bytes``, ``created_at`` (mtime as ISO),
+    and ``file_count`` (cheap to read from the zip's central directory).
+    Listed unfiltered; the Quests-page UI groups by quest-name prefix
+    on the client side.
+    """
+    root = _archives_dir()
+    files = sorted(root.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+    out: list[dict[str, Any]] = []
+    for p in files:
+        st = p.stat()
+        entry: dict[str, Any] = {
+            "name": p.name,
+            "size_bytes": st.st_size,
+            "created_at": datetime.fromtimestamp(
+                st.st_mtime, tz=timezone.utc
+            ).isoformat(),
+        }
+        try:
+            with zipfile.ZipFile(p, "r") as zf:
+                entry["file_count"] = sum(
+                    1 for n in zf.namelist() if not n.endswith("/")
+                )
+        except (zipfile.BadZipFile, OSError):
+            entry["file_count"] = None  # corrupt or unreadable — still show it
+        out.append(entry)
+    return {"archives": out, "total": len(out)}
+
+
+@router.get("/archives/{name}/download", dependencies=[Depends(require_auth)])
+def download_archive(name: str) -> FileResponse:
+    """Stream the named zip as a download.
+
+    The browser sees a ``Content-Disposition: attachment`` so it offers
+    a save dialog. Path traversal is blocked by ``_safe_archive_name``.
+    """
+    safe = _safe_archive_name(name)
+    path = _archives_dir() / safe
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"archive {safe!r} not found")
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=safe,
+    )
+
+
+@router.delete("/archives/{name}", dependencies=[Depends(require_auth), Depends(require_writable)])
+def delete_archive(name: str) -> dict[str, Any]:
+    """Remove an archive from the archives directory.
+
+    Surfaced as a small action on the Quests-page list; the user
+    keeps control over disk usage without shelling into the container.
+    """
+    safe = _safe_archive_name(name)
+    path = _archives_dir() / safe
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"archive {safe!r} not found")
+    size = path.stat().st_size
+    path.unlink()
+    return {"deleted": safe, "size_bytes": size}

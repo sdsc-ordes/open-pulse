@@ -1,0 +1,76 @@
+{# Lazy-loaded "Activity" panel — commit-level signal from the
+   GrimoireLab OpenSearch indices. Empty body when the repo isn't
+   indexed; the front-end hides the placeholder. #}
+{% if stats and stats.total_commits > 0 %}
+<div class="card">
+  <div class="card-title">Activity</div>
+  <div class="card-meta" style="margin: 4px 0 12px;">
+    From GrimoireLab git ingest in OpenSearch.
+  </div>
+  <div class="grid-stats">
+    <div class="card tone-info">
+      <div class="card-title">Commits</div>
+      <div class="stat-value">{{ '{:,}'.format(stats.total_commits) }}</div>
+    </div>
+    {% if stats.contributors %}
+    <div class="card tone-info">
+      <div class="card-title">Contributors</div>
+      <div class="stat-value">{{ '{:,}'.format(stats.contributors) }}</div>
+    </div>
+    {% endif %}
+    {% if stats.last_commit_date %}
+    <div class="card tone-info">
+      <div class="card-title">Last commit</div>
+      <div class="stat-value" style="font-size: 18px;">{{ stats.last_commit_date }}</div>
+    </div>
+    {% endif %}
+    {% if stats.first_commit_date %}
+    <div class="card tone-info">
+      <div class="card-title">First commit</div>
+      <div class="stat-value" style="font-size: 18px;">{{ stats.first_commit_date }}</div>
+    </div>
+    {% endif %}
+    {% if stats.active_months %}
+    <div class="card tone-info">
+      <div class="card-title">Active months</div>
+      <div class="stat-value">{{ stats.active_months }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if stats.monthly %}
+    {# Inline SVG sparkline: one bar per month for the last ~24 months.
+       Heights are normalised against the max bucket so the trend is
+       always visible regardless of the absolute commit volume. #}
+    {% set tail = stats.monthly[-24:] %}
+    {% set max_count = (tail | map(attribute=1) | max) or 1 %}
+    {% set bar_w = 10 %}
+    {% set gap = 2 %}
+    {% set chart_h = 44 %}
+    {% set chart_w = (tail | length) * (bar_w + gap) %}
+    <div style="margin-top: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: var(--fg-muted); margin-bottom: 4px;">
+        <span>Commits per month · last {{ tail | length }} month{{ '' if (tail | length) == 1 else 's' }}</span>
+        <span class="mono">max {{ max_count }}</span>
+      </div>
+      <svg viewBox="0 0 {{ chart_w }} {{ chart_h + 14 }}"
+           preserveAspectRatio="xMinYEnd meet"
+           width="100%" height="58"
+           role="img" aria-label="Commits per month">
+        {% for month, count in tail %}
+          {% set h = (count / max_count * chart_h) | round(1) %}
+          {% set x = loop.index0 * (bar_w + gap) %}
+          <rect x="{{ x }}" y="{{ chart_h - h }}" width="{{ bar_w }}" height="{{ h }}"
+                fill="var(--accent)" rx="1">
+            <title>{{ month }} · {{ count }} commit{{ '' if count == 1 else 's' }}</title>
+          </rect>
+        {% endfor %}
+        <text x="0" y="{{ chart_h + 12 }}"
+              font-size="10" fill="var(--fg-faint)">{{ tail[0][0] }}</text>
+        <text x="{{ chart_w - 1 }}" y="{{ chart_h + 12 }}"
+              font-size="10" fill="var(--fg-faint)" text-anchor="end">{{ tail[-1][0] }}</text>
+      </svg>
+    </div>
+  {% endif %}
+</div>
+{% endif %}

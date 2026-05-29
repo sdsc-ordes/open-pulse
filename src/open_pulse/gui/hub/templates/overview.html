@@ -11,72 +11,126 @@
 <div x-data="overview()" x-init="init()" class="space-y-6">
 
   <!-- ── Range picker + meta ──────────────────────────────────────── -->
-  <div class="card" style="display: flex; align-items: center; gap: 12px;">
+  <div class="card" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
     <span class="card-title">Window</span>
     <div class="range-buttons">
       <template x-for="r in ranges" :key="r">
         <button class="btn"
                 :class="range === r ? 'btn-primary' : 'btn-ghost'"
-                @click="setRange(r)" x-text="r"></button>
+                @click="setRange(r)" x-text="r === 'custom' ? 'custom…' : r"></button>
       </template>
+    </div>
+    <!-- Custom date range, only visible when 'custom' is selected. -->
+    <div x-show="range === 'custom'" x-cloak
+         style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+      <label class="card-meta" style="font-size: 11px;">from</label>
+      <input type="datetime-local" x-model="customFrom"
+             style="font-size: 12px; padding: 3px 6px; background: var(--surface-sunk);
+                    border: 1px solid var(--border); border-radius: 4px; color: var(--fg);" />
+      <label class="card-meta" style="font-size: 11px;">to</label>
+      <input type="datetime-local" x-model="customTo"
+             style="font-size: 12px; padding: 3px 6px; background: var(--surface-sunk);
+                    border: 1px solid var(--border); border-radius: 4px; color: var(--fg);" />
+      <button class="btn btn-primary" @click="applyCustom()"
+              :disabled="!customFrom || !customTo">Apply</button>
     </div>
     <span class="card-meta ml-auto" x-text="metaLine"></span>
     <button class="btn btn-ghost" @click="reload()">↻</button>
   </div>
 
-  <!-- ── Big-number row (current values) ──────────────────────────── -->
+  <!-- ── Big-number row: one tile per chart below ─────────────────── -->
+  <!-- Each tile mirrors the chart underneath: the big number is the
+       chart's dominant filled series (repos / GitHub repos); the
+       subtitle line carries the other two series so the tile + chart
+       legends agree at a glance. Delta is over the visible window. -->
   <section class="grid-stats">
     <div class="card tone-info">
-      <div class="card-title">Services healthy</div>
+      <div class="card-title">Neo4j · repos</div>
       <div class="flex items-baseline gap-2 mt-1">
-        <div class="stat-value" x-text="latest.services_healthy + '/' + latest.services_total"></div>
-        <span class="stat-trend" x-show="delta('services_healthy') !== null"
-              x-text="formatDelta(delta('services_healthy')) + ' over window'"></span>
+        <div class="stat-value" x-text="formatVal(latest.neo4j_repos)"></div>
+        <span class="stat-trend" x-show="delta('neo4j_repos') !== null"
+              x-text="formatDelta(delta('neo4j_repos')) + ' over window'"></span>
       </div>
+      <div class="stat-sub" x-text="
+        formatVal(latest.neo4j_users) + ' users · ' +
+        formatVal(latest.neo4j_orgs)  + ' orgs'
+      "></div>
     </div>
     <div class="card tone-info">
-      <div class="card-title">SPARQL repos</div>
+      <div class="card-title">SPARQL · repos</div>
       <div class="flex items-baseline gap-2 mt-1">
         <div class="stat-value" x-text="formatVal(latest.sparql_repos)"></div>
         <span class="stat-trend" x-show="delta('sparql_repos') !== null"
-              x-text="formatDelta(delta('sparql_repos'))"></span>
+              x-text="formatDelta(delta('sparql_repos')) + ' over window'"></span>
       </div>
+      <div class="stat-sub" x-text="
+        formatVal(latest.sparql_users) + ' users · ' +
+        formatVal(latest.sparql_orgs)  + ' orgs'
+      "></div>
     </div>
     <div class="card tone-info">
-      <div class="card-title">Neo4j nodes</div>
+      <div class="card-title">OpenSearch · repos</div>
       <div class="flex items-baseline gap-2 mt-1">
-        <div class="stat-value" x-text="formatVal(latest.neo4j_nodes)"></div>
-        <span class="stat-trend" x-show="delta('neo4j_nodes') !== null"
-              x-text="formatDelta(delta('neo4j_nodes'))"></span>
+        <div class="stat-value" x-text="formatVal(latest.opensearch_repos)"></div>
+        <span class="stat-trend" x-show="delta('opensearch_repos') !== null"
+              x-text="formatDelta(delta('opensearch_repos')) + ' over window'"></span>
       </div>
+      <div class="stat-sub" x-text="
+        formatVal(latest.opensearch_users) + ' users · ' +
+        formatVal(latest.opensearch_orgs)  + ' orgs'
+      "></div>
     </div>
     <div class="card tone-info">
-      <div class="card-title">Neo4j relationships</div>
+      <div class="card-title">DuckDB · GitHub repos</div>
       <div class="flex items-baseline gap-2 mt-1">
-        <div class="stat-value" x-text="formatVal(latest.neo4j_rels)"></div>
-        <span class="stat-trend" x-show="delta('neo4j_rels') !== null"
-              x-text="formatDelta(delta('neo4j_rels'))"></span>
+        <div class="stat-value" x-text="formatVal(latest.duckdb_github_repos)"></div>
+        <span class="stat-trend" x-show="delta('duckdb_github_repos') !== null"
+              x-text="formatDelta(delta('duckdb_github_repos')) + ' over window'"></span>
       </div>
+      <div class="stat-sub" x-text="
+        formatVal(latest.duckdb_zenodo_records)    + ' Zenodo · ' +
+        formatVal(latest.duckdb_huggingface_items) + ' HF'
+      "></div>
     </div>
   </section>
 
-  <!-- ── Charts ───────────────────────────────────────────────────── -->
+  <!-- ── Charts: one panel per backend, three series each ─────────── -->
   <div class="grid-charts">
     <div class="card chart-card">
-      <div class="card-title">Services (healthy / running / total)</div>
-      <div class="chart-wrap"><canvas x-ref="cServices"></canvas></div>
+      <div class="card-title">Neo4j · repos / users / orgs</div>
+      <p class="card-meta" style="margin-top: 2px;">
+        Node-label counts from the crawler graph (``Repo`` / ``User`` / ``Org``).
+      </p>
+      <div class="chart-wrap"><canvas x-ref="cNeo4j"></canvas></div>
     </div>
     <div class="card chart-card">
-      <div class="card-title">SPARQL repos</div>
+      <div class="card-title">SPARQL · repos / users / orgs</div>
+      <p class="card-meta" style="margin-top: 2px;">
+        Distinct subjects per type:
+        <code>schema:SoftwareSourceCode</code>,
+        <code>schema:Person</code>,
+        <code>org:Organization</code>.
+      </p>
       <div class="chart-wrap"><canvas x-ref="cSparql"></canvas></div>
     </div>
     <div class="card chart-card">
-      <div class="card-title">Neo4j nodes</div>
-      <div class="chart-wrap"><canvas x-ref="cNodes"></canvas></div>
+      <div class="card-title">OpenSearch · repos / users / orgs</div>
+      <p class="card-meta" style="margin-top: 2px;">
+        Cardinality on <code>origin</code> + <code>author_uuid</code> across the
+        <code>git_*_enriched</code> indices; orgs derived from the first
+        path segment of each origin URL.
+      </p>
+      <div class="chart-wrap"><canvas x-ref="cOpensearch"></canvas></div>
     </div>
     <div class="card chart-card">
-      <div class="card-title">Neo4j relationships</div>
-      <div class="chart-wrap"><canvas x-ref="cRels"></canvas></div>
+      <div class="card-title">DuckDB · GitHub / Zenodo / HuggingFace</div>
+      <p class="card-meta" style="margin-top: 2px;">
+        Row counts from the GME's per-provider DuckDB catalogs
+        (<code>github.duckdb · repos</code>,
+        <code>zenodo.duckdb · records</code>,
+        <code>huggingface.duckdb · datasets + models + spaces</code>).
+      </p>
+      <div class="chart-wrap"><canvas x-ref="cDuckdb"></canvas></div>
     </div>
   </div>
 
@@ -98,7 +152,7 @@
           <div class="top-head">
             <span class="card-title" x-text="f.label"></span>
             <span class="pill pill-info" x-show="(f.values || []).length"
-                  x-text="(f.values || []).length + ' values'"></span>
+                  x-text="(f.values || []).length"></span>
           </div>
           <p class="card-meta top-desc" x-text="f.description"></p>
 
@@ -116,7 +170,7 @@
                 <span class="top-bar-cell">
                   <span class="top-bar"
                         :style="'width:' + (Math.max(8, (v.count / topMax(f)) * 100)) + '%'"></span>
-                  <span class="top-label" :title="v.value" x-text="shortLabel(v.value)"></span>
+                  <span class="top-label" :title="v.value" x-text="shortLabel(v)"></span>
                 </span>
                 <span class="top-count" x-text="v.count"></span>
               </li>
@@ -138,6 +192,15 @@
   }
   .chart-card { padding: 16px; }
   .chart-wrap { height: 240px; margin-top: 8px; position: relative; }
+
+  /* Subtitle under each big-number tile — shows the chart's secondary
+     series (e.g. users / orgs) so a glance gives the full triple. */
+  .stat-sub {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
 
   /* ── Top-N facet cards ─────────────────────────────────────────── */
   .grid-tops {
@@ -190,23 +253,55 @@
 <script>
 function overview() {
   return {
-    ranges: ['1h', '6h', '24h', '7d', '30d'],
+    ranges: ['1h', '6h', '24h', '7d', '30d', 'custom'],
     range: localStorage.getItem('op:hub:overview-range') || '6h',
+    // Custom range bounds. Restored from localStorage so the user's
+    // last custom window survives a page reload.
+    customFrom: localStorage.getItem('op:hub:overview-custom-from') || '',
+    customTo:   localStorage.getItem('op:hub:overview-custom-to')   || '',
     samples: [],
     loading: false,
     metaLine: '',
-    latest: { services_healthy: 0, services_running: 0, services_total: 0,
-              sparql_repos: 0, neo4j_nodes: 0, neo4j_rels: 0,
-              uptime_max_seconds: 0 },
+    // Default state shown until the first ``/api/stats/history`` call
+    // returns. Keys mirror every column the tile row + charts read so
+    // there's no template-time ``undefined`` while loading.
+    latest: {
+      // Services (still surfaced on the Status page; charts dropped from
+      // Overview but the marquee + tile row in main.py read these too).
+      services_healthy: 0, services_running: 0, services_total: 0,
+      uptime_max_seconds: 0,
+      // Per-backend chart series.
+      neo4j_repos: null, neo4j_users: null, neo4j_orgs: null,
+      neo4j_nodes: null, neo4j_rels: null,
+      sparql_repos: null, sparql_users: null, sparql_orgs: null,
+      opensearch_repos: null, opensearch_users: null, opensearch_orgs: null,
+      duckdb_github_repos: null, duckdb_zenodo_records: null,
+      duckdb_huggingface_items: null,
+    },
     charts: {},
+    // Track which range the charts were last rendered with — if the
+    // user switches ranges, Chart.js can leave its time-scale state
+    // in an inconsistent place and the next ``chart.update()`` throws
+    // "Cannot set properties of undefined (setting 'fullSize')". The
+    // safe fix is to destroy + recreate the chart on range change.
+    _lastRange: null,
     pollHandle: null,
 
     async init() {
       // Wait for Chart.js + the luxon adapter to land — they're CDN'd.
       await this._waitForChartJs();
+      // If the user's last session left them on 'custom' without a
+      // saved pair, fall back to '6h' so the first load doesn't 400.
+      if (this.range === 'custom' && (!this.customFrom || !this.customTo)) {
+        this.range = '6h';
+      }
       await this.reload();
       // Refresh every minute (the sampler interval) so the page is live.
-      this.pollHandle = setInterval(() => this.reload(/*silent=*/true), 60_000);
+      // Skip auto-refresh on the custom window — the user explicitly
+      // pinned that range.
+      this.pollHandle = setInterval(() => {
+        if (this.range !== 'custom') this.reload(/*silent=*/true);
+      }, 60_000);
     },
 
     async _waitForChartJs() {
@@ -219,19 +314,66 @@ function overview() {
     setRange(r) {
       this.range = r;
       localStorage.setItem('op:hub:overview-range', r);
+      // For custom we wait for the user to pick the two bounds + hit
+      // Apply; the fetch fires from applyCustom(). Everything else
+      // reloads immediately.
+      if (r !== 'custom') {
+        this.reload();
+      } else if (this.customFrom && this.customTo) {
+        this.applyCustom();
+      }
+    },
+
+    applyCustom() {
+      if (!this.customFrom || !this.customTo) return;
+      localStorage.setItem('op:hub:overview-custom-from', this.customFrom);
+      localStorage.setItem('op:hub:overview-custom-to',   this.customTo);
       this.reload();
     },
 
-    bucketFor(range) {
+    bucketFor(range, samplesSpanSeconds) {
       // Match approximate point density: aim for ~120 points per chart.
+      if (range === 'custom') {
+        // Pick a bucket that keeps the series under ~150 points; the
+        // sampler runs every 60s, so a 1h span = 60 raw rows = no
+        // bucketing needed.
+        if (!samplesSpanSeconds) return 0;
+        const target = 150;
+        return Math.max(0, Math.floor(samplesSpanSeconds / target / 60) * 60);
+      }
       return ({ '1h': 0, '6h': 60, '24h': 300, '7d': 1800, '30d': 7200 })[range] || 0;
     },
 
     async reload(silent) {
       if (!silent) this.loading = true;
       try {
-        const bucket = this.bucketFor(this.range);
-        const r = await fetch(`/api/stats/history?range=${this.range}&bucket_seconds=${bucket}`);
+        // For the custom range, compute the span first so we can pick
+        // a sensible bucket width.
+        let bucket;
+        let url;
+        if (this.range === 'custom') {
+          if (!this.customFrom || !this.customTo) {
+            this.metaLine = 'pick from + to and click Apply';
+            return;
+          }
+          const span = Math.max(
+            0,
+            (new Date(this.customTo).getTime() - new Date(this.customFrom).getTime()) / 1000,
+          );
+          bucket = this.bucketFor('custom', span);
+          // ``datetime-local`` values are local-naive; turn them into
+          // ISO with Z so SQLite's ``ts BETWEEN`` matches the rows
+          // we persist as UTC.
+          const startIso = new Date(this.customFrom).toISOString();
+          const endIso   = new Date(this.customTo).toISOString();
+          url = `/api/stats/history?range=custom&bucket_seconds=${bucket}`
+              + `&start=${encodeURIComponent(startIso)}`
+              + `&end=${encodeURIComponent(endIso)}`;
+        } else {
+          bucket = this.bucketFor(this.range);
+          url = `/api/stats/history?range=${this.range}&bucket_seconds=${bucket}`;
+        }
+        const r = await fetch(url);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
         this.samples = j.samples || [];
@@ -289,37 +431,71 @@ function overview() {
         },
       };
 
+      // Per-backend palette: each chart uses the same three colours
+      // (accent / ok / warn) so a reader can scan the legend in one
+      // panel and the next one feels familiar. Filled dataset only on
+      // the dominant series (repos) to keep the chart legible — three
+      // overlapping fills make a muddy blob.
       const datasets = {
-        services: [
-          { label: 'healthy', data: this.samples.map(s => s.services_healthy ?? null), ...baseline(ok, true) },
-          { label: 'running', data: this.samples.map(s => s.services_running ?? null), ...baseline(accent) },
-          { label: 'total',   data: this.samples.map(s => s.services_total   ?? null), ...baseline(warn) },
+        neo4j: [
+          { label: 'repos', data: this.samples.map(s => s.neo4j_repos ?? null), ...baseline(accent, true) },
+          { label: 'users', data: this.samples.map(s => s.neo4j_users ?? null), ...baseline(ok) },
+          { label: 'orgs',  data: this.samples.map(s => s.neo4j_orgs  ?? null), ...baseline(warn) },
         ],
         sparql: [
           { label: 'repos', data: this.samples.map(s => s.sparql_repos ?? null), ...baseline(accent, true) },
+          { label: 'users', data: this.samples.map(s => s.sparql_users ?? null), ...baseline(ok) },
+          { label: 'orgs',  data: this.samples.map(s => s.sparql_orgs  ?? null), ...baseline(warn) },
         ],
-        nodes: [
-          { label: 'nodes', data: this.samples.map(s => s.neo4j_nodes ?? null), ...baseline(accent, true) },
+        opensearch: [
+          { label: 'repos', data: this.samples.map(s => s.opensearch_repos ?? null), ...baseline(accent, true) },
+          { label: 'users', data: this.samples.map(s => s.opensearch_users ?? null), ...baseline(ok) },
+          { label: 'orgs',  data: this.samples.map(s => s.opensearch_orgs  ?? null), ...baseline(warn) },
         ],
-        rels: [
-          { label: 'relationships', data: this.samples.map(s => s.neo4j_rels ?? null), ...baseline(accent, true) },
+        duckdb: [
+          { label: 'GitHub repos',    data: this.samples.map(s => s.duckdb_github_repos       ?? null), ...baseline(accent, true) },
+          { label: 'Zenodo records',  data: this.samples.map(s => s.duckdb_zenodo_records     ?? null), ...baseline(ok) },
+          { label: 'HuggingFace',     data: this.samples.map(s => s.duckdb_huggingface_items  ?? null), ...baseline(warn) },
         ],
       };
 
       const refs = {
-        services: this.$refs.cServices,
-        sparql:   this.$refs.cSparql,
-        nodes:    this.$refs.cNodes,
-        rels:     this.$refs.cRels,
+        neo4j:      this.$refs.cNeo4j,
+        sparql:     this.$refs.cSparql,
+        opensearch: this.$refs.cOpensearch,
+        duckdb:     this.$refs.cDuckdb,
       };
+      // Range changed since the last render? Tear every chart down
+      // so the next constructor sees a clean canvas. Chart.js can't
+      // safely ``update()`` a time-scale chart with a vastly
+      // different data range — its layout calc throws
+      // "Cannot set properties of undefined (setting 'fullSize')".
+      const rangeChanged = this._lastRange !== this.range;
+      if (rangeChanged) {
+        for (const k of Object.keys(this.charts)) {
+          try { this.charts[k].destroy(); } catch (_) { /* noop */ }
+          delete this.charts[k];
+        }
+      }
+      this._lastRange = this.range;
+
       for (const key of Object.keys(refs)) {
         const ctx = refs[key];
         if (!ctx) continue;
         if (this.charts[key]) {
-          this.charts[key].data.labels = labels;
-          this.charts[key].data.datasets = datasets[key];
-          this.charts[key].update('none');
-        } else {
+          // Same range, just newer data (polling). Update in place.
+          try {
+            this.charts[key].data.labels = labels;
+            this.charts[key].data.datasets = datasets[key];
+            this.charts[key].update('none');
+          } catch (e) {
+            // Defensive fallback: any Chart.js layout glitch → drop
+            // the chart and rebuild from scratch on the next pass.
+            try { this.charts[key].destroy(); } catch (_) {}
+            delete this.charts[key];
+          }
+        }
+        if (!this.charts[key]) {
           this.charts[key] = new Chart(ctx, {
             type: 'line',
             data: { labels, datasets: datasets[key] },
@@ -330,10 +506,27 @@ function overview() {
     },
 
     delta(key) {
-      if (this.samples.length < 2) return null;
-      const first = this.samples[0][key];
-      const last  = this.samples[this.samples.length - 1][key];
-      if (first === null || last === null || first === undefined || last === undefined) return null;
+      // Window-aware delta: take the first and last NON-NULL samples for
+      // ``key`` in the visible window. Without this a brand-new metric
+      // would show a null trend on every range > "when the column was
+      // added" — the chart's series is visibly growing but the tile says
+      // nothing. Picking the first non-null moves the start of the
+      // measurement to when the column began being populated.
+      if (!this.samples.length) return null;
+      let first = null, last = null;
+      for (const s of this.samples) {
+        const v = s[key];
+        if (v === null || v === undefined) continue;
+        if (first === null) first = v;
+        last = v;
+      }
+      if (first === null || last === null || first === last) {
+        // ``first === last`` covers both the "one non-null sample" case
+        // (no delta to compute) and the legitimate "no change" case.
+        // The chart still draws the flat series; the trend pill stays
+        // empty rather than reporting a misleading 0.
+        return first === last && first !== null ? 0 : null;
+      }
       return last - first;
     },
 
@@ -376,9 +569,20 @@ function topStats() {
     },
 
     shortLabel(v) {
+      // ``v`` here can be a row object (value + optional label) OR a
+      // raw URL/string. Resolve to the human label when the backend
+      // attached one (e.g. Wikidata Q-ids on the Discipline facet).
+      if (v && typeof v === 'object') {
+        if (v.label) return v.label;
+        v = v.value || '';
+      }
       if (!v) return '';
       try {
         const u = new URL(v);
+        // Ontology fragment IRIs (open-pulse.epfl.ch/ontology#Software,
+        // SPDX licence pages, etc.) carry their useful name after the
+        // `#`. Fall back to the last path segment for everything else.
+        if (u.hash) return u.hash.replace(/^#/, '');
         return u.pathname.split('/').filter(Boolean).pop() || u.hostname;
       } catch (_) { return v; }
     },

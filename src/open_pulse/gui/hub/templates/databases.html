@@ -1,14 +1,123 @@
 {% extends "base.html" %}
 {% block heading %}Query{% endblock %}
-{% block subheading %}SPARQL · Cypher · OpenSearch consoles. Click an example chip to load it; your tabs persist locally in your browser.{% endblock %}
+{% block subheading %}Community Graph (Neo4j) · Repositories Properties (SPARQL) · Grimoire Lab (OpenSearch). Click an example chip to load it; your tabs persist locally in your browser.{% endblock %}
 
 {% block content %}
+{# Shared tree-aware table renderer (state + methods are mixed into the
+   page's Alpine x-data via spread; CSS is scoped under .tree-table). #}
+<link rel="stylesheet" href="/static/css/tree-table.css" />
+<script src="/static/js/tree-table.js"></script>
+{# highlight.js for the snippet codeblock. CDN load — the dark theme
+   (atom-one-dark) plays nicely with the existing dark code panel
+   in both light and dark hub themes. #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlightjs-line-numbers.js/2.8.0/highlightjs-line-numbers.min.js"></script>
+{# marked + DOMPurify for the assistant chat. marked turns the LLM's
+   GitHub-flavoured Markdown (tables, lists, fenced code, headings, …)
+   into HTML; DOMPurify sanitizes before we drop it via ``x-html``.
+   highlight.js is already loaded above; we add both github + github-dark
+   theme stylesheets and toggle their ``disabled`` flag based on the
+   hub's ``data-theme`` so syntax colors track the user's theme choice
+   (the hub uses a manual ``data-theme`` toggle, not ``prefers-color-scheme``,
+   so a CSS media query wouldn't pick it up). #}
+<link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" />
+<link id="hljs-dark"  rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.5/dist/purify.min.js"></script>
+<script>
+(function syncHljsTheme() {
+  const light = document.getElementById('hljs-light');
+  const dark  = document.getElementById('hljs-dark');
+  const apply = () => {
+    const t = document.documentElement.dataset.theme;
+    if (light) light.disabled = (t === 'dark');
+    if (dark)  dark.disabled  = (t !== 'dark');
+  };
+  apply();
+  // base.html mutates data-theme on the <html> root when the user
+  // toggles. Watch for changes so the code-block colors track.
+  new MutationObserver(apply).observe(document.documentElement,
+    { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>
+{# Register SPARQL + Cypher with highlight.js — neither ships in the
+   common bundle, so we declare minimal grammars locally. SQL and JSON
+   come pre-loaded (SQL for SPARQL fallback / OS-SQL, JSON for OS-DSL).
+   Definitions are intentionally permissive: misclassifying a
+   identifier as a keyword is harmless; flagging valid syntax as
+   "illegal" would break highlighting mid-edit. #}
+<script>
+(function () {
+  if (!window.hljs) return;
+  hljs.registerLanguage('sparql', () => ({
+    name: 'SPARQL',
+    case_insensitive: true,
+    keywords: {
+      keyword:
+        'BASE PREFIX SELECT CONSTRUCT DESCRIBE ASK FROM NAMED WHERE ' +
+        'OPTIONAL UNION MINUS FILTER NOT EXISTS BIND VALUES SERVICE GRAPH ' +
+        'DISTINCT REDUCED ORDER BY ASC DESC LIMIT OFFSET GROUP HAVING ' +
+        'DELETE INSERT DATA WITH USING DEFAULT ALL LOAD CLEAR CREATE DROP ' +
+        'COPY MOVE ADD SILENT INTO',
+      built_in:
+        'STR LANG LANGMATCHES DATATYPE BOUND SAMETERM IF COALESCE ' +
+        'REGEX REPLACE CONCAT SUBSTR STRLEN UCASE LCASE STARTS ENDS ' +
+        'CONTAINS COUNT SUM MIN MAX AVG SAMPLE GROUP_CONCAT NOW YEAR ' +
+        'MONTH DAY HOURS MINUTES SECONDS TIMEZONE TZ UUID STRUUID MD5 ' +
+        'SHA1 SHA256 RAND ABS ROUND CEIL FLOOR ISIRI ISURI ISBLANK ' +
+        'ISLITERAL ISNUMERIC IRI URI BNODE',
+      literal: 'true false',
+    },
+    contains: [
+      hljs.HASH_COMMENT_MODE,
+      { className: 'variable', begin: /[?$][A-Za-z_][\w]*/ },
+      { className: 'symbol',   begin: /<[^>\s]+>/ },                 // IRIs
+      { className: 'symbol',   begin: /\b[A-Za-z_][\w-]*:[A-Za-z_][\w-]*/ }, // pname
+      { className: 'string',   begin: /"""/, end: /"""/ },
+      { className: 'string',   begin: /'''/, end: /'''/ },
+      hljs.QUOTE_STRING_MODE,
+      hljs.APOS_STRING_MODE,
+      hljs.C_NUMBER_MODE,
+    ],
+  }));
+
+  hljs.registerLanguage('cypher', () => ({
+    name: 'Cypher',
+    case_insensitive: true,
+    keywords: {
+      keyword:
+        'MATCH OPTIONAL RETURN WHERE WITH UNWIND CREATE MERGE DELETE ' +
+        'DETACH SET REMOVE FOREACH CALL YIELD UNION ORDER BY ASC DESC ' +
+        'LIMIT SKIP DISTINCT AS IS NULL NOT AND OR XOR IN STARTS ENDS ' +
+        'CONTAINS CASE WHEN THEN ELSE END USE USING INDEX CONSTRAINT ON ' +
+        'EXISTS ANY ALL NONE SINGLE PROFILE EXPLAIN DROP SHOW',
+      built_in:
+        'count sum avg min max collect size length head tail last ' +
+        'toString toInteger toFloat toLower toUpper trim split replace ' +
+        'coalesce labels type id keys properties nodes relationships ' +
+        'path range reduce abs round ceil floor rand exists',
+      literal: 'true false null TRUE FALSE NULL',
+    },
+    contains: [
+      hljs.C_LINE_COMMENT_MODE,
+      hljs.C_BLOCK_COMMENT_MODE,
+      // Node label or relationship type — :CamelCase / :lowercase.
+      { className: 'symbol', begin: /:[A-Za-z_][\w]*/ },
+      // Parameter $foo
+      { className: 'variable', begin: /\$[A-Za-z_][\w]*/ },
+      hljs.QUOTE_STRING_MODE,
+      hljs.APOS_STRING_MODE,
+      hljs.C_NUMBER_MODE,
+    ],
+  }));
+})();
+</script>
 <div x-data="dbConsole()" x-init="init()" class="space-y-4">
 
   <!-- Engine picker -->
   <div class="tab-bar">
     <template x-for="t in engines" :key="t">
-      <button :class="engine === t ? 'active' : ''" @click="setEngine(t)" x-text="t"></button>
+      <button :class="engine === t ? 'active' : ''" @click="setEngine(t)" x-text="engineLabels[t] || t"></button>
     </template>
     <span class="card-meta ml-auto" style="padding: 10px 14px;" x-text="hint()"></span>
   </div>
@@ -30,6 +139,42 @@
     </template>
   </div>
   <p class="examples-summary" x-show="activeExampleSummary" x-text="activeExampleSummary"></p>
+
+  <!-- Snapshots rail: SPARQL-only. Lists the named graphs currently in
+       the store (typically ``YYYY-MM/{runtime}``). Clicking a chip
+       prepends a ``FROM <iri>`` to the editor so the query targets that
+       snapshot; clicking the same chip again removes it (toggle). The
+       ``default`` chip is always present so users can reset back to
+       the un-scoped query. -->
+  <div class="snapshots-rail" x-show="engine === 'sparql'" x-cloak>
+    <span class="examples-label">Snapshot</span>
+    <button class="example-chip"
+            :class="activeGraphFromUri === null ? 'is-active' : ''"
+            title="Run against the SPARQL store's default graph (un-scoped)."
+            @click="setActiveGraph(null)">
+      <span class="example-chip-name">default</span>
+      <span class="example-chip-mode" x-text="formatGraphCount(snapshotsDefaultCount)"></span>
+    </button>
+    <template x-for="g in (sparqlNamedGraphs || [])" :key="g.uri">
+      <button class="example-chip"
+              :class="activeGraphFromUri === g.uri ? 'is-active' : ''"
+              :title="g.uri + ' · ' + g.triples + ' triples'"
+              @click="setActiveGraph(g.uri)">
+        <span class="example-chip-name"
+              x-text="g.uri.replace('https://open-pulse.epfl.ch/graph/','')"></span>
+        <span class="example-chip-mode" x-text="formatGraphCount(g.triples)"></span>
+      </button>
+    </template>
+    <template x-if="!(sparqlNamedGraphs || []).length && !snapshotsLoading">
+      <span class="card-meta" style="font-style: italic;">no named graphs — only default.</span>
+    </template>
+    <span class="card-meta ml-auto" x-show="snapshotsLoading">probing store…</span>
+    <button class="btn btn-ghost"
+            @click="refreshSnapshots()"
+            :disabled="snapshotsLoading"
+            title="Re-probe the SPARQL store for new named graphs"
+            style="margin-left: 4px; padding: 2px 8px; font-size: 11px;">↻</button>
+  </div>
 
   <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;">
 
@@ -68,26 +213,33 @@
           </div>
         </div>
 
-        <!-- Code editor with line-number gutter -->
+        <!-- Code editor with line-number gutter + highlight overlay.
+             The textarea sits transparent on top; a `<pre><code class="hljs">`
+             pinned underneath shows the syntax-highlighted version. The
+             textarea drives the pane's height (resize: vertical) so the
+             overlay (position: absolute; inset: 0) tracks it automatically.
+             Scroll events sync gutter + overlay to the textarea's scroll. -->
         <div class="code-editor">
           <pre class="gutter" x-ref="gutter" x-text="lineNumbers"></pre>
-          <textarea class="mono"
-                    x-ref="textarea"
-                    rows="14"
-                    spellcheck="false"
-                    x-model="query"
-                    @input="onEditorInput()"
-                    @scroll="syncGutter()"
-                    @keydown.window.meta.enter.prevent="run()"
-                    @keydown.window.ctrl.enter.prevent="run()"
-                    placeholder="-- click an example chip above, or type a query here. ⌘/Ctrl+Enter to run."></textarea>
+          <div class="code-editor-pane">
+            <pre class="code-highlight" aria-hidden="true"><code x-ref="highlight" class="hljs"></code></pre>
+            <textarea class="mono code-editor-input"
+                      x-ref="textarea"
+                      rows="14"
+                      spellcheck="false"
+                      x-model="query"
+                      @input="onEditorInput()"
+                      @scroll="syncEditorScroll()"
+                      @keydown.window.meta.enter.prevent="run()"
+                      @keydown.window.ctrl.enter.prevent="run()"
+                      placeholder="-- click an example chip above, or type a query here. ⌘/Ctrl+Enter to run."></textarea>
+          </div>
         </div>
 
         <div class="flex gap-2 mt-3" style="align-items: center;">
           <button class="btn btn-primary" @click="run()" :disabled="busy">Run <span class="kbd ml-1">⌘↵</span></button>
           <button class="btn" @click="showSnippets = !showSnippets" :title="showSnippets ? 'Hide examples' : 'Show curl / python / js examples'" style="padding-left: 10px; padding-right: 10px;">&lt;/&gt;</button>
-          <input style="margin-left: 12px;" placeholder="save to library as…" x-model="saveName" />
-          <button class="btn" @click="save()" :disabled="!saveName">Save to library</button>
+          <button class="btn" @click="libraryOpen = true" title="Open the saved-queries library" style="padding-left: 10px; padding-right: 10px;">📚 Library</button>
           <span class="card-meta ml-auto" x-text="resultMeta()"></span>
         </div>
 
@@ -101,7 +253,16 @@
             <button class="btn ml-auto" @click="copySnippet()" :title="snippetCopied ? 'Copied!' : 'Copy snippet'"
                     x-text="snippetCopied ? '✓ copied' : 'Copy'" style="padding: 2px 10px;"></button>
           </div>
-          <pre class="console" style="margin: 0; padding: 10px 12px; white-space: pre-wrap; max-height: 240px; overflow: auto;" x-text="renderSnippet()"></pre>
+          {# Snippet block, syntax-highlighted via highlight.js. The
+             <code> child gets its content + class re-set by
+             syncSnippetCode(), which Alpine re-runs whenever any
+             reactive dependency (query / language pill / engine /
+             os mode) changes. #}
+          <pre class="console" style="margin: 0; padding: 0; max-height: 240px; overflow: auto;"><code
+              x-ref="snippetCode"
+              x-effect="syncSnippetCode()"
+              class="hljs language-bash"
+              style="padding: 10px 12px; display: block; white-space: pre-wrap;"></code></pre>
           <p class="card-meta" style="margin-top: 6px;">Replace placeholder credentials with the values from <code>infra/env/.env</code>. Reads are public by default; writes require admin auth.</p>
         </div>
 
@@ -109,30 +270,226 @@
       </div>
     </div>
 
-    <!-- ── Saved-queries library (right, 1fr) ─────────────────────── -->
-    <div class="card">
-      <div class="card-title">Library</div>
-      <p class="card-meta">
-        Server-side library (stored in the hub's SQLite). Use the
-        <em>Save to library</em> button on the editor to add the current query;
-        click an entry below to load it as a fresh tab.
-      </p>
-      <div style="margin-top: 8px;">
-        <template x-for="s in savedFiltered()" :key="s.id">
-          <button @click="loadFromLibrary(s)"
-                  style="width: 100%; text-align: left; padding: 8px 10px; border-radius: 6px; background: transparent; border: 0; color: var(--fg); cursor: pointer;"
-                  onmouseover="this.style.background='var(--surface-sunk)'"
-                  onmouseout="this.style.background='transparent'">
-            <div class="font-semibold" x-text="s.name"></div>
-            <div class="card-meta">· <span x-text="s.engine"></span></div>
+    <!-- ── Right rail (1fr): tabbed sidekick — Session log + Assistant
+         Replaces the standalone Session-log card and the floating
+         bottom-right Assistant. Tabs are persisted in localStorage so
+         the user lands back on whichever side they used last. -->
+    <div class="card right-rail">
+      <div class="right-rail-tabs">
+        <button class="right-rail-tab"
+                :class="rightTab === 'session' ? 'is-active' : ''"
+                @click="setRightTab('session')">
+          Session log
+          <span class="right-rail-badge" x-show="sessionLog.length"
+                x-text="sessionLog.length"></span>
+        </button>
+        <button class="right-rail-tab"
+                :class="rightTab === 'assistant' ? 'is-active' : ''"
+                @click="setRightTab('assistant')">
+          ✨ Assistant
+          <span class="right-rail-badge" x-show="aiMessages.length"
+                x-text="aiMessages.length"></span>
+        </button>
+        <button class="btn btn-ghost btn-tiny ml-auto"
+                x-show="rightTab === 'session' && sessionLog.length"
+                @click="clearSessionLog()"
+                title="Clear all session-log entries">clear</button>
+        <label x-show="rightTab === 'assistant'"
+               class="ai-tools-toggle"
+               style="margin-left: auto;"
+               :title="aiToolsEnabled ? 'Agent mode: assistant can run read-only SPARQL / Cypher tools and refine its answer with the results.' : 'Agent mode off — assistant only writes queries; you click Use as query + Run.'">
+          <input type="checkbox" x-model="aiToolsEnabled"
+                 @change="localStorage.setItem('op:hub:db-ai-tools', aiToolsEnabled ? '1' : '0')"
+                 style="margin-right: 4px;" />
+          <span style="font-size: 11px;">tools</span>
+        </label>
+        <select class="ai-model"
+                x-show="rightTab === 'assistant'"
+                x-model="aiModel"
+                :disabled="!aiModels.length"
+                title="Model — comes from the configured LLM endpoint."
+                style="max-width: 160px;">
+          <template x-for="m in aiModels" :key="m.id">
+            <option :value="m.id" x-text="m.id"></option>
+          </template>
+        </select>
+        <button class="btn btn-ghost btn-tiny"
+                x-show="rightTab === 'assistant' && aiMessages.length"
+                @click="aiMessages = []; persistAiMessages()"
+                title="Clear chat history (kept per-browser).">⌫</button>
+      </div>
+
+      <!-- Session-log pane -->
+      <div x-show="rightTab === 'session'" class="right-rail-pane">
+        <p class="card-meta" style="margin-top: 4px;">
+          Last <span x-text="sessionLog.length"></span> runs in this browser
+          (cap 100). Click an entry to re-open it as a new tab.
+        </p>
+        <div class="db-sesslog-list">
+          <template x-for="e in sessionLog" :key="e.id">
+            <button @click="loadFromLog(e)" class="db-sesslog-entry">
+              <div class="db-sesslog-line1">
+                <span class="db-sesslog-engine"
+                      :class="'tag-' + e.engine"
+                      x-text="e.engine + (e.os_mode ? ' · ' + e.os_mode : '')"></span>
+                <span class="db-sesslog-meta" x-text="formatLogTime(e.ts)"></span>
+              </div>
+              <div class="db-sesslog-line2" x-text="e.tab_name || 'untitled'"></div>
+              <div class="db-sesslog-line3">
+                <span x-text="(e.row_count || 0).toLocaleString() + ' rows'"></span>
+                <span> · </span>
+                <span x-text="(e.runtime_ms || 0) + ' ms'"></span>
+              </div>
+            </button>
+          </template>
+          <template x-if="!sessionLog.length">
+            <p class="card-meta" style="font-style: italic; margin-top: 8px;">
+              no runs yet — hit ⌘↵ (or click <strong>Run</strong>) to execute the current tab.
+            </p>
+          </template>
+        </div>
+      </div>
+
+      <!-- Assistant pane (replaces the old floating panel) -->
+      <div x-show="rightTab === 'assistant'" class="right-rail-pane right-rail-pane-chat">
+        <div class="ai-panel-body" x-ref="aiBody">
+          <template x-if="!aiMessages.length">
+            <div class="ai-empty">
+              <p style="margin-bottom: 6px;">Ask me to write or refine a query.</p>
+              <p class="card-meta" style="font-size: 11px;">
+                I see your current engine, the editor's query, the
+                available named graphs, and any result-table rows you
+                attach. Click <code>Use as query</code> on my replies
+                to drop a code block into the editor.
+              </p>
+              <p class="card-meta" style="font-size: 11px; margin-top: 6px;"
+                 x-show="aiSchema"
+                 :title="aiSchemaTooltip()">
+                ⚙ Live schema attached — <span x-text="aiSchemaSummary()"></span>
+                <a href="#" @click.prevent="loadAiSchema()" style="margin-left: 4px;">refresh</a>
+              </p>
+            </div>
+          </template>
+          <template x-for="(m, i) in aiMessages" :key="i">
+            <div class="ai-msg" :class="'ai-msg-' + m.role">
+              <div class="ai-msg-role" x-text="aiMessageLabel(m)"></div>
+              <!-- Tool result: collapsible card showing the call +
+                   result. The model already consumed the full result
+                   via a ``role: tool`` message; this UI is just so the
+                   human can see what the agent did. -->
+              <template x-if="m.role === 'tool'">
+                <details class="ai-tool" :open="i === aiMessages.length - 1">
+                  <summary>
+                    <code x-text="m.name"></code>
+                    <span class="card-meta" x-text="aiToolSummary(m)"></span>
+                  </summary>
+                  <div class="ai-tool-call">
+                    <div class="ai-tool-label">arguments</div>
+                    <pre x-text="aiPrettyArgs(m.arguments)"></pre>
+                  </div>
+                  <div class="ai-tool-result">
+                    <div class="ai-tool-label">result</div>
+                    <pre x-text="aiPrettyResult(m.content)"></pre>
+                  </div>
+                  <div class="ai-msg-actions" x-show="aiExtractToolQuery(m)">
+                    <button class="btn btn-ghost"
+                            @click="useAiBlockAsQuery(aiExtractToolQuery(m))"
+                            title="Drop the tool's query into the editor.">
+                      ⤴ Use as query
+                    </button>
+                  </div>
+                </details>
+              </template>
+              <template x-if="m.role !== 'tool'">
+                <div class="ai-msg-body" x-html="renderAiMessage(m.content || '')"></div>
+              </template>
+              <div class="ai-msg-actions"
+                   x-show="m.role === 'assistant' && m.content && extractCodeBlock(m.content)">
+                <button class="btn btn-ghost"
+                        @click="useAiBlockAsQuery(extractCodeBlock(m.content))"
+                        title="Replace the editor's query with this code block.">
+                  ⤴ Use as query
+                </button>
+              </div>
+            </div>
+          </template>
+          <div x-show="aiBusy" class="ai-msg ai-msg-assistant">
+            <div class="ai-msg-role">assistant</div>
+            <div class="ai-msg-body" x-html="renderAiMessage(aiPartial || '…')"></div>
+          </div>
+        </div>
+
+        <div class="ai-attach-rail" x-show="rows.length" x-cloak>
+          <span class="card-meta" style="font-size: 11px;">Attach rows:</span>
+          <input type="number" min="1" max="50" x-model.number="aiAttachN"
+                 style="width: 50px; padding: 2px 4px; font-size: 11px;
+                        background: var(--surface-sunk); border: 1px solid var(--border);
+                        border-radius: 4px; color: var(--fg);" />
+          <button class="btn btn-ghost"
+                  @click="attachRowsToChat('head')"
+                  :disabled="!rows.length"
+                  title="Add the first N rows of the current result table to the chat.">
+            + head
           </button>
-        </template>
-        <template x-if="savedFiltered().length === 0">
-          <p class="card-meta" style="font-style: italic;">none for <span x-text="engine"></span> yet</p>
-        </template>
+          <button class="btn btn-ghost"
+                  @click="attachRowsToChat('tail')"
+                  :disabled="!rows.length"
+                  title="Add the last N rows of the current result table to the chat.">
+            + tail
+          </button>
+          <span class="card-meta ml-auto" style="font-size: 11px;"
+                x-text="rows.length + ' total'"></span>
+        </div>
+
+        <div class="ai-composer">
+          <textarea x-model="aiInput"
+                    @keydown="aiComposerKey($event)"
+                    :disabled="aiBusy"
+                    placeholder="Enter (or ⌘/Ctrl+Enter) to send · Shift+Enter for newline."
+                    rows="3"></textarea>
+          <button class="btn btn-primary"
+                  @click="sendAi()"
+                  :disabled="aiBusy || !aiInput.trim()">Send</button>
+        </div>
       </div>
     </div>
 
+  </div>
+
+  <!-- ── Library modal — saved queries (server-side SQLite).
+       Hidden by default; opened by the 📚 button in the editor
+       toolbar. Clicking outside the panel or the × closes it. -->
+  <div class="db-modal-backdrop" x-show="libraryOpen" x-cloak
+       @click.self="libraryOpen = false"
+       @keydown.escape.window="libraryOpen = false">
+    <div class="db-modal">
+      <div class="db-modal-header">
+        <div class="card-title" style="margin: 0;">Library &middot; <span x-text="engine"></span></div>
+        <button class="btn-close" @click="libraryOpen = false" aria-label="Close">&times;</button>
+      </div>
+      <p class="card-meta" style="margin: 0;">
+        Server-side library (stored in the hub's SQLite). Click an entry to
+        load it as a fresh tab.
+      </p>
+      <div class="db-modal-saveform">
+        <input placeholder="save the current query as…" x-model="saveName"
+               @keydown.enter="if (saveName) save()" />
+        <button class="btn btn-primary" @click="save()" :disabled="!saveName">Save</button>
+      </div>
+      <div class="db-modal-list">
+        <template x-for="s in savedFiltered()" :key="s.id">
+          <button @click="loadFromLibrary(s); libraryOpen = false" class="db-modal-entry">
+            <div class="font-semibold" x-text="s.name"></div>
+            <div class="card-meta">&middot; <span x-text="s.engine"></span></div>
+          </button>
+        </template>
+        <template x-if="savedFiltered().length === 0">
+          <p class="card-meta" style="font-style: italic; margin: 6px 0;">
+            no saved queries yet for <span x-text="engine"></span>.
+          </p>
+        </template>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -145,6 +502,15 @@
         <button class="btn btn-ghost" x-show="sortColumn" @click="clearSort()"
                 title="Clear column sort">↕ reset sort</button>
         <span class="card-meta" x-show="sortColumn" style="margin: 0 6px;">·</span>
+        <!-- Graph viz: only when current result actually carries node/rel
+             objects from Neo4j (see _normalize() in routes/databases.py). -->
+        <button class="btn btn-primary"
+                x-show="engine === 'cypher' && hasGraphData()"
+                @click="openGraph()"
+                title="Render nodes + relationships from this result">
+          ⬡ View as graph
+        </button>
+        <span class="card-meta" x-show="engine === 'cypher' && hasGraphData()" style="margin: 0 6px;">·</span>
         <span class="card-meta" style="margin-right: 4px;">download</span>
         <button class="btn"        @click="download('csv')"      title="CSV (RFC 4180)">CSV</button>
         <button class="btn"        @click="download('md')"       title="Markdown table">MD</button>
@@ -169,98 +535,95 @@
     <pre x-show="rawDump" class="console mt-3" x-text="rawDump"></pre>
   </div>
 
+  <!-- Graph modal: opens when the user clicks "View as graph" on a Cypher
+       result that contains node/relationship objects. vis-network is
+       lazy-loaded from a CDN the first time openGraph() fires. -->
+  <div class="graph-modal" x-show="graphOpen" x-cloak
+       @click.self="closeGraph()"
+       @keydown.escape.window="closeGraph()">
+    <div class="graph-modal-inner">
+      <div class="graph-modal-header">
+        <div class="card-title">Graph view</div>
+        <span class="card-meta ml-2"
+              x-text="graphStats.nodes + ' nodes · ' + graphStats.edges + ' edges'"></span>
+        <div class="ml-auto" style="display: flex; gap: 6px;">
+          <!-- Configure panel: only relevant in scalar-mapping mode. The
+               button is hidden when the result has native Node objects
+               because there's nothing for the user to configure. -->
+          <button class="btn btn-ghost"
+                  x-show="graphMapping.length > 0"
+                  @click="graphConfigOpen = !graphConfigOpen"
+                  :title="graphConfigOpen ? 'Hide column mapping' : 'Show column mapping'">
+            <span x-text="graphConfigOpen ? '▼ columns' : '▸ columns'"></span>
+          </button>
+          <button class="btn btn-ghost" @click="redrawGraph()" title="Re-run layout">↻ relayout</button>
+          <button class="btn btn-ghost" @click="closeGraph()" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+
+      <!-- Column-mapping panel: lets the user pick which columns are
+           nodes (and their kind) and which carry edge labels. Shown
+           collapsed by default once auto-detect succeeds; expanded
+           when the heuristic couldn't pick ≥2 node columns. -->
+      <div class="graph-config" x-show="graphConfigOpen && graphMapping.length > 0" x-cloak>
+        <div class="graph-config-head">
+          <span class="card-meta">
+            Map each column to a role. Auto-detected from the query —
+            edit if the heuristic missed.
+          </span>
+          <div class="ml-auto" style="display: flex; gap: 6px;">
+            <button class="btn btn-ghost" @click="resetMapping()" title="Re-run auto-detect from the query">
+              ↺ auto-detect
+            </button>
+            <button class="btn btn-primary" @click="redrawGraph()" title="Apply current mapping">
+              ▶ render
+            </button>
+          </div>
+        </div>
+        <div class="graph-config-grid">
+          <template x-for="(col, i) in columns" :key="col + '::' + i">
+            <div class="graph-config-row">
+              <span class="graph-config-col" :title="col" x-text="col"></span>
+              <select class="graph-config-role"
+                      @change="updateMapping(i, { role: $event.target.value })">
+                <option value="ignore"
+                        :selected="(graphMapping[i] && graphMapping[i].role) === 'ignore'">Ignore</option>
+                <option value="node"
+                        :selected="(graphMapping[i] && graphMapping[i].role) === 'node'">Node</option>
+                <option value="edge"
+                        :selected="(graphMapping[i] && graphMapping[i].role) === 'edge'">Edge label</option>
+              </select>
+              <input class="graph-config-kind"
+                     placeholder="Repo / User / Org / …"
+                     :disabled="!(graphMapping[i] && graphMapping[i].role === 'node')"
+                     :value="(graphMapping[i] && graphMapping[i].kind) || ''"
+                     @change="updateMapping(i, { kind: $event.target.value })" />
+              <!-- Always rendered so the per-row grid keeps four columns
+                   even when there's no binding hint to show. Empty
+                   string is invisible but holds the slot open. -->
+              <span class="card-meta graph-config-hint"
+                    x-text="(graphMapping[i] && graphMapping[i].binding)
+                            ? '(query var: ' + graphMapping[i].binding + ')'
+                            : ''"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div id="cypher-graph-canvas" class="graph-canvas"></div>
+      <div class="graph-modal-footer">
+        <span class="card-meta">drag to pan · scroll to zoom · click a node for details</span>
+        <span class="card-meta ml-auto" x-show="graphSelectedLabel"
+              x-text="graphSelectedLabel"></span>
+      </div>
+    </div>
+  </div>
+
+
 </div>
 
 <style>
-  /* ── tree-view: tabla en tabla ─────────────────────────────────── */
-  .tree-table table.data.tree {
-    border-collapse: collapse;
-    width: 100%;
-  }
-  .tree-table table.data.tree th {
-    background: var(--surface-sunk);
-    border: 1px solid var(--border);
-    padding: 4px 8px;
-    font-weight: 600;
-    text-align: left;
-    font-size: 11px;
-    position: sticky; top: 0; z-index: 1;
-  }
-  .tree-table table.data.tree > tbody > tr > td {
-    border: 1px solid var(--border);
-    vertical-align: top;
-  }
-  .tree-table table.nested {
-    border-collapse: collapse;
-    width: 100%;
-    font-size: 11px;
-    background: var(--surface-soft);
-  }
-  .tree-table table.nested th,
-  .tree-table table.nested td {
-    border: 1px solid var(--border);
-    padding: 2px 6px;
-  }
-  .tree-table table.nested th {
-    background: var(--surface);
-    font-weight: 600;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-  }
-  .tree-table .nested-cell { padding: 2px !important; }
-  .tree-table .nested-list { display: flex; flex-direction: column; gap: 1px; }
-  .tree-table .nested-list > div {
-    padding: 2px 6px;
-    background: var(--surface-soft);
-    border-radius: 3px;
-    font-size: 11px;
-    word-break: break-all;
-  }
-  /* Header cell with column name + type-selector dropdown. */
-  .tree-table .th-with-type {
-    display: flex; align-items: center; gap: 6px;
-    justify-content: space-between;
-  }
-  .tree-table .th-with-type .th-label {
-    font-weight: 600;
-    cursor: pointer;
-    user-select: none;
-  }
-  .tree-table .th-with-type .th-label:hover { color: var(--accent, currentColor); }
-  .tree-table .th-type {
-    font-size: 10px;
-    padding: 1px 4px;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    background: var(--surface);
-    color: var(--fg-muted);
-    cursor: pointer;
-  }
-  .tree-table .th-type:hover { color: var(--fg); }
-  /* Per-leaf renderers for url / image / pretty. */
-  .tree-table .cell-url {
-    color: var(--accent, #4a9eff);
-    text-decoration: underline;
-    word-break: break-all;
-  }
-  .tree-table .cell-img-cell { text-align: center; }
-  .tree-table .cell-img {
-    max-width: 120px; max-height: 80px;
-    object-fit: contain;
-    border-radius: 3px;
-    background: var(--surface-soft);
-  }
-  .tree-table .cell-pretty {
-    margin: 0;
-    padding: 4px 8px;
-    background: var(--surface-soft);
-    border-radius: 3px;
-    font-size: 11px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 200px; overflow: auto;
-  }
+  /* tree-table CSS moved to /static/css/tree-table.css */
 
   /* ── examples chips ─────────────────────────────────────────────── */
   .examples-rail {
@@ -269,6 +632,17 @@
     background: var(--surface-soft);
     border: 1px solid var(--border);
     border-radius: 10px;
+  }
+  /* Snapshots rail mirrors the examples-rail visually but uses a
+     subtly different background tint to signal it manipulates query
+     scope (FROM clauses) rather than swapping query bodies. */
+  .snapshots-rail {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 8px 12px;
+    background: var(--surface-sunk);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-top: 8px;
   }
   .examples-label {
     font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
@@ -388,21 +762,23 @@
     opacity: 1;
   }
 
-  /* ── code editor with gutter ───────────────────────────────────── */
+  /* ── code editor with gutter — uses the unified --code-* palette
+   *    so the editor matches the chaoss trace + recipe blocks
+   *    (background, gutter colour, line-number column). */
   .code-editor {
     display: flex;
     align-items: stretch;
     border: 1px solid var(--border);
     border-radius: 6px;
-    background: var(--surface-soft);
+    background: var(--code-bg);
     overflow: hidden;
   }
   .code-editor .gutter {
     margin: 0;
-    padding: 10px 8px 10px 10px;
-    border-right: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--fg-faint);
+    padding: 10px 12px 10px 14px;
+    border-right: 1px solid var(--code-ln-border);
+    background: var(--code-ln-bg);
+    color: var(--code-ln-fg);
     font: 13px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
     text-align: right;
     user-select: none;
@@ -410,26 +786,579 @@
     min-width: 40px;
     max-height: inherit;
     white-space: pre;
+    font-variant-numeric: tabular-nums;
   }
-  .code-editor textarea {
+  /* Pane that wraps the highlight overlay + textarea. Acts as the
+   * positioning context (relative) and is sized by the textarea inside. */
+  .code-editor-pane {
+    position: relative;
+    flex: 1;
+    display: flex;
+    min-width: 0;
+  }
+  /* The <pre><code> overlay sits behind the textarea and shows the
+   * highlighted source. ``overflow: hidden`` plus a transform-driven
+   * scroll keeps it visually identical to the textarea without a
+   * second scrollbar competing with the textarea's. */
+  .code-editor-pane .code-highlight {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 10px 14px;
+    pointer-events: none;
+    overflow: hidden;
+    background: transparent;
+    border: 0;
+    white-space: pre;
+    z-index: 0;
+  }
+  .code-editor-pane .code-highlight code.hljs {
+    display: block;
+    padding: 0;
+    background: transparent;
+    color: var(--code-fg);
+    font: 13px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
+    white-space: pre;
+    will-change: transform;
+  }
+  /* Textarea is transparent on top — caret stays visible, glyphs hide
+   * so only the highlight overlay's text shows through. */
+  .code-editor textarea.code-editor-input {
+    position: relative;
+    z-index: 1;
     flex: 1;
     margin: 0;
     border: 0 !important;
     border-radius: 0 !important;
     background: transparent !important;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    caret-color: var(--code-fg);
     resize: vertical;
-    padding: 10px 12px;
+    padding: 10px 14px;
     font: 13px/1.55 ui-monospace, "SF Mono", Consolas, monospace;
     box-shadow: none !important;
     outline: 0;
+    width: 100%;
   }
-  .code-editor textarea:focus {
-    background: var(--surface) !important;
+  .code-editor textarea.code-editor-input:focus {
+    background: transparent !important;
   }
+  /* Selection has to remain visible despite transparent text: tint
+   * the background, keep the foreground transparent. */
+  .code-editor textarea.code-editor-input::selection {
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+  .code-editor textarea.code-editor-input::placeholder {
+    color: var(--code-ln-fg);
+    -webkit-text-fill-color: var(--code-ln-fg);
+  }
+
+  /* ── Session query log (right column).
+   *   Each card is a clickable shortcut to re-open the run as a new
+   *   tab. Engine pills give an at-a-glance visual cue. */
+  .db-sesslog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .db-sesslog-list {
+    margin-top: 8px;
+    max-height: 540px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .db-sesslog-entry {
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--fg);
+    cursor: pointer;
+    transition: background 80ms ease, border-color 80ms ease;
+  }
+  .db-sesslog-entry:hover {
+    background: var(--surface-sunk);
+    border-color: var(--border);
+  }
+  .db-sesslog-line1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+  .db-sesslog-line2 {
+    font-size: 12px;
+    color: var(--fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    margin-bottom: 2px;
+  }
+  .db-sesslog-line3 {
+    font-size: 11px;
+    color: var(--fg-muted);
+  }
+  .db-sesslog-engine {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-sunk);
+    color: var(--fg);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  .db-sesslog-engine.tag-cypher {
+    background: color-mix(in srgb, #88c0d0 22%, transparent);
+    color: #88c0d0;
+  }
+  .db-sesslog-engine.tag-sparql {
+    background: color-mix(in srgb, #b48ead 22%, transparent);
+    color: #b48ead;
+  }
+  .db-sesslog-engine.tag-opensearch {
+    background: color-mix(in srgb, #ebcb8b 24%, transparent);
+    color: #ebcb8b;
+  }
+  .db-sesslog-meta { font-size: 11px; color: var(--fg-muted); }
+
+  /* ── Library modal. Replaces the always-visible right-side card
+   *   from the previous layout; only opens when the user clicks the
+   *   📚 button in the editor toolbar. */
+  .db-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .db-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    max-width: 640px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+  }
+  .db-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .db-modal-header .btn-close {
+    font-size: 20px;
+    padding: 0 10px;
+    line-height: 1;
+    background: transparent;
+    border: 0;
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .db-modal-header .btn-close:hover { color: var(--fg); }
+  .db-modal-saveform {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .db-modal-saveform input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-sunk);
+    color: var(--fg);
+  }
+  .db-modal-list {
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .db-modal-entry {
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--fg);
+    cursor: pointer;
+  }
+  .db-modal-entry:hover {
+    background: var(--surface-sunk);
+    border-color: var(--border);
+  }
+
+  /* ── Graph modal (Cypher view-as-graph) ───────────────────────── */
+  .graph-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  }
+  .graph-modal-inner {
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #ddd);
+    border-radius: 8px;
+    width: min(96vw, 1400px);
+    height: min(92vh, 900px);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
+  }
+  .graph-modal-header,
+  .graph-modal-footer {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border, #ddd);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .graph-modal-footer {
+    border-bottom: none;
+    border-top: 1px solid var(--border, #ddd);
+    font-size: 12px;
+  }
+  .graph-canvas {
+    flex: 1;
+    min-height: 0;
+    background: var(--surface-sunk, #fafafa);
+  }
+  /* Configure-columns panel inside the graph modal. Sits between the
+     header and the canvas; collapsible via the chevron button. */
+  .graph-config {
+    padding: 8px 14px 10px 14px;
+    border-bottom: 1px solid var(--border, #ddd);
+    background: var(--surface-soft, #f6f6f8);
+  }
+  .graph-config-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+  }
+  .graph-config-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .graph-config-row {
+    /* Each row is its own grid so the hint cell being hidden via
+       x-show (display: none) just leaves blank space in that row,
+       instead of pulling the NEXT row's cells into this one's slot. */
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) 110px minmax(160px, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+  }
+  .graph-config-col {
+    font-size: 12px;
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .graph-config-role,
+  .graph-config-kind {
+    font-size: 11px;
+    padding: 2px 6px;
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #ddd);
+    border-radius: 3px;
+    color: var(--fg, inherit);
+  }
+  .graph-config-kind:disabled {
+    opacity: 0.5;
+    background: var(--surface-sunk, #f0f0f0);
+  }
+  .graph-config-hint {
+    font-size: 10px;
+    font-style: italic;
+  }
+  [x-cloak] { display: none !important; }
+
+  /* ── Right rail (tabbed: Session log / Assistant) ──────────────── */
+  .right-rail {
+    display: flex; flex-direction: column;
+    padding: 0;
+    /* Bound the rail's growth so a long chat scrolls *inside* the
+       pane rather than ratcheting the surrounding card up forever:
+       ``max-height`` caps it, ``min-height`` keeps it tall enough to
+       be useful when the chat is empty, and ``height: 100%`` lets
+       CSS-grid still stretch the rail to match the editor card's
+       baseline when the editor side is the dominant column.
+       Mathematical effect:
+           rail_height = clamp(min, editor_card_height, max)
+       — within these bounds both columns share the same baseline. */
+    min-height: 480px;
+    max-height: calc(100vh - 160px);
+    height: 100%;
+  }
+  .right-rail-tabs {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .right-rail-tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent; border: 0; cursor: pointer;
+    padding: 4px 10px; border-radius: 6px;
+    font-size: 12px; color: var(--fg-muted);
+  }
+  .right-rail-tab:hover { background: var(--surface-soft); color: var(--fg); }
+  .right-rail-tab.is-active {
+    background: var(--surface-soft); color: var(--fg); font-weight: 500;
+  }
+  .right-rail-badge {
+    background: var(--surface-sunk); color: var(--fg-muted);
+    padding: 1px 6px; border-radius: 999px; font-size: 10px;
+    border: 1px solid var(--border);
+  }
+  .right-rail-tab.is-active .right-rail-badge {
+    background: var(--surface); color: var(--fg);
+  }
+  .right-rail-pane {
+    flex: 1; min-height: 0;
+    padding: 10px 14px; overflow: auto;
+    /* Same content box across both panes — the chat variant zeroes its
+       outer padding and pushes it inwards to the body / composer so the
+       composer can still pin to the bottom edge. ``box-sizing`` matters
+       because internal flex children (the composer textarea) inherit
+       this and width-equivalent calculations would otherwise drift. */
+    box-sizing: border-box;
+    width: 100%;
+  }
+  .right-rail-pane-chat {
+    /* Chat needs the composer pinned at the bottom — split into a
+       scrollable body + fixed footer (attach rail + composer). */
+    padding: 0;
+    display: flex; flex-direction: column;
+  }
+  .ai-model {
+    font-size: 11px; padding: 3px 6px;
+    background: var(--surface-sunk); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--fg);
+  }
+  .ai-panel-body {
+    flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+    padding: 10px 14px; display: flex; flex-direction: column; gap: 10px;
+    box-sizing: border-box; width: 100%;
+    /* Thin, theme-aware scrollbar so the rail doesn't get visually
+       crowded by a default 16px chrome scrollbar. Firefox honours
+       ``scrollbar-width`` + ``scrollbar-color``; WebKit gets its own
+       pseudo-elements below. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .ai-panel-body::-webkit-scrollbar { width: 8px; }
+  .ai-panel-body::-webkit-scrollbar-track { background: transparent; }
+  .ai-panel-body::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+  .ai-panel-body::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
+  /* Session-log pane gets the same scrollbar treatment for visual
+     consistency between the two tabs. */
+  .right-rail-pane:not(.right-rail-pane-chat) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .right-rail-pane::-webkit-scrollbar { width: 8px; }
+  .right-rail-pane::-webkit-scrollbar-track { background: transparent; }
+  .right-rail-pane::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+  .right-rail-pane::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
+  .ai-msg {
+    box-sizing: border-box;
+    max-width: 100%;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;   /* let long unbroken URIs/SPARQL IRIs wrap */
+  }
+  /* Code blocks: stay inside the bubble, scroll internally for long
+     lines instead of pushing the whole chat pane wider. */
+  .ai-msg-body pre {
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  /* Tables in chat — same constraint, horizontal scroll inside the
+     bubble when they're wider than the pane. */
+  .ai-msg-body table { display: block; overflow-x: auto; }
+  .ai-composer { box-sizing: border-box; width: 100%; }
+  .ai-composer textarea { box-sizing: border-box; min-width: 0; }
+  .ai-attach-rail { box-sizing: border-box; width: 100%; flex-wrap: wrap; }
+  .ai-empty { color: var(--fg-muted); font-size: 12px; padding: 20px 0; }
+  .ai-msg {
+    border-radius: 8px; padding: 8px 10px;
+    background: var(--surface-sunk);
+    font-size: 13px;
+  }
+  .ai-msg-user   { background: var(--surface-soft); }
+  .ai-msg-system { background: var(--surface-sunk); font-style: italic; opacity: 0.7; font-size: 11px; }
+  .ai-msg-role {
+    font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--fg-muted); margin-bottom: 4px;
+  }
+  .ai-msg-body { line-height: 1.45; color: var(--fg); }
+  /* Code blocks inherit the theme's foreground (dark text on light
+     theme, light text on dark) instead of forcing a high-contrast
+     palette that washes out under the wrong theme. */
+  .ai-msg-body pre {
+    background: var(--surface, #fff);
+    color: var(--fg, inherit);
+    border: 1px solid var(--border, #ddd);
+    padding: 8px 10px; border-radius: 6px;
+    overflow-x: auto; font-size: 11px;
+    margin: 6px 0; white-space: pre;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .ai-msg-body code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    background: var(--surface);
+    color: var(--fg);
+    padding: 1px 4px; border-radius: 3px;
+  }
+  /* Inside a syntax-highlighted <pre>, hljs paints its own colors —
+     don't let the inline-code background bleed through. */
+  .ai-msg-body pre code, .ai-msg-body pre .hljs {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+  }
+  /* Markdown tables in chat: compact, scrollable, theme-aware. */
+  .ai-msg-body table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 6px 0;
+    font-size: 12px;
+  }
+  .ai-msg-body th, .ai-msg-body td {
+    padding: 4px 8px;
+    border: 1px solid var(--border, #ddd);
+    text-align: left;
+  }
+  .ai-msg-body th {
+    background: var(--surface-soft, var(--surface));
+    font-weight: 600;
+  }
+  .ai-msg-body tr:nth-child(even) td {
+    background: var(--surface-sunk, transparent);
+  }
+  /* Headings inside the chat — shrink them so they don't blow up the
+     panel. */
+  .ai-msg-body h1, .ai-msg-body h2, .ai-msg-body h3,
+  .ai-msg-body h4, .ai-msg-body h5, .ai-msg-body h6 {
+    margin: 8px 0 4px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .ai-msg-body h1 { font-size: 15px; }
+  .ai-msg-body h2 { font-size: 14px; }
+  .ai-msg-body h3 { font-size: 13px; }
+  .ai-msg-body h4, .ai-msg-body h5, .ai-msg-body h6 { font-size: 12px; }
+  /* Lists: keep them tidy. */
+  .ai-msg-body ul, .ai-msg-body ol { margin: 4px 0; padding-left: 22px; }
+  .ai-msg-body li { margin: 2px 0; }
+  /* Blockquote — used by some models for caveats. */
+  .ai-msg-body blockquote {
+    border-left: 3px solid var(--border, #ddd);
+    margin: 6px 0;
+    padding: 2px 8px;
+    color: var(--fg-muted);
+  }
+  /* Inline anchors — keep the brand accent. */
+  .ai-msg-body a { color: var(--accent, #335bff); text-decoration: underline; }
+  /* Tool-call card: collapsible summary + arguments + result. The
+     card sits inside an .ai-msg bubble (role=tool) so the surrounding
+     spacing matches the rest of the chat. */
+  .ai-tool { font-size: 12px; }
+  .ai-tool summary {
+    cursor: pointer; list-style: none; padding: 4px 0;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ai-tool summary::before {
+    content: '▸';
+    transition: transform 0.15s;
+  }
+  .ai-tool[open] summary::before { transform: rotate(90deg); }
+  .ai-tool-label {
+    font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--fg-muted);
+    margin: 6px 0 2px;
+  }
+  .ai-tool pre {
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 6px 8px; border-radius: 4px;
+    font-size: 11px; max-height: 220px; overflow: auto;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  .ai-tools-toggle {
+    display: inline-flex; align-items: center;
+    color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .ai-tools-toggle input { accent-color: var(--accent, #335bff); }
+  .ai-msg-body p { margin: 4px 0; }
+  .ai-msg-actions { margin-top: 6px; }
+  .ai-msg-actions .btn { font-size: 11px; padding: 3px 8px; }
+  .ai-attach-rail {
+    display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+    border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .ai-attach-rail .btn { font-size: 11px; padding: 3px 8px; }
+  .ai-composer {
+    display: flex; gap: 6px; padding: 10px 14px;
+    border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .ai-composer textarea {
+    flex: 1; resize: none; font-family: inherit; font-size: 12px;
+    padding: 6px 8px; background: var(--surface-sunk);
+    border: 1px solid var(--border); border-radius: 6px; color: var(--fg);
+  }
+  .ai-composer textarea:focus { outline: 1px solid var(--accent); }
 </style>
 
 <script>
 const TAB_STORAGE_KEY = 'op:hub:db-tabs:v1';
+const SESSION_LOG_KEY = 'op:hub:db-session-log:v1';
+const SESSION_LOG_CAP = 100;
+
+function loadSessionLog() {
+  try { return JSON.parse(localStorage.getItem(SESSION_LOG_KEY) || '[]') || []; }
+  catch (_) { return []; }
+}
+function saveSessionLog(rows) {
+  try { localStorage.setItem(SESSION_LOG_KEY, JSON.stringify(rows)); }
+  catch (_) { /* localStorage quota — drop silently, log is a convenience. */ }
+}
 
 const STARTERS = {
   sparql: '# pick an example above, or type SPARQL here. ⌘/Ctrl+Enter to run.\nPREFIX schema: <http://schema.org/>\nSELECT ?repo WHERE { ?repo a schema:SoftwareSourceCode } LIMIT 25',
@@ -628,27 +1557,56 @@ function _opensearchSnippet(lang, q, host, osMode) {
 }
 function dbConsole() {
   return {
-    engines: ['sparql', 'cypher', 'opensearch'],
-    engine: 'sparql',
+    // Tree-table renderer mixin: columns / rows / truncated / sortColumn /
+    // sortDir / cellTypes / treeMaxDepth + every render/sort method.
+    // Spread first so page-specific entries below can override safely
+    // (Alpine merges by spread order — later wins).
+    ...window.treeTable(),
+
+    // Tab order + default match the reading order on the entity
+    // pages: graph relations first (who connects to what), then
+    // semantic properties, then operational data.
+    engines: ['cypher', 'sparql', 'opensearch'],
+    engine: 'cypher',
+    // Human-readable engine names shown in the tab-bar. Keys are the
+    // canonical engine ids used everywhere else in the code.
+    engineLabels: {
+      'cypher':     'Community Graph · Neo4j',
+      'sparql':     'Repositories Properties · SPARQL',
+      'opensearch': 'Grimoire Lab · OpenSearch',
+    },
     // Snippets panel state (curl / python / js examples).
     showSnippets: false, snippetLang: 'curl', snippetCopied: false,
     osMode: 'sql',
     busy: false, error: '',
-    columns: [], rows: [], truncated: false, rawDump: '',
-    sortColumn: null,
-    sortDir: 'asc',          // 'asc' | 'desc'
-    // Per-column render override (set via the in-header dropdown). Keys
-    // are column names; values are one of:
-    //   auto    — primitive → text, object → tree, array → sub-table,
-    //             mixed shapes → JSON string (the safe heuristic)
-    //   json    — force tree expansion even for mixed columns
-    //   pretty  — multi-line indented JSON inside a <pre>
-    //   text    — single-line JSON.stringify / String(value)
-    //   url     — render as <a href> for string values
-    //   image   — render as <img src> for string values
-    // Reset on every fresh query (different queries → different schema).
-    cellTypes: {},
-    treeMaxDepth: 5,
+    rawDump: '',
+    // Graph viz modal state (Cypher only; vis-network lazy-loaded).
+    graphOpen: false,
+    graphNetwork: null,
+    graphStats: { nodes: 0, edges: 0 },
+    graphSelectedLabel: '',
+    // Query text that produced the current result set — captured at
+    // ``run()`` time so the graph view's cypher introspection sees the
+    // query a user actually executed, not whatever they have in the
+    // editor right now.
+    lastQueryRan: '',
+    // Per-column role mapping for the graph view's scalar-extraction
+    // mode. Built by auto-detection (introspection + column-name
+    // heuristics); the user can override via the modal's "Configure
+    // columns" panel. Shape: ``[{role: 'node'|'edge'|'ignore',
+    // kind: '<Label>', binding: '<cypher-var>' }, …]`` indexed by
+    // column position. Persisted per query in localStorage.
+    graphMapping: [],
+    // Cached cypher introspection of ``lastQueryRan``: bindings,
+    // their labels, and the edges between them. ``null`` when the
+    // result came back with native node objects (no introspection
+    // needed) or when the query couldn't be parsed.
+    graphIntrospection: null,
+    // Whether the modal's column-mapping panel is expanded. Auto-
+    // collapsed when auto-detect picked ≥2 node columns; auto-
+    // expanded otherwise so the user knows to map columns.
+    graphConfigOpen: false,
+    // (cellTypes + treeMaxDepth come from the treeTable mixin.)
     examples: {},
     activeExampleId: null,
     activeExampleSummary: '',
@@ -664,9 +1622,40 @@ function dbConsole() {
     // ── library (server-side SQLite) ─────────────────────────────
     saved: [],
     saveName: '',
+    libraryOpen: false,
+
+    // ── session query log (browser-local) ────────────────────────
+    sessionLog: [],
+
+    // ── snapshots rail (SPARQL named graphs) ─────────────────────
+    sparqlNamedGraphs: [],         // [{uri, triples}, …] from /api/stats/
+    snapshotsDefaultCount: null,   // default-graph triple count (live, separate query)
+    snapshotsLoading: false,
+    activeGraphFromUri: null,      // currently-injected ``FROM <iri>`` (null = default)
+
+    // ── Right rail (tabbed: session log + assistant) ─────────────
+    // ``rightTab`` persists in localStorage so the user lands back on
+    // whichever side they used last.
+    rightTab: localStorage.getItem('op:hub:db-right-tab') || 'session',
+
+    // ── AI assistant (lives inside the right rail) ───────────────
+    aiOpen: false,                 // legacy: kept so older bookmarks don't crash
+    aiModels: [],                  // [{id}, …] from /api/ai/models
+    aiModel: '',                   // selected model id
+    aiMessages: [],                // conversation history (OpenAI shape)
+    aiInput: '',                   // composer textarea
+    aiBusy: false,                 // a request is in flight
+    aiPartial: '',                 // streaming accumulator until the message lands
+    aiAttachN: 10,                 // head/tail row count to attach
+    aiSchema: null,                // {sparql:{…}, neo4j:{…}} from /api/ai/schema-context
+    // Agentic mode lets the assistant call ``run_sparql`` / ``run_cypher``
+    // tools on its own (read-only, row-capped). Default off so the
+    // experience stays predictable until the user opts in.
+    aiToolsEnabled: localStorage.getItem('op:hub:db-ai-tools') === '1',
 
     async init() {
       this.tabs = loadTabs();
+      this.sessionLog = loadSessionLog();
       if (!this.tabs.length) {
         // Seed three default tabs, one per engine, with the engine starter.
         for (const eng of this.engines) {
@@ -683,13 +1672,83 @@ function dbConsole() {
       this.engine = first.engine;
       this.switchTab(first.id);
 
-      this.$watch('query', () => { this.recomputeGutter(); });
+      this.$watch('query', () => {
+        this.recomputeGutter();
+        this.rehighlightEditor();
+        this.autoResizeEditor();
+      });
       this.$watch('engine', () => {
         this.error = ''; this.rows = []; this.columns = []; this.rawDump = '';
+        this.rehighlightEditor();
       });
+      // OpenSearch toggles SQL ↔ JSON DSL — re-paint on that swap too.
+      this.$watch('osMode', () => { this.rehighlightEditor(); });
 
       await Promise.all([this.loadExamples(), this.loadSaved()]);
       this.recomputeGutter();
+      this.rehighlightEditor();
+      this.autoResizeEditor();
+      // Probe the SPARQL store for named graphs if SPARQL is the initial
+      // engine — same lazy-load pattern setEngine() uses on tab switch.
+      if (this.engine === 'sparql') this.refreshSnapshots();
+      // If the user left the page on the assistant tab last time,
+      // restore the chat state now so the panel isn't blank on first
+      // open.
+      if (this.rightTab === 'assistant') this.openAi();
+
+      // Deep-link handler: if the page was opened with a fragment
+      // like ``#engine=cypher&q=…&os_mode=dsl`` (e.g. from a "Open
+      // in /databases" button on the CHAOSS dashboard), switch to
+      // that engine, spawn a fresh tab seeded with the query, and
+      // apply os_mode. Clears the fragment afterwards so the deep-
+      // link doesn't fire again on every reload.
+      this.consumeDeepLink();
+    },
+
+    consumeDeepLink() {
+      const raw = (window.location.hash || '').replace(/^#/, '');
+      if (!raw) return;
+      const params = new URLSearchParams(raw);
+      const engine = params.get('engine');
+      const q = params.get('q');
+      const osMode = params.get('os_mode');
+      if (!engine || !this.engines.includes(engine)) return;
+
+      // Switch engine first so the new tab is filed under it.
+      this.engine = engine;
+      if (osMode === 'sql' || osMode === 'dsl') {
+        this.osMode = osMode;
+      }
+      // Spawn a fresh tab seeded with the deep-linked query — we
+      // don't want to clobber whatever the user had in their
+      // scratch tab.
+      if (q) {
+        const t = {
+          id: newTabId(),
+          name: 'from CHAOSS',
+          engine,
+          content: q,
+        };
+        this.tabs.push(t);
+        saveTabs(this.tabs);
+        this.switchTab(t.id);
+      } else {
+        const found = this.tabs.find(tt => tt.engine === engine);
+        if (found) this.switchTab(found.id);
+      }
+
+      // Strip the fragment so a reload doesn't re-open the link.
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+
+      // Auto-run: "Run query" on the CHAOSS dashboard implies the
+      // visitor wants to see results, not just have the editor
+      // pre-loaded. Fire ``run()`` on the next tick so Alpine has
+      // finished swapping the active tab + its content. We defer
+      // via setTimeout(0) rather than awaiting because init() should
+      // return cheaply.
+      if (q) {
+        setTimeout(() => { this.run().catch(() => {}); }, 0);
+      }
     },
 
     // ── library (server-side SQLite) ─────────────────────────────
@@ -736,9 +1795,67 @@ function dbConsole() {
 
     onEditorInput() {
       this.tabIsDirty = true;
+      this.recomputeGutter();
+      this.rehighlightEditor();
+      this.autoResizeEditor();
       // Debounced auto-persist; saves on every keystroke after a short pause.
       if (this._saveTimer) clearTimeout(this._saveTimer);
       this._saveTimer = setTimeout(() => this.persistActive(), 350);
+    },
+    autoResizeEditor() {
+      // Grow / shrink the textarea to fit its content. We clamp the
+      // upper bound to ~60% of viewport so a paste of 10 000 lines
+      // doesn't push everything else off-screen — past that, the
+      // textarea's own scrollbar takes over.
+      const ta = this.$refs.textarea;
+      if (!ta) return;
+      ta.style.height = 'auto';
+      const min = 220;  // matches the previous ``rows="14"`` baseline
+      const max = Math.max(min, Math.floor(window.innerHeight * 0.6));
+      ta.style.height = Math.min(max, Math.max(min, ta.scrollHeight)) + 'px';
+      // The overlay <pre> needs to match for the highlight + gutter to
+      // line up; the existing scroll sync handles the rest.
+      const hl = this.$refs.highlight;
+      if (hl) hl.parentElement.style.height = ta.style.height;
+    },
+
+    // ── syntax highlight overlay ─────────────────────────────────
+    // Returns the highlight.js language id matching the current engine.
+    // OpenSearch is bimodal: SQL plugin vs raw JSON DSL.
+    editorLanguage() {
+      if (this.engine === 'opensearch') return this.osMode === 'sql' ? 'sql' : 'json';
+      if (this.engine === 'sparql') return 'sparql';
+      if (this.engine === 'cypher') return 'cypher';
+      return 'sql';
+    },
+    rehighlightEditor() {
+      const ta = this.$refs.textarea;
+      const hl = this.$refs.highlight;
+      if (!ta || !hl || !window.hljs) return;
+      const lang = this.editorLanguage();
+      // Trailing newline guarantees the overlay has the same number of
+      // visible lines as the textarea after a newline-terminated edit.
+      const src = (ta.value || '') + '\n';
+      try {
+        hl.innerHTML = hljs.highlight(src, { language: lang, ignoreIllegals: true }).value;
+      } catch (_) {
+        hl.textContent = src;  // grammar failed — degrade to plain text
+      }
+      // Apply current scroll offset to the freshly-rendered code.
+      this.syncEditorScroll();
+    },
+    syncEditorScroll() {
+      const ta = this.$refs.textarea;
+      const hl = this.$refs.highlight;
+      const g  = this.$refs.gutter;
+      if (!ta) return;
+      if (g)  g.scrollTop  = ta.scrollTop;
+      if (hl) {
+        // Translate the code element to match textarea scroll. Using
+        // transform (not scrollTop on <pre>) avoids the pre needing
+        // its own scrollbar overlapping the textarea's.
+        hl.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`;
+      }
     },
 
     switchTab(id) {
@@ -796,6 +1913,90 @@ function dbConsole() {
       const found = this.tabs.find(t => t.engine === name);
       if (found) this.switchTab(found.id);
       else this.newTab();
+      // Probe the SPARQL store for snapshots when the user lands on the
+      // SPARQL tab. We only fetch once per tab visit — the user can
+      // press the ↻ button to re-probe after a quest run lands a new
+      // snapshot graph.
+      if (name === 'sparql' && !this.sparqlNamedGraphs.length) {
+        this.refreshSnapshots();
+      }
+    },
+
+    // ── Snapshots rail (SPARQL named graphs) ─────────────────────
+    async refreshSnapshots() {
+      this.snapshotsLoading = true;
+      try {
+        const r = await fetch('/api/stats/');
+        if (!r.ok) return;
+        const j = await r.json();
+        const graphs = (j.sparql || {}).named_graphs;
+        if (Array.isArray(graphs)) this.sparqlNamedGraphs = graphs;
+        // Default-graph count: the stats endpoint already returns the
+        // total (sum across all graphs in some stores); query the
+        // default explicitly for the chip badge.
+        try {
+          const dr = await fetch('/api/databases/sparql/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              query: 'SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }',
+            }),
+          });
+          if (dr.ok) {
+            const d = await dr.json();
+            const v = ((d.rows || [])[0] || [])[0];
+            this.snapshotsDefaultCount = v ? parseInt(v, 10) : null;
+          }
+        } catch (_) {}
+      } catch (_) { /* swallow */ }
+      finally { this.snapshotsLoading = false; }
+    },
+    setActiveGraph(uri) {
+      // Toggle: clicking the active graph clears the FROM scope.
+      const next = this.activeGraphFromUri === uri ? null : uri;
+      this.activeGraphFromUri = next;
+      this.query = this._rewriteFromClause(this.query, next);
+      this.persistActive();
+      this.recomputeGutter();
+    },
+    _rewriteFromClause(query, graphUri) {
+      // SPARQL grammar (per W3C 1.1 §4.1.1):
+      //
+      //   SelectQuery ::= SelectClause DatasetClause* WhereClause SolutionModifier
+      //
+      // → ``FROM`` lives between ``SELECT ?vars`` and ``WHERE { … }``,
+      // not after the PREFIX prologue. We strip any prior managed FROM
+      // line (tag-comment makes it unambiguous so the user's own FROMs
+      // aren't touched), then re-insert immediately before the first
+      // ``WHERE`` keyword — works for both ``SELECT ?x WHERE { … }``
+      // (single line) and the multi-line equivalent.
+      const cleaned = (query || '').replace(
+        /^\s*FROM <[^>]+>\s*#\s*managed by snapshots rail\s*\r?\n?/gim,
+        '',
+      );
+      if (!graphUri) return cleaned;
+      const fromLine = `FROM <${graphUri}>  # managed by snapshots rail`;
+      // Insert before the first standalone ``WHERE`` keyword. We use
+      // \b boundaries so ``WHEREVER`` (hypothetical user variable name)
+      // doesn't false-positive. CONSTRUCT/ASK/DESCRIBE queries also use
+      // WHERE; queries without one (rare) fall through to the append
+      // branch below.
+      const whereRe = /\bWHERE\b/i;
+      const idx = cleaned.search(whereRe);
+      if (idx >= 0) {
+        const before = cleaned.slice(0, idx).replace(/\s+$/, '');
+        const after = cleaned.slice(idx);
+        return before + '\n' + fromLine + '\n' + after;
+      }
+      // No WHERE: append at the end. This is rare (DESCRIBE without a
+      // body, custom forms) but better than dropping the user's intent.
+      return cleaned.replace(/\s+$/, '') + '\n' + fromLine + '\n';
+    },
+    formatGraphCount(n) {
+      if (n === null || n === undefined) return '';
+      if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+      if (n >= 1_000) return (n / 1_000).toFixed(0) + 'k';
+      return String(n);
     },
 
     // ── line-number gutter ───────────────────────────────────────
@@ -831,6 +2032,63 @@ function dbConsole() {
     },
     hint() { return HINTS[this.engine] || ''; },
 
+    // ── snippet panel (curl / python / js examples) ──────────────
+    // Re-evaluated by Alpine on every reactive change — typing in
+    // the editor, switching tabs, flipping engine, swapping the
+    // language pill, or toggling osMode all re-render the snippet.
+    renderSnippet() {
+      const host = (window.location.hostname || 'localhost');
+      const q = this.query || '';
+      if (this.engine === 'sparql') {
+        return _sparqlSnippet(this.snippetLang, q, host);
+      }
+      if (this.engine === 'cypher') {
+        return _cypherSnippet(this.snippetLang, q, host);
+      }
+      if (this.engine === 'opensearch') {
+        return _opensearchSnippet(this.snippetLang, q, host, this.osMode);
+      }
+      return '';
+    },
+    // Map the language pill to a highlight.js language id. ``bash``
+    // is intentionally used for ``curl`` (highlight.js doesn't have
+    // a separate curl mode but the shell mode reads it fine).
+    snippetHljsLang() {
+      return ({
+        curl: 'bash',
+        python: 'python',
+        js: 'javascript',
+      })[this.snippetLang] || 'bash';
+    },
+    // Push the latest snippet text into the <code> element and ask
+    // highlight.js to re-paint it. Called by an Alpine x-effect so
+    // changes to any reactive dependency trigger a re-render.
+    syncSnippetCode() {
+      const el = this.$refs.snippetCode;
+      if (!el) return;
+      const text = this.renderSnippet();
+      el.textContent = text;
+      // highlight.js refuses to re-highlight an element that already
+      // carries the ``data-highlighted`` attribute, so clear it.
+      el.removeAttribute('data-highlighted');
+      el.className = 'hljs language-' + this.snippetHljsLang();
+      if (window.hljs) {
+        try { window.hljs.highlightElement(el); } catch (_) {}
+        // Add line-numbers gutter, matching the chaoss expanders.
+        try { if (window.hljs.lineNumbersBlock) window.hljs.lineNumbersBlock(el, { singleLine: true }); } catch (_) {}
+      }
+    },
+    async copySnippet() {
+      try {
+        await navigator.clipboard.writeText(this.renderSnippet());
+        this.snippetCopied = true;
+        setTimeout(() => { this.snippetCopied = false; }, 1500);
+      } catch (_) {
+        // Clipboard blocked (insecure context).
+        this.snippetCopied = false;
+      }
+    },
+
     // ── examples ─────────────────────────────────────────────────
     async loadExamples() {
       const r = await fetch('/api/databases/examples');
@@ -845,9 +2103,475 @@ function dbConsole() {
       this.onEditorInput();
     },
 
+    // ── AI assistant ─────────────────────────────────────────────
+    // Chat state is browser-local (localStorage) so a refresh
+    // doesn't drop the conversation. Messages follow the OpenAI
+    // ``{role, content}`` shape — same the proxy forwards upstream.
+    AI_STORAGE_KEY: 'op:hub:db-ai:v1',
+    setRightTab(tab) {
+      this.rightTab = tab;
+      try { localStorage.setItem('op:hub:db-right-tab', tab); } catch (_) {}
+      if (tab === 'assistant') this.openAi();
+    },
+    async openAi() {
+      this.aiOpen = true;
+      if (!this.aiModels.length) await this.loadAiModels();
+      // Schema introspection: pull once per tab session so the very
+      // first prompt has actual predicates/labels in context.  The
+      // backend caches for 10min so a quick close/reopen costs nothing.
+      if (!this.aiSchema) this.loadAiSchema();
+      this.loadAiMessages();
+      // Auto-scroll the body to the bottom after Alpine renders.
+      this.$nextTick(() => {
+        const el = this.$refs.aiBody;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+    async loadAiSchema() {
+      try {
+        const r = await fetch('/api/ai/schema-context');
+        if (!r.ok) return;
+        this.aiSchema = await r.json();
+      } catch (_) { /* fail-soft — chat still works without schema */ }
+    },
+    // ── Tool-result rendering helpers ────────────────────────────
+    aiMessageLabel(m) {
+      if (m.role !== 'tool') return m.role;
+      return (m.name ? 'tool · ' + m.name : 'tool');
+    },
+    aiToolSummary(m) {
+      const r = m.content || {};
+      if (r.error) return '⚠ error';
+      if (typeof r.row_count === 'number') {
+        let s = `${r.row_count} rows`;
+        if (r.truncated) s += ' (truncated)';
+        if (typeof r.elapsed_ms === 'number') s += ` · ${r.elapsed_ms} ms`;
+        return s;
+      }
+      if (typeof r.ask !== 'undefined') return `ask = ${r.ask}`;
+      return '';
+    },
+    aiPrettyArgs(args) {
+      // Tool arguments arrive as a JSON-encoded string from the model;
+      // pretty-print so the call is easy to scan.
+      if (typeof args !== 'string') return JSON.stringify(args ?? {}, null, 2);
+      try { return JSON.stringify(JSON.parse(args), null, 2); }
+      catch (_) { return args; }
+    },
+    aiPrettyResult(content) {
+      // ``content`` is the structured result the server gives us. We
+      // also accept legacy string shape (older streams) just in case.
+      if (typeof content === 'string') {
+        try { return JSON.stringify(JSON.parse(content), null, 2); }
+        catch (_) { return content; }
+      }
+      return JSON.stringify(content ?? {}, null, 2);
+    },
+    aiExtractToolQuery(m) {
+      // Pull the SPARQL / Cypher query the tool was called with so the
+      // user can drop it into the editor without re-copying.
+      try {
+        const args = typeof m.arguments === 'string'
+          ? JSON.parse(m.arguments)
+          : (m.arguments || {});
+        return args.query || null;
+      } catch (_) { return null; }
+    },
+
+    aiSchemaSummary() {
+      const s = this.aiSchema || {};
+      const parts = [];
+      const sp = s.sparql || {};
+      if (sp.top_predicates) parts.push(`${sp.top_predicates.length} predicates`);
+      if (sp.top_types)      parts.push(`${sp.top_types.length} types`);
+      const neo = s.neo4j || {};
+      if (neo.label_counts)        parts.push(`${neo.label_counts.length} labels`);
+      if (neo.relationship_counts) parts.push(`${neo.relationship_counts.length} rel types`);
+      return parts.join(' · ');
+    },
+    aiSchemaTooltip() {
+      const s = this.aiSchema || {};
+      if (!s.generated_at) return 'Live schema not yet loaded.';
+      const ageSec = Math.max(0, Math.round(Date.now() / 1000 - s.generated_at));
+      return `Probed ${ageSec}s ago. Refreshes every 10 min server-side, on demand here.`;
+    },
+    async loadAiModels() {
+      try {
+        const r = await fetch('/api/ai/models');
+        if (!r.ok) return;
+        const j = await r.json();
+        // OpenAI shape: ``{"data":[{"id":…}, …]}``; some self-hosted
+        // servers return a bare list — handle both.
+        const list = Array.isArray(j) ? j : (j.data || []);
+        this.aiModels = list
+          .filter(m => m && (m.id || typeof m === 'string'))
+          .map(m => typeof m === 'string' ? { id: m } : { id: m.id })
+          .sort((a, b) => a.id.localeCompare(b.id));
+        // Prefer a sane default: previously-selected model from
+        // localStorage > the GME's gpt-oss-120b > whatever's first.
+        const saved = localStorage.getItem(this.AI_STORAGE_KEY + ':model');
+        if (saved && this.aiModels.some(m => m.id === saved)) {
+          this.aiModel = saved;
+        } else {
+          const preferred = this.aiModels.find(m => /gpt-oss-120b/i.test(m.id));
+          this.aiModel = preferred ? preferred.id : (this.aiModels[0]?.id || '');
+        }
+      } catch (_) {}
+    },
+    loadAiMessages() {
+      try {
+        const raw = localStorage.getItem(this.AI_STORAGE_KEY);
+        if (raw) this.aiMessages = JSON.parse(raw);
+      } catch (_) { this.aiMessages = []; }
+    },
+    persistAiMessages() {
+      try {
+        localStorage.setItem(this.AI_STORAGE_KEY, JSON.stringify(this.aiMessages));
+      } catch (_) {}
+    },
+    aiContext() {
+      // The hub-side proxy folds this into a system message, so the
+      // model always sees the editor's current state without the user
+      // having to repaste it.  Named graphs and snapshot probe come
+      // from companion PRs; we look them up defensively so this file
+      // works in isolation too.
+      const ctx = {
+        engine: this.engine,
+        query: this.query || '',
+      };
+      if (Array.isArray(this.sparqlNamedGraphs) && this.sparqlNamedGraphs.length) {
+        ctx.named_graphs = this.sparqlNamedGraphs;
+      }
+      // Live schema introspection — top predicates, types, labels,
+      // rel types, property keys. Lets the model recognise predicates
+      // the static system prompt may not have documented.
+      if (this.aiSchema) ctx.schema = this.aiSchema;
+      return ctx;
+    },
+    async sendAi() {
+      const text = (this.aiInput || '').trim();
+      if (!text || this.aiBusy) return;
+      this.aiMessages.push({ role: 'user', content: text });
+      this.aiInput = '';
+      this.persistAiMessages();
+      await this._aiCompletion();
+    },
+    aiComposerKey(e) {
+      // Keyboard contract:
+      //   - Enter (no modifiers)     → send
+      //   - ⌘/Ctrl + Enter           → send  (matches the Run shortcut elsewhere on the page)
+      //   - Shift + Enter            → newline (default textarea behaviour, let through)
+      //   - anything else            → default
+      // We handle this in one handler instead of Alpine's modifier
+      // chaining because ``.exact`` competes with the IME composition
+      // events some browsers (and screen readers) emit for Enter.
+      if (e.key !== 'Enter') return;
+      if (e.shiftKey) return;          // newline
+      e.preventDefault();
+      this.sendAi();
+    },
+    _messagesForUpstream() {
+      // Convert the chat panel's display-friendly shape into the strict
+      // OpenAI tool-calling schema:
+      //   * Tool messages MUST have ``role: "tool"``, ``tool_call_id``,
+      //     and ``content`` as a *string* (not a dict). RCP / litellm
+      //     rejects the request with a pydantic validation error if
+      //     ``content`` is anything else.
+      //   * Assistant messages that carried ``tool_calls`` need
+      //     ``content: null`` (not ``""``) so the upstream knows the
+      //     model spoke only by invoking tools — some endpoints flag
+      //     mismatched empty-string+tool_calls combos.
+      // Locally-only flagged messages (e.g. placeholders we might add
+      // later) get filtered out at the same time.
+      return this.aiMessages
+        .filter(m => !m._localOnly)
+        .map(m => {
+          if (m.role === 'tool') {
+            const raw = m.content;
+            const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+            return {
+              role: 'tool',
+              tool_call_id: m.tool_call_id || '',
+              content: text,
+            };
+          }
+          if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+            const out = {
+              role: 'assistant',
+              tool_calls: m.tool_calls,
+            };
+            // OpenAI permits content=null alongside tool_calls; some
+            // servers also accept the field omitted. We keep the
+            // string when the assistant actually wrote prose this
+            // turn, drop it otherwise.
+            if (m.content) out.content = m.content;
+            else out.content = null;
+            return out;
+          }
+          // ``user`` and plain ``assistant`` messages pass through.
+          return { role: m.role, content: m.content || '' };
+        });
+    },
+    async _aiCompletion() {
+      this.aiBusy = true;
+      this.aiPartial = '';
+      try {
+        if (this.aiModel) {
+          localStorage.setItem(this.AI_STORAGE_KEY + ':model', this.aiModel);
+        }
+        const resp = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            // ``aiMessages`` carries display-friendly tool / tool_calls
+            // payloads (dicts, separate name/arguments fields). The
+            // upstream OpenAI schema is stricter — see _messagesForUpstream.
+            messages: this._messagesForUpstream(),
+            model: this.aiModel,
+            context: this.aiContext(),
+            temperature: 0.3,
+            tools_enabled: this.aiToolsEnabled,
+          }),
+        });
+        if (!resp.ok || !resp.body) {
+          this.aiMessages.push({
+            role: 'assistant',
+            content: `⚠ Request failed (HTTP ${resp.status}). Check that the LLM endpoint is reachable.`,
+          });
+          this.persistAiMessages();
+          return;
+        }
+        // Consume the SSE stream chunk by chunk; ``aiPartial`` holds
+        // what's been seen so far so Alpine re-renders incrementally.
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let accumulated = '';
+        // Tool-calls accumulator for the current assistant turn —
+        // mirrors the server-side merge so the local copy of messages
+        // matches what the backend appended into ``messages`` (the
+        // server is the source of truth; this is just so the UI can
+        // re-render after an agentic loop without a full refetch).
+        const toolCallsAcc = [];
+        let turnFinishReason = null;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          // SSE frames are separated by blank lines; each frame can
+          // carry multiple ``data: …`` lines that concatenate.
+          let nlIdx;
+          while ((nlIdx = buf.indexOf('\n\n')) !== -1) {
+            const frame = buf.slice(0, nlIdx);
+            buf = buf.slice(nlIdx + 2);
+            const payload = frame
+              .split('\n')
+              .filter(l => l.startsWith('data:'))
+              .map(l => l.slice(5).trim())
+              .join('');
+            if (!payload || payload === '[DONE]') continue;
+            try {
+              const obj = JSON.parse(payload);
+              if (obj.error) {
+                accumulated += `\n⚠ ${obj.error}`;
+                this.aiPartial = accumulated;
+                continue;
+              }
+              // Synthetic tool-result frame from the hub. Push as a
+              // ``tool`` message into the chat and flush the
+              // in-progress assistant turn so the UI renders the
+              // tool result + the new assistant turn that follows.
+              if (obj.op_tool) {
+                if (accumulated || toolCallsAcc.length) {
+                  this.aiMessages.push({
+                    role: 'assistant',
+                    content: accumulated,
+                    tool_calls: toolCallsAcc.length ? toolCallsAcc.slice() : undefined,
+                  });
+                  accumulated = '';
+                  toolCallsAcc.length = 0;
+                }
+                this.aiMessages.push({
+                  role: 'tool',
+                  tool_call_id: obj.tool_call_id,
+                  name: obj.name,
+                  arguments: obj.arguments,
+                  content: obj.result,
+                });
+                this.aiPartial = '';
+                this.persistAiMessages();
+                continue;
+              }
+              const choice = obj.choices?.[0] || {};
+              const delta = choice.delta || {};
+              if (delta.content) {
+                accumulated += delta.content;
+                this.aiPartial = accumulated;
+                this.$nextTick(() => {
+                  const el = this.$refs.aiBody;
+                  if (el) el.scrollTop = el.scrollHeight;
+                });
+              }
+              // Streamed tool-call delta — merge by index so the
+              // local UI matches the backend's view of the turn.
+              for (const tc of delta.tool_calls || []) {
+                const idx = tc.index || 0;
+                while (toolCallsAcc.length <= idx) {
+                  toolCallsAcc.push({
+                    id: '', type: 'function',
+                    function: { name: '', arguments: '' },
+                  });
+                }
+                const slot = toolCallsAcc[idx];
+                if (tc.id) slot.id = tc.id;
+                if (tc.type) slot.type = tc.type;
+                if (tc.function?.name) slot.function.name = tc.function.name;
+                if (tc.function?.arguments) slot.function.arguments += tc.function.arguments;
+              }
+              if (choice.finish_reason) turnFinishReason = choice.finish_reason;
+            } catch (_) { /* malformed frame — keep going */ }
+          }
+        }
+        // Whatever the model finished with — flush the final assistant
+        // turn (could be a regular text reply, or a turn that ended
+        // on tool_calls but never produced more content after the
+        // last tool round).
+        if (accumulated || toolCallsAcc.length) {
+          this.aiMessages.push({
+            role: 'assistant',
+            content: accumulated,
+            tool_calls: toolCallsAcc.length ? toolCallsAcc.slice() : undefined,
+          });
+          this.persistAiMessages();
+        }
+      } catch (e) {
+        this.aiMessages.push({
+          role: 'assistant',
+          content: `⚠ ${e.message}`,
+        });
+        this.persistAiMessages();
+      } finally {
+        this.aiBusy = false;
+        this.aiPartial = '';
+      }
+    },
+    attachRowsToChat(which) {
+      if (!this.rows.length) return;
+      const n = Math.max(1, Math.min(50, Number(this.aiAttachN) || 10));
+      const slice = which === 'tail'
+        ? this.rows.slice(-n)
+        : this.rows.slice(0, n);
+      // Convert rows + columns into an array of {col: value} records
+      // so the model gets self-describing JSON.
+      const records = slice.map(row => {
+        const o = {};
+        this.columns.forEach((c, i) => { o[c] = row[i]; });
+        return o;
+      });
+      const label = which === 'tail'
+        ? `tail ${slice.length} of ${this.rows.length} rows`
+        : `head ${slice.length} of ${this.rows.length} rows`;
+      const content =
+        `Attached **${label}** from the current result table:\n\n` +
+        '```json\n' + JSON.stringify(records, null, 2) + '\n```';
+      this.aiMessages.push({ role: 'user', content });
+      this.persistAiMessages();
+      this.$nextTick(() => {
+        const el = this.$refs.aiBody;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+    renderAiMessage(content) {
+      // Full GitHub-flavoured Markdown via marked + DOMPurify (XSS-safe)
+      // + highlight.js for code blocks. Falls back to a plain-escaped
+      // render if a CDN load failed so the chat still works offline.
+      if (typeof window.marked === 'undefined' || typeof window.DOMPurify === 'undefined') {
+        const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return '<pre>' + esc(content) + '</pre>';
+      }
+      // marked ≥5 removed the ``highlight`` option from ``parse()`` — you
+      // have to register a renderer override via ``marked.use``. We set
+      // this up once per page-load (idempotent because marked merges
+      // renderers); the code() override hands every fenced block to
+      // hljs, falling back to auto-detect when the fence is untagged or
+      // the language is unknown.
+      this._initMarkedOnce();
+      const html = window.marked.parse(content);
+      // DOMPurify keeps Markdown's structural tags (tables, lists,
+      // code, headings) but strips scripts / on* handlers / data: URLs.
+      return window.DOMPurify.sanitize(html, {
+        ADD_TAGS: ['table', 'thead', 'tbody', 'tr', 'th', 'td'],
+        ADD_ATTR: ['class', 'data-lang'],
+      });
+    },
+    _initMarkedOnce() {
+      if (this._markedReady) return;
+      this._markedReady = true;
+      const escapeHtml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      window.marked.use({
+        gfm: true,
+        breaks: true,
+        // ``renderer.code`` is called for every fenced block. We try
+        // the explicit fence tag first (``sparql`` / ``cypher`` /
+        // ``json`` …), then fall back to ``highlightAuto`` so untagged
+        // blocks still get colourised — many LLMs forget the tag.
+        renderer: {
+          code(token) {
+            // marked v12 passes a token object; older signatures pass
+            // (code, lang, escaped). Normalise.
+            const code = typeof token === 'object' ? token.text : token;
+            const lang = (typeof token === 'object' ? token.lang : arguments[1] || '').toLowerCase().trim();
+            if (!window.hljs) {
+              return `<pre><code>${escapeHtml(code)}</code></pre>`;
+            }
+            let highlighted = null;
+            let actualLang = lang;
+            if (lang && window.hljs.getLanguage(lang)) {
+              try {
+                highlighted = window.hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+              } catch (_) {}
+            }
+            if (highlighted === null) {
+              try {
+                const auto = window.hljs.highlightAuto(code);
+                highlighted = auto.value;
+                actualLang = actualLang || auto.language || '';
+              } catch (_) {
+                highlighted = escapeHtml(code);
+              }
+            }
+            const cls = actualLang ? `hljs language-${actualLang}` : 'hljs';
+            return `<pre><code class="${cls}">${highlighted}</code></pre>`;
+          },
+        },
+      });
+    },
+    extractCodeBlock(content) {
+      // Return the first fenced code block whose language matches the
+      // active engine (sparql/cypher/opensearch). Falls back to any
+      // code block so the user can still grab e.g. an SQL snippet.
+      const re = /```(\w+)?\n([\s\S]*?)```/g;
+      const blocks = [];
+      let m;
+      while ((m = re.exec(content)) !== null) {
+        blocks.push({ lang: (m[1] || '').toLowerCase(), code: m[2].trimEnd() });
+      }
+      if (!blocks.length) return null;
+      const match = blocks.find(b => b.lang === this.engine);
+      return (match || blocks[0]).code;
+    },
+    useAiBlockAsQuery(code) {
+      if (!code) return;
+      this.query = code;
+      this.persistActive();
+      this.recomputeGutter();
+      this.rehighlightEditor();
+    },
+
     // ── run ──────────────────────────────────────────────────────
     async run() {
       this.busy = true; this.error = ''; this.rows = []; this.columns = []; this.rawDump = '';
+      const t0 = performance.now();
       try {
         const body = { query: this.query };
         let path;
@@ -870,49 +2594,79 @@ function dbConsole() {
         const j = await r.json();
         this.columns = j.columns || []; this.rows = j.rows || []; this.truncated = !!j.truncated;
         this.rawDump = j.raw ? JSON.stringify(j.raw, null, 2) : '';
+        // Remember what produced this row set — needed by the graph
+        // view's introspection pass (binding → label → edge type).
+        this.lastQueryRan = this.query || '';
+        // Reset graph mapping/introspection so it gets rebuilt for the
+        // new result; the user's overrides (if any) live in localStorage
+        // and get reloaded on the next openGraph().
+        this.graphMapping = [];
+        this.graphIntrospection = null;
         // Reset sort on a fresh result set so the user sees raw order first.
         this.sortColumn = null;
         this.sortDir = 'asc';
         // New schema → drop any per-column type overrides from the previous query.
         this.cellTypes = {};
+        // Log the successful run for the session-log panel.
+        this.appendSessionLog({
+          ts: new Date().toISOString(),
+          engine: this.engine,
+          os_mode: this.engine === 'opensearch' ? this.osMode : null,
+          tab_name: this.activeTabName || 'untitled',
+          query: this.query || '',
+          runtime_ms: Math.round(performance.now() - t0),
+          row_count: this.rows.length,
+        });
       } catch (e) { this.error = e.message; }
       finally   { this.busy = false; }
     },
 
-    // ── sorting ──────────────────────────────────────────────────
-    toggleSort(col) {
-      if (this.sortColumn === col) {
-        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
-      } else {
-        this.sortColumn = col;
-        this.sortDir = 'asc';
+    // ── session query log (per-browser, capped) ──────────────────
+    // Ring-buffer FIFO: newest at index 0, oldest evicted when the
+    // array grows past SESSION_LOG_CAP. Stored in localStorage so it
+    // survives page reloads but stays local to the browser.
+    appendSessionLog(entry) {
+      entry.id = 'lg-' + Math.random().toString(36).slice(2, 10);
+      this.sessionLog.unshift(entry);
+      if (this.sessionLog.length > SESSION_LOG_CAP) {
+        this.sessionLog = this.sessionLog.slice(0, SESSION_LOG_CAP);
       }
+      saveSessionLog(this.sessionLog);
     },
-    clearSort() { this.sortColumn = null; this.sortDir = 'asc'; },
+    clearSessionLog() {
+      if (!confirm('Clear all session log entries?')) return;
+      this.sessionLog = [];
+      saveSessionLog(this.sessionLog);
+    },
+    loadFromLog(entry) {
+      // Re-open as a fresh tab so it's clear this is a replay; the
+      // user can pin or rename if they want to keep it around.
+      const t = {
+        id: newTabId(),
+        name: '↺ ' + (entry.tab_name || 'log'),
+        engine: entry.engine,
+        content: entry.query || '',
+      };
+      this.tabs.push(t);
+      saveTabs(this.tabs);
+      if (entry.os_mode) this.osMode = entry.os_mode;
+      this.engine = entry.engine;
+      this.switchTab(t.id);
+    },
+    formatLogTime(iso) {
+      // Friendly relative time for compact log rows.
+      try {
+        const d = new Date(iso).getTime();
+        const diff = (Date.now() - d) / 1000;
+        if (diff < 5)     return 'just now';
+        if (diff < 60)    return Math.round(diff) + 's ago';
+        if (diff < 3600)  return Math.round(diff / 60) + 'm ago';
+        if (diff < 86400) return Math.round(diff / 3600) + 'h ago';
+        return new Date(iso).toLocaleDateString();
+      } catch (_) { return iso; }
+    },
 
-    sortedRows() {
-      if (!this.sortColumn) return this.rows;
-      const idx = this.columns.indexOf(this.sortColumn);
-      if (idx === -1) return this.rows;
-      const dir = this.sortDir === 'desc' ? -1 : 1;
-      // Copy first — Array.sort mutates and would re-trigger Alpine watchers.
-      return [...this.rows].sort((a, b) => {
-        const av = a[idx], bv = b[idx];
-        // Stable handling of nulls / undefined: always last.
-        const aN = av === null || av === undefined;
-        const bN = bv === null || bv === undefined;
-        if (aN && bN) return 0;
-        if (aN) return 1;
-        if (bN) return -1;
-        // Numeric path when both sides parse as finite numbers.
-        const an = Number(av), bn = Number(bv);
-        if (Number.isFinite(an) && Number.isFinite(bn) && av !== '' && bv !== '') {
-          return (an - bn) * dir;
-        }
-        // Fall back to locale-aware string compare.
-        return String(av).localeCompare(String(bv), undefined, { numeric: true }) * dir;
-      });
-    },
+    // (toggleSort / clearSort / sortedRows come from the treeTable mixin.)
 
     // ── downloads ────────────────────────────────────────────────
     _csvCell(v) {
@@ -976,276 +2730,638 @@ function dbConsole() {
       URL.revokeObjectURL(url);
     },
 
+    // ── Graph view (Cypher only) ────────────────────────────────────
+    // Cypher results may carry nodes (`{_kind:'node',_id,...}`) and
+    // relationships (`{_kind:'rel',_id,_start,_end,_type,...}`) — the
+    // server emits those fields when the query returns full graph
+    // objects (see _normalize() in routes/databases.py). When present,
+    // we surface a "View as graph" button that renders a vis-network
+    // canvas in a modal.
+    _graphElementsFromRows() {
+      // Two paths into the same vis-network shape:
+      //  - native: result already carries Node/Rel objects (RETURN n, r).
+      //  - mapped: scalar-only result; pick node columns + reuse the
+      //    query introspection for edge labels.
+      // The button visibility check ensures we only get here on Cypher.
+      if (this._hasNativeNodes()) {
+        return this._graphElementsFromNative();
+      }
+      return this._graphElementsFromMapping();
+    },
+
+    _graphElementsFromNative() {
+      const nodes = new Map();
+      const edges = new Map();
+      const visit = (v) => {
+        if (v === null || v === undefined) return;
+        if (Array.isArray(v)) { v.forEach(visit); return; }
+        if (typeof v !== 'object') return;
+        if (v._kind === 'node' && v._id) {
+          if (!nodes.has(v._id)) {
+            const labels = v._labels || [];
+            const display = v.full_name || v.login || v.name || (labels[0] || 'node') + ':' + v._id;
+            nodes.set(v._id, {
+              id: v._id,
+              label: display,
+              title: this._htmlTooltip(labels, v),
+              group: labels[0] || 'node',
+            });
+          }
+        } else if (v._kind === 'rel' && v._id) {
+          edges.set(v._id, {
+            id: v._id,
+            from: v._start,
+            to: v._end,
+            label: v._type,
+            arrows: 'to',
+            title: this._htmlTooltip([v._type], v),
+          });
+        } else {
+          // Plain dict — descend in case nested values carry graph objects.
+          for (const k in v) visit(v[k]);
+        }
+      };
+      for (const row of this.rows) row.forEach(visit);
+      // Drop edges whose endpoints aren't in the node set (defensive — a
+      // partial result may reference nodes Neo4j didn't return).
+      const final_edges = [];
+      for (const e of edges.values()) {
+        if (nodes.has(e.from) && nodes.has(e.to)) final_edges.push(e);
+      }
+      return { nodes: [...nodes.values()], edges: final_edges };
+    },
+
+    // Hard cap on nodes for the mapped-mode renderer. vis-network gets
+    // sluggish past a couple thousand; 500 keeps modal interactions
+    // snappy on a typical laptop. Bumpable via the "Configure" panel.
+    _GRAPH_NODE_CAP: 500,
+
+    _graphElementsFromMapping() {
+      const mapping = this.graphMapping || [];
+      // Pre-split the mapping by role so the per-row loop stays tight.
+      const nodeCols = [];   // [{idx, kind, binding}]
+      const edgeCols = [];   // [{idx}]
+      for (let i = 0; i < mapping.length; i++) {
+        const m = mapping[i] || { role: 'ignore' };
+        if (m.role === 'node') {
+          nodeCols.push({ idx: i, kind: (m.kind || 'node').trim() || 'node', binding: m.binding || null });
+        } else if (m.role === 'edge') {
+          edgeCols.push({ idx: i });
+        }
+      }
+      if (nodeCols.length < 2) {
+        return { nodes: [], edges: [] };
+      }
+
+      // Edge-label lookup keyed on (fromBinding, toBinding) — drawn
+      // from the query introspection so the user gets relationship
+      // types for free when the query named both ends.
+      const intro = this.graphIntrospection;
+      const edgeLabel = (fromB, toB) => {
+        if (!intro || !fromB || !toB) return '';
+        for (const e of intro.edges) {
+          if (e.from === fromB && e.to === toB) return e.type || '';
+          if (!e.directed && e.from === toB && e.to === fromB) return e.type || '';
+        }
+        return '';
+      };
+
+      const cap = this._GRAPH_NODE_CAP;
+      const nodes = new Map();
+      const edges = new Map();
+      for (const row of this.rows) {
+        // Materialise the row's node identities in left-to-right column
+        // order — that ordering also drives the edge path below.
+        // Per-column entries may carry one node OR a list of nodes
+        // (when the column is a Cypher ``collect()`` projection).
+        const rowSlots = [];
+        for (const nc of nodeCols) {
+          const v = row[nc.idx];
+          if (v === null || v === undefined || v === '') {
+            rowSlots.push([]);
+            continue;
+          }
+          // Array-aware: a ``collect(...)`` column emits one node per
+          // element so a row carrying ``['alice', 'bob']`` produces
+          // two User nodes instead of one node labeled ``["alice", "bob"]``.
+          // The edge-drawing pass below treats the slot's array as
+          // ``edges from the previous slot's nodes to each element here``.
+          const items = Array.isArray(v) ? v : [v];
+          const slot = [];
+          for (const item of items) {
+            if (item === null || item === undefined || item === '') continue;
+            const idStr = (typeof item === 'object') ? JSON.stringify(item) : String(item);
+            const id = nc.kind + '::' + idStr;
+            slot.push({ id, label: idStr, kind: nc.kind, binding: nc.binding });
+          }
+          rowSlots.push(slot);
+        }
+        // Flatten for the node-registration step. The order of slots
+        // is preserved so the per-row edge path below still goes
+        // left-to-right (slot[0] → slot[1] → …).
+        const rowNodes = [];
+        for (const s of rowSlots) for (const n of s) rowNodes.push(n);
+        for (const n of rowNodes) {
+          if (nodes.has(n.id)) continue;
+          if (nodes.size >= cap) break;
+          nodes.set(n.id, { id: n.id, label: n.label, group: n.kind });
+        }
+
+        // Pull a per-row edge label from the first non-empty edge column,
+        // when the user mapped one explicitly. Falls back to the cypher
+        // introspection's relationship type for the (from, to) binding pair.
+        let explicitLabel = '';
+        for (const ec of edgeCols) {
+          const v = row[ec.idx];
+          if (v !== null && v !== undefined && v !== '') {
+            explicitLabel = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+            break;
+          }
+        }
+        // Wire edges as a path through node *slots* left-to-right: for
+        // each adjacent slot pair, draw the cross-product of edges
+        // between every left-node and every right-node. With one item
+        // per slot this collapses to the simple linear path; with a
+        // ``collect()`` column on either side it fans out so each
+        // element gets its own edge.
+        for (let i = 0; i + 1 < rowSlots.length; i++) {
+          const left = rowSlots[i], right = rowSlots[i + 1];
+          for (const a of left) {
+            for (const b of right) {
+              if (!nodes.has(a.id) || !nodes.has(b.id)) continue;
+              const label = explicitLabel || edgeLabel(a.binding, b.binding) || '';
+              // Edge id keys collapse the same (from, to, label) triple
+              // across rows so a recurring relationship reads as one
+              // edge in the canvas instead of N stacked ones.
+              const key = a.id + '→' + b.id + '|' + label;
+              if (!edges.has(key)) {
+                edges.set(key, {
+                  id: 'e-' + edges.size,
+                  from: a.id, to: b.id,
+                  label,
+                  arrows: 'to',
+                });
+              }
+            }
+          }
+        }
+      }
+      return { nodes: [...nodes.values()], edges: [...edges.values()] };
+    },
+
+    // ── Cypher introspection ────────────────────────────────────────
+    // Two regex passes over the query text — cheap, no parser
+    // dependency. Returns:
+    //   bindingLabels:  { <var>: <Label> }
+    //   columnBindings: { <returned-col-name>: <var> }
+    //   edges:          [ { from, to, type, directed } ]
+    // ``null`` when the query isn't Cypher or doesn't parse.
+    _cypherIntrospect(query) {
+      if (!query || this.engine !== 'cypher') return null;
+      // Strip ``// line`` and ``/* block */`` comments before regexing.
+      const stripped = query
+        .replace(/\/\/[^\n]*/g, ' ')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ');
+
+      // Pass 1: binding → label from ``(var:Label)`` patterns. Ignores
+      // properties inside the parens (``{login: 'x'}``) and
+      // ``WHERE``-style clauses since we anchor on the var:Label start.
+      const bindingLabels = {};
+      const nodeRe = /\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*([A-Z][a-zA-Z0-9_]*)/g;
+      let m;
+      while ((m = nodeRe.exec(stripped))) {
+        // First seen wins — re-bindings via ``WITH`` typically reuse
+        // the same label, so this is robust enough for the common case.
+        if (!bindingLabels[m[1]]) bindingLabels[m[1]] = m[2];
+      }
+
+      // Pass 2: edges between bindings.
+      // Recognise ``(a)-[r:TYPE]->(b)``, ``(a)<-[:TYPE]-(b)``, and
+      // anonymous variants. ``[type=null]`` is preserved so we can
+      // still draw the edge without a label.
+      const edges = [];
+      const edgeRe = new RegExp(
+        // first node: anchor on identifier then skip rest of the parens
+        '\\(\\s*([a-zA-Z_][a-zA-Z0-9_]*)' +
+        '(?:\\s*:\\s*[A-Za-z][A-Za-z0-9_]*)?' +
+        '[^)]*\\)' +
+        // optional left arrow
+        '\\s*(<?-)' +
+        // optional ``[r:TYPE]`` chunk (var optional, type optional)
+        '\\s*(?:\\[' +
+        '\\s*(?:[a-zA-Z_][a-zA-Z0-9_]*)?' +
+        '\\s*(?::\\s*([A-Z_][A-Z0-9_]*))?' +
+        '[^\\]]*\\])?' +
+        // optional right arrow
+        '\\s*(-?>?)' +
+        // second node: anchor on identifier
+        '\\s*\\(\\s*([a-zA-Z_][a-zA-Z0-9_]*)',
+        'g',
+      );
+      while ((m = edgeRe.exec(stripped))) {
+        const from = m[1];
+        const leftArrow = m[2] === '<-';
+        const type = m[3] || null;
+        const rightArrow = m[4] === '->';
+        const to = m[5];
+        const directed = leftArrow || rightArrow;
+        edges.push({
+          from: leftArrow ? to : from,
+          to:   leftArrow ? from : to,
+          type,
+          directed,
+        });
+      }
+
+      // Pass 3: column → binding via ``RETURN <expr> AS <alias>``.
+      //
+      // The expression part can be a plain ``<binding>`` /
+      // ``<binding>.<prop>``, an aliased property (``r.full_name AS
+      // repo``), or wrapped in a function — the common case being
+      // ``coalesce(n.full_name, n.login) AS neighbor_id``. For wrapped
+      // expressions we scan the whole expression for any identifier
+      // that's a known binding and take the first match. That covers
+      // ``properties(r)``, ``coalesce(...)``, ``CASE WHEN startNode(rel)
+      //  …``, etc., without parsing the expression for real.
+      const columnBindings = {};
+      const retMatch = stripped.match(/\bRETURN\s+([\s\S]+?)(?:\s+(?:ORDER\s+BY|LIMIT|UNION|$))/i);
+      if (retMatch) {
+        const items = this._splitTopLevelCommas(retMatch[1]);
+        for (const raw of items) {
+          const item = raw.trim();
+          // Try to split ``<expr> AS <alias>`` from the right so a
+          // multi-arg ``coalesce(a, b) AS x`` keeps the alias
+          // separate from the expr's commas/parens.
+          const asMatch = item.match(/^([\s\S]+?)\s+AS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$/i);
+          let expr, alias;
+          if (asMatch) {
+            expr = asMatch[1].trim();
+            alias = asMatch[2];
+          } else {
+            expr = item;
+            // No alias → the bare binding name is also its column name.
+            // ``<binding>.<prop>`` without alias gets a weird Neo4j-side
+            // column name that's not worth predicting.
+            const bare = item.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*$/);
+            if (bare && bindingLabels[bare[1]]) {
+              // Bare binding ref → the node itself; no specific prop.
+              columnBindings[bare[1]] = { binding: bare[1], prop: null };
+            }
+            continue;
+          }
+
+          // Fast path: ``<binding>`` or ``<binding>.<prop>`` exactly.
+          const direct = expr.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?\s*$/);
+          if (direct && bindingLabels[direct[1]]) {
+            // Store the prop name too (or null for bare bindings) so
+            // the same-binding dedup pass below can rank by identity
+            // priority (``full_name`` beats ``name``, etc.).
+            columnBindings[alias] = { binding: direct[1], prop: direct[2] || null };
+            continue;
+          }
+
+          // Slow path: the expression is wrapped in a function call.
+          // We only want to tie the alias to a binding when the
+          // expression returns the BINDING'S IDENTITY (its full_name /
+          // login / name / id), not when it just *references* the
+          // binding to compute something else.
+          //
+          // Concrete examples we want to recognise as identity:
+          //   coalesce(n.full_name, n.login)   → n
+          //   trim(u.login)                    → u
+          //
+          // Examples we want to REJECT (they reference the binding
+          // but don't return its identity):
+          //   labels(r)[0]      → label string, not the Repo id
+          //   properties(r)     → property dict
+          //   count(DISTINCT r) → integer
+          //   type(rel)         → edge label
+          //   CASE WHEN startNode(rel) = r THEN 'out' ELSE 'in' END
+          //
+          // Heuristic: only match when the expression contains
+          // ``<binding>.<identity-prop>`` for an identity prop from
+          // the small whitelist below. The first such match wins.
+          const IDENTITY_PROPS = /^(?:full_name|login|name|id|email|slug)$/i;
+          const propRe = /\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)/g;
+          let pm;
+          while ((pm = propRe.exec(expr))) {
+            const binding = pm[1];
+            const prop = pm[2];
+            if (bindingLabels[binding] && IDENTITY_PROPS.test(prop)) {
+              columnBindings[alias] = { binding, prop };
+              break;
+            }
+          }
+        }
+      }
+
+      return { bindingLabels, columnBindings, edges };
+    },
+
+    _splitTopLevelCommas(text) {
+      // Walk char-by-char tracking bracket depth so commas inside a
+      // function call (``count(DISTINCT r)``) don't split the
+      // projection. Cheap and adequate for the regex-grade parsing
+      // we're doing here.
+      const out = [];
+      let depth = 0, start = 0;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '(' || c === '[' || c === '{') depth++;
+        else if (c === ')' || c === ']' || c === '}') depth--;
+        else if (c === ',' && depth === 0) {
+          out.push(text.slice(start, i));
+          start = i + 1;
+        }
+      }
+      out.push(text.slice(start));
+      return out;
+    },
+
+    // Build the default column → role mapping for the modal's
+    // configure panel. Combines the cypher introspection (most
+    // accurate) with column-name heuristics (last-ditch fallback so
+    // queries that don't parse cleanly still get reasonable defaults).
+    _autoDetectColumnMapping() {
+      const intro = this.graphIntrospection || { bindingLabels: {}, columnBindings: {}, edges: [] };
+      const REPO_RE = /^(repo|repository|library|client|origin|seed|full_name|repo_id|repo_name)$/;
+      const USER_RE = /^(user|author|contributor|reviewer|commenter|member|login|user_login|user_name|neighbor|neighbour|neighbor_id|neighbour_id|node|target)$/;
+      const ORG_RE  = /^(org|organization|owner|owner_login)$/;
+      const EDGE_RE = /^(type|rel|edge|kind|direction|relationship|edge_type)$/;
+
+      // Pass 1: per-column initial role using introspection then
+      // column-name heuristics. ``binding`` is filled when
+      // introspection tied the column to a specific cypher var; that
+      // info drives the same-binding dedup below.
+      const draft = this.columns.map((col) => {
+        const cb = intro.columnBindings[col];
+        if (cb && intro.bindingLabels[cb.binding]) {
+          return {
+            role: 'node',
+            kind: intro.bindingLabels[cb.binding],
+            binding: cb.binding,
+            prop: cb.prop,
+          };
+        }
+        const low = col.toLowerCase();
+        if (REPO_RE.test(low)) return { role: 'node', kind: 'Repo', binding: null, prop: null };
+        if (USER_RE.test(low)) return { role: 'node', kind: 'User', binding: null, prop: null };
+        if (ORG_RE.test(low))  return { role: 'node', kind: 'Org',  binding: null, prop: null };
+        if (EDGE_RE.test(low)) return { role: 'edge', kind: '',     binding: null, prop: null };
+        return { role: 'ignore', kind: '', binding: null, prop: null };
+      });
+
+      // Pass 2: dedup columns that point at the same cypher binding.
+      //
+      // ``RETURN u.login AS login, u.name AS name`` ties both columns
+      // to ``u`` — drawing both as separate User nodes would create
+      // bogus login↔name edges per row. Keep the one with the
+      // highest-priority identity prop; mark the rest as ``ignore``
+      // (still visible in the configure panel for the user to flip).
+      const IDENTITY_PRIORITY = ['full_name', 'login', 'id', 'name', 'email', 'slug'];
+      const propRank = (p) => {
+        if (!p) return IDENTITY_PRIORITY.length; // bare binding ref — lowest priority
+        const i = IDENTITY_PRIORITY.indexOf(p.toLowerCase());
+        return i >= 0 ? i : IDENTITY_PRIORITY.length + 1;
+      };
+      const byBinding = new Map();
+      draft.forEach((m, i) => {
+        if (m.role !== 'node' || !m.binding) return;
+        const list = byBinding.get(m.binding) || [];
+        list.push(i);
+        byBinding.set(m.binding, list);
+      });
+      for (const indices of byBinding.values()) {
+        if (indices.length < 2) continue;
+        // Lower rank number = higher priority. Tiebreak on column order
+        // (first occurrence wins) — matches how users usually write the
+        // identifier column first.
+        indices.sort((a, b) => {
+          const ra = propRank(draft[a].prop), rb = propRank(draft[b].prop);
+          if (ra !== rb) return ra - rb;
+          return a - b;
+        });
+        const keep = indices[0];
+        for (const idx of indices) {
+          if (idx === keep) continue;
+          draft[idx] = { role: 'ignore', kind: '', binding: null, prop: null };
+        }
+      }
+
+      // Strip the internal ``prop`` field — the mapping persisted to
+      // localStorage and consumed by the renderer only needs role,
+      // kind, and binding.
+      return draft.map(({ role, kind, binding }) => ({ role, kind, binding }));
+    },
+
+    // Stable hash of the query text — keys the per-query mapping in
+    // localStorage. Plain djb2; collisions are harmless (worst case
+    // the user re-configures the panel once).
+    _queryHash(text) {
+      let h = 5381;
+      const s = (text || '');
+      for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i);
+      return 'graph-map-' + (h >>> 0).toString(36);
+    },
+
+    _loadPersistedMapping() {
+      try {
+        const raw = localStorage.getItem(this._queryHash(this.lastQueryRan));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        // Guard against schema drift: keep only when the column count
+        // matches the current result. Mismatches usually mean a
+        // different query happened to hash the same way (extremely
+        // unlikely) or the result schema changed.
+        if (Array.isArray(parsed) && parsed.length === this.columns.length) return parsed;
+        return null;
+      } catch (_) { return null; }
+    },
+
+    _savePersistedMapping() {
+      try {
+        localStorage.setItem(
+          this._queryHash(this.lastQueryRan),
+          JSON.stringify(this.graphMapping),
+        );
+      } catch (_) { /* quota or private mode — drop silently */ }
+    },
+    _htmlTooltip(labels, obj) {
+      // vis-network supports an HTMLElement as title — that's what we'd
+      // need for proper escaping. With a plain string the value is
+      // injected as innerHTML, so we escape manually. Keep it small.
+      const esc = (s) => String(s).replace(/[&<>"]/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+      const lines = [];
+      if (labels && labels.length) lines.push('<b>' + esc(labels.join(', ')) + '</b>');
+      for (const k in obj) {
+        if (k.startsWith('_')) continue;
+        const v = obj[k];
+        if (v === null || v === undefined || v === '') continue;
+        const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        lines.push(esc(k) + ': ' + esc(s.length > 80 ? s.slice(0, 77) + '…' : s));
+      }
+      return lines.join('<br>');
+    },
+    hasGraphData() {
+      // Show the "View as graph" button on any non-empty Cypher result
+      // that *could* render meaningfully — i.e. either the result
+      // already carries native Node objects (RETURN n, r) or we have
+      // ≥2 columns we can map to nodes via the configure panel.
+      if (this.engine !== 'cypher' || !this.rows.length) return false;
+      if (this._hasNativeNodes()) return true;
+      return this.columns.length >= 2;
+    },
+    _hasNativeNodes() {
+      for (const row of this.rows) {
+        for (const cell of row) {
+          if (cell && typeof cell === 'object' && cell._kind === 'node') return true;
+        }
+      }
+      return false;
+    },
+    async _ensureVisNetwork() {
+      if (window.vis && window.vis.Network) return;
+      // Lazy-load vis-network from CDN. Keeps the page cheap when the
+      // user never opens the graph modal.
+      await new Promise((resolve, reject) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/vis-network@9.1.9/styles/vis-network.css';
+        document.head.appendChild(link);
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('failed to load vis-network'));
+        document.head.appendChild(s);
+      });
+    },
+    async openGraph() {
+      try {
+        await this._ensureVisNetwork();
+      } catch (e) {
+        this.error = String(e);
+        return;
+      }
+      // Scalar mode prep: build (or reload) the column → role mapping
+      // before mounting so the first frame already shows the right
+      // nodes/edges. When the result carries native Node objects this
+      // is a no-op — _graphElementsFromRows() takes the native path.
+      if (!this._hasNativeNodes()) {
+        this.graphIntrospection = this._cypherIntrospect(this.lastQueryRan);
+        const persisted = this._loadPersistedMapping();
+        if (persisted) {
+          this.graphMapping = persisted;
+          this.graphConfigOpen = false;
+        } else {
+          this.graphMapping = this._autoDetectColumnMapping();
+          // Force the configure panel open when auto-detect couldn't
+          // find ≥2 node columns — the user needs to map something
+          // before the graph is meaningful.
+          const nNodeCols = this.graphMapping.filter(m => m.role === 'node').length;
+          this.graphConfigOpen = nNodeCols < 2;
+        }
+      } else {
+        this.graphMapping = [];
+        this.graphIntrospection = null;
+        this.graphConfigOpen = false;
+      }
+      const { nodes, edges } = this._graphElementsFromRows();
+      this.graphStats = { nodes: nodes.length, edges: edges.length };
+      this.graphSelectedLabel = '';
+      this.graphOpen = true;
+      // Defer the network construction until the modal DOM is mounted.
+      this.$nextTick(() => this._mountGraph(nodes, edges));
+    },
+
+    // Called by the configure-panel controls (role dropdown, kind
+    // input, "Render" button). Saves the user's overrides to
+    // localStorage so the next openGraph() with the same query starts
+    // already configured.
+    updateMapping(i, patch) {
+      const m = { ...(this.graphMapping[i] || { role: 'ignore', kind: '', binding: null }), ...patch };
+      // If the user switches a column away from "node", clear the
+      // binding hint since the introspection-derived edge label is
+      // only meaningful between two binding-typed columns.
+      if (m.role !== 'node') m.binding = null;
+      this.graphMapping.splice(i, 1, m);
+      this._savePersistedMapping();
+    },
+
+    resetMapping() {
+      // Drop the persisted override and re-run auto-detection from the
+      // introspection. Handy when the heuristic was wrong and the user
+      // edited their way into a mess.
+      try { localStorage.removeItem(this._queryHash(this.lastQueryRan)); }
+      catch (_) {}
+      this.graphMapping = this._autoDetectColumnMapping();
+      this.redrawGraph();
+    },
+    _mountGraph(nodes, edges) {
+      const el = document.getElementById('cypher-graph-canvas');
+      if (!el) return;
+      if (this.graphNetwork) {
+        try { this.graphNetwork.destroy(); } catch (_) {}
+        this.graphNetwork = null;
+      }
+      const data = {
+        nodes: new vis.DataSet(nodes),
+        edges: new vis.DataSet(edges),
+      };
+      const options = {
+        nodes: {
+          shape: 'dot',
+          size: 14,
+          font: { size: 12 },
+        },
+        edges: {
+          font: { size: 10, align: 'middle' },
+          smooth: { type: 'dynamic' },
+        },
+        physics: {
+          stabilization: { iterations: 200 },
+          barnesHut: { gravitationalConstant: -8000, springLength: 140 },
+        },
+        interaction: { hover: true, tooltipDelay: 120 },
+        groups: {
+          Repo: { color: '#4f8eef' },
+          User: { color: '#54c27c' },
+          Org:  { color: '#e5a83f' },
+        },
+      };
+      this.graphNetwork = new vis.Network(el, data, options);
+      this.graphNetwork.on('selectNode', (params) => {
+        const id = params.nodes[0];
+        const n = data.nodes.get(id);
+        if (n) this.graphSelectedLabel = (n.group || 'node') + ' · ' + n.label;
+      });
+      this.graphNetwork.on('deselectNode', () => { this.graphSelectedLabel = ''; });
+    },
+    redrawGraph() {
+      if (!this.graphNetwork) return;
+      const { nodes, edges } = this._graphElementsFromRows();
+      this.graphStats = { nodes: nodes.length, edges: edges.length };
+      this._mountGraph(nodes, edges);
+    },
+    closeGraph() {
+      this.graphOpen = false;
+      if (this.graphNetwork) {
+        try { this.graphNetwork.destroy(); } catch (_) {}
+        this.graphNetwork = null;
+      }
+    },
+
     resultMeta() {
       if (this.busy) return 'running…';
       if (!this.rows.length) return '';
       return this.rows.length + ' rows' + (this.truncated ? ' (truncated)' : '');
     },
-    cellLabel(v) {
-      if (v === null || v === undefined) return '';
-      if (typeof v === 'object') return JSON.stringify(v);
-      return String(v);
-    },
+    // (cellLabel / renderTreeTable / getCellType / onCellTypeChange /
+    //  onHeaderClick / _typeSelectHtml / _buildTopSubtree / _buildSubtree /
+    //  _leafCount / _addHeaderCells / _renderCells / _renderLeaf / _escape
+    //  all come from the treeTable mixin.)
 
-    // ── Tree-aware renderer ─────────────────────────────────────────
-    // Single x-html blob: walks every cell to discover nested structure,
-    // emits multi-row thead (object expansion) + nested <table>s for
-    // array cells. Per-column type dropdowns are embedded in the level-0
-    // <th>; a delegated @change handler rewrites cellTypes.
-    renderTreeTable() {
-      const rows = this.sortedRows();
-      const cols = this.columns;
-
-      // Top-level subtrees honor the per-column type override.
-      const subtrees = cols.map((c, j) =>
-        this._buildTopSubtree(rows.map(r => r[j]), this.getCellType(c))
-      );
-
-      // Number of header rows = 1 (column name + dropdown) + max object
-      // expansion depth. Leaves and arrays don't grow the header.
-      const objDepth = (t) => {
-        if (!t || t.kind !== 'object') return 0;
-        return 1 + Math.max(0, ...Object.values(t.children).map(objDepth));
-      };
-      const headerLevels = 1 + Math.max(0, ...subtrees.map(objDepth));
-      const headerGrid = Array.from({length: headerLevels}, () => []);
-      for (let j = 0; j < cols.length; j++) {
-        this._addHeaderCells(cols[j], subtrees[j], 0, headerLevels - 1, headerGrid, /*topLevel=*/ true);
-      }
-
-      let html = '<table class="data tree">';
-      html += '<thead>';
-      for (const row of headerGrid) {
-        html += '<tr>';
-        for (const cell of row) {
-          if (cell.topLevel) {
-            const sortMark = this.sortColumn === cell.label
-              ? (this.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
-            const safeCol = this._escape(cell.label);
-            html += `<th colspan="${cell.colspan}" rowspan="${cell.rowspan}">`
-                  + `<div class="th-with-type">`
-                  +   `<span class="th-label" data-col-sort="${safeCol}" title="Sort by ${safeCol}">${safeCol}${sortMark}</span>`
-                  +   this._typeSelectHtml(cell.label, this.getCellType(cell.label))
-                  + `</div>`
-                  + `</th>`;
-          } else {
-            html += `<th colspan="${cell.colspan}" rowspan="${cell.rowspan}">${this._escape(cell.label)}</th>`;
-          }
-        }
-        html += '</tr>';
-      }
-      html += '</thead><tbody>';
-
-      for (const row of rows) {
-        html += '<tr>';
-        for (let j = 0; j < cols.length; j++) {
-          html += this._renderCells(row[j], subtrees[j]);
-        }
-        html += '</tr>';
-      }
-      html += '</tbody></table>';
-      return html;
-    },
-
-    getCellType(col) {
-      return this.cellTypes[col] || 'auto';
-    },
-
-    onCellTypeChange(e) {
-      const col = e.target && e.target.getAttribute && e.target.getAttribute('data-col-type');
-      if (!col) return;
-      // Replace object so Alpine sees a property change (not a deep mutation).
-      this.cellTypes = { ...this.cellTypes, [col]: e.target.value };
-    },
-
-    onHeaderClick(e) {
-      // Delegated click handler for the sort affordance. Only fires for
-      // elements explicitly tagged data-col-sort (the column-name span);
-      // the type-selector dropdown sits next to it but doesn't carry the
-      // attr, so clicking the dropdown won't trigger a sort.
-      const col = e.target && e.target.getAttribute && e.target.getAttribute('data-col-sort');
-      if (!col) return;
-      this.toggleSort(col);
-    },
-
-    _typeSelectHtml(col, current) {
-      const opts = ['auto', 'json', 'pretty', 'text', 'url', 'image'];
-      const safeCol = this._escape(col);
-      const options = opts.map(t =>
-        `<option value="${t}"${t === current ? ' selected' : ''}>${t}</option>`
-      ).join('');
-      return `<select class="th-type" data-col-type="${safeCol}" title="Render this column as…">${options}</select>`;
-    },
-
-    // Top-level subtree honors the user's override:
-    //   url/image/text/pretty → leaf with a render hint
-    //   json                  → object/array expansion, mixed shapes allowed
-    //   auto                  → object/array expansion, mixed → leaf (safe default)
-    _buildTopSubtree(values, type) {
-      if (type === 'text' || type === 'pretty' || type === 'url' || type === 'image') {
-        return { kind: 'leaf', renderAs: type };
-      }
-      return this._buildSubtree(values, 0, /*allowMixed=*/ type === 'json');
-    },
-
-    // Recursive shape detector. `allowMixed` lets json-typed columns
-    // expand even when some rows have primitives or arrays alongside
-    // objects — primitive rows just render empty for the sub-keys.
-    _buildSubtree(values, depth, allowMixed) {
-      if (depth >= this.treeMaxDepth) return { kind: 'leaf' };
-      let hasObj = false, hasArr = false, hasPrim = false;
-      const keys = new Set();
-      const arrItems = [];
-      for (const v of values) {
-        if (v === null || v === undefined) continue;
-        if (Array.isArray(v)) {
-          hasArr = true;
-          for (const it of v) arrItems.push(it);
-        } else if (typeof v === 'object') {
-          hasObj = true;
-          for (const k of Object.keys(v)) keys.add(k);
-        } else {
-          hasPrim = true;
-        }
-      }
-      if (!allowMixed) {
-        if (hasObj && hasPrim) return { kind: 'leaf' };
-        if (hasArr && (hasObj || hasPrim)) return { kind: 'leaf' };
-      }
-      // Forced-expand under json: pick whichever shape dominates;
-      // arrays beat objects since "tabla en tabla" reads better than
-      // "expanded keys with empty cells for the array rows".
-      if (hasArr) return { kind: 'array', child: this._buildSubtree(arrItems, depth + 1, allowMixed) };
-      if (hasObj) {
-        const children = {};
-        for (const k of keys) {
-          const sub = values.map(v =>
-            (v && typeof v === 'object' && !Array.isArray(v)) ? v[k] : undefined
-          );
-          children[k] = this._buildSubtree(sub, depth + 1, allowMixed);
-        }
-        return { kind: 'object', children };
-      }
-      return { kind: 'leaf' };
-    },
-
-    _leafCount(t) {
-      if (!t || t.kind !== 'object') return 1;
-      return Object.values(t.children).reduce((a, c) => a + this._leafCount(c), 0);
-    },
-
-    _addHeaderCells(label, subtree, level, maxLevel, grid, topLevel) {
-      if (subtree.kind !== 'object') {
-        grid[level].push({
-          label,
-          colspan: this._leafCount(subtree),
-          rowspan: maxLevel - level + 1,
-          topLevel: !!topLevel,
-        });
-        return;
-      }
-      grid[level].push({
-        label,
-        colspan: this._leafCount(subtree),
-        rowspan: 1,
-        topLevel: !!topLevel,
-      });
-      for (const k of Object.keys(subtree.children)) {
-        this._addHeaderCells(k, subtree.children[k], level + 1, maxLevel, grid, /*topLevel=*/ false);
-      }
-    },
-
-    _renderCells(value, subtree) {
-      if (subtree.kind === 'leaf') {
-        return this._renderLeaf(value, subtree.renderAs);
-      }
-      if (subtree.kind === 'object') {
-        let out = '';
-        for (const k of Object.keys(subtree.children)) {
-          const sub = (value && typeof value === 'object' && !Array.isArray(value)) ? value[k] : undefined;
-          out += this._renderCells(sub, subtree.children[k]);
-        }
-        return out;
-      }
-      if (subtree.kind === 'array') {
-        const items = Array.isArray(value) ? value : [];
-        if (!items.length) return '<td class="card-meta" style="font-style: italic;">∅</td>';
-        const child = subtree.child;
-        if (child.kind === 'object') {
-          const keys = Object.keys(child.children);
-          const objDepth = (t) => (!t || t.kind !== 'object') ? 0 : 1 + Math.max(0, ...Object.values(t.children).map(objDepth));
-          const innerLevels = 1 + Math.max(0, ...keys.map(k => objDepth(child.children[k])));
-          const innerGrid = Array.from({length: innerLevels}, () => []);
-          for (const k of keys) {
-            this._addHeaderCells(k, child.children[k], 0, innerLevels - 1, innerGrid, /*topLevel=*/ false);
-          }
-          let inner = '<table class="nested">';
-          inner += '<thead>';
-          for (const r of innerGrid) {
-            inner += '<tr>';
-            for (const c of r) {
-              inner += `<th colspan="${c.colspan}" rowspan="${c.rowspan}">${this._escape(c.label)}</th>`;
-            }
-            inner += '</tr>';
-          }
-          inner += '</thead><tbody>';
-          for (const item of items) {
-            inner += '<tr>';
-            for (const k of keys) {
-              const sub = (item && typeof item === 'object' && !Array.isArray(item)) ? item[k] : undefined;
-              inner += this._renderCells(sub, child.children[k]);
-            }
-            inner += '</tr>';
-          }
-          inner += '</tbody></table>';
-          return `<td class="nested-cell">${inner}</td>`;
-        }
-        // Array of primitives or array-of-arrays: stacked list.
-        let html = '<td class="nested-cell"><div class="nested-list">';
-        for (const item of items) {
-          if (Array.isArray(item) || (item && typeof item === 'object')) {
-            html += `<div>${this._escape(JSON.stringify(item))}</div>`;
-          } else {
-            html += `<div>${this._escape(item === null || item === undefined ? '' : String(item))}</div>`;
-          }
-        }
-        html += '</div></td>';
-        return html;
-      }
-      return '<td></td>';
-    },
-
-    // Leaf renderer. `renderAs` (set on the subtree by _buildTopSubtree)
-    // selects the variant; undefined falls back to the default which is
-    // "single-line text / JSON-stringified objects" — same as the auto
-    // heuristic produced before per-column types existed.
-    _renderLeaf(value, renderAs) {
-      if (value === null || value === undefined) {
-        return '<td class="mono" style="font-size: 12px;"></td>';
-      }
-      if (renderAs === 'url' && typeof value === 'string' && value) {
-        const safe = this._escape(value);
-        return `<td><a href="${safe}" target="_blank" rel="noopener" class="cell-url">${safe}</a></td>`;
-      }
-      if (renderAs === 'image' && typeof value === 'string' && value) {
-        const safe = this._escape(value);
-        return `<td class="cell-img-cell"><img src="${safe}" loading="lazy" alt="" class="cell-img"/></td>`;
-      }
-      if (renderAs === 'pretty') {
-        const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
-        return `<td><pre class="cell-pretty">${this._escape(text)}</pre></td>`;
-      }
-      // text / auto leaf / fallback
-      const label = typeof value === 'object' ? JSON.stringify(value) : String(value);
-      return `<td class="mono" style="font-size: 12px;">${this._escape(label)}</td>`;
-    },
-
-    _escape(s) {
-      if (s === null || s === undefined) return '';
-      return String(s).replace(/[&<>"']/g, c => (
-        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-      ));
-    },
+    // ── (tree-renderer methods are mixed in from window.treeTable) ──
   };
 }
 </script>

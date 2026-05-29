@@ -258,7 +258,42 @@ def cypher_query(
 
 
 def _normalize(value: Any) -> Any:
-    """Make Cypher values JSON-friendly: nodes/relationships → dicts, etc."""
+    """Make Cypher values JSON-friendly while preserving graph structure.
+
+    Nodes get ``{"_kind":"node","_id":...,"_labels":[...], ...props}``;
+    relationships get ``{"_kind":"rel","_id":...,"_type":..., "_start":...,
+    "_end":..., ...props}``. The extra underscore-prefixed keys let the
+    Databases console render a Cypher result as a graph in addition to the
+    flat table — without them, ``rel`` came back as an empty dict.
+    """
+    # Relationship has _type and start/end_node ids — must be checked before
+    # the generic Node branch because relationships also expose properties.
+    if (
+        hasattr(value, "type")
+        and hasattr(value, "start_node")
+        and hasattr(value, "end_node")
+    ):
+        return {
+            "_kind": "rel",
+            "_id": str(getattr(value, "element_id", getattr(value, "id", ""))),
+            "_type": value.type,
+            "_start": str(
+                getattr(
+                    value.start_node, "element_id", getattr(value.start_node, "id", "")
+                )
+            ),
+            "_end": str(
+                getattr(value.end_node, "element_id", getattr(value.end_node, "id", ""))
+            ),
+            **dict(value),
+        }
+    if hasattr(value, "labels") and hasattr(value, "items"):
+        return {
+            "_kind": "node",
+            "_id": str(getattr(value, "element_id", getattr(value, "id", ""))),
+            "_labels": list(value.labels),
+            **dict(value),
+        }
     if hasattr(value, "items"):
         return dict(value)
     if hasattr(value, "_properties"):

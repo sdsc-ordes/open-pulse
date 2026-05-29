@@ -1,0 +1,1008 @@
+{% extends "base.html" %}
+{% block title %}{{ label }} · Hub · Open Pulse{% endblock %}
+{% block heading %}{{ label }}{% endblock %}
+{% block subheading %}
+  {% if source_type %}<span style="color: var(--fg-faint);">{{ source_type }}</span> · {% endif %}
+  <span class="mono">{{ collection_name }}</span>
+  {% if count is not none %} · <strong>{{ '{:,}'.format(count) }}</strong> entries{% endif %}
+{% endblock %}
+{% block headeractions %}
+  <a class="btn btn-ghost" href="/hub">← Back to Hub</a>
+{% endblock %}
+
+{% block breadcrumb %}
+<nav class="hub-breadcrumb" aria-label="breadcrumb">
+  <a href="/hub">Hub</a>
+  <span class="sep">›</span>
+  <span class="current">{{ label }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+{# Shared tree-aware table styles: powers the nested-rendering of JSON
+   cells and the per-column type dropdown in the header. Scoped under
+   .tree-table so it doesn't bleed elsewhere on the page. #}
+<link rel="stylesheet" href="/static/css/tree-table.css" />
+
+{# Skeleton-loading placeholders for the stats card + first rows
+   fetch. Page-local since these only appear on the collection view;
+   keeps the global stylesheet small. The pulse animation is a
+   2-stop opacity ramp — soft enough not to distract, fast enough
+   to read as "loading" rather than "broken".
+
+   Width classes (.w-30 .. .w-100) drive the per-line randomisation
+   so the skeleton doesn't look like a mechanical block — closer to
+   what a real row of data looks like. #}
+<style>
+  @keyframes op-skel-pulse {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 0.20; }
+  }
+  .duckdb-skel-line {
+    height: 12px;
+    background: var(--surface-2, #1f2937);
+    border-radius: 6px;
+    animation: op-skel-pulse 1.4s ease-in-out infinite;
+  }
+  .duckdb-skel-line.h-lg { height: 22px; }
+  .duckdb-skel-line.w-30  { width: 30%; }
+  .duckdb-skel-line.w-40  { width: 40%; }
+  .duckdb-skel-line.w-50  { width: 50%; }
+  .duckdb-skel-line.w-60  { width: 60%; }
+  .duckdb-skel-line.w-70  { width: 70%; }
+  .duckdb-skel-line.w-80  { width: 80%; }
+  .duckdb-skel-line.w-90  { width: 90%; }
+  .duckdb-skel-line.w-95  { width: 95%; }
+  .duckdb-skel-line.w-100 { width: 100%; }
+  .duckdb-skel-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 0 4px;
+  }
+  /* Stagger pulse phases so the lines don't blink in lock-step;
+     reads as "asynchronous loading" rather than a single spinner. */
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(2) { animation-delay: 0.15s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(3) { animation-delay: 0.30s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(4) { animation-delay: 0.45s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(5) { animation-delay: 0.60s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(6) { animation-delay: 0.75s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(7) { animation-delay: 0.90s; }
+  /* Light-theme override: the dark surface-2 default is invisible on
+     the white background; pick a slightly tinted gray that reads. */
+  html:not([data-theme="dark"]) .duckdb-skel-line {
+    background: #e5e7eb;
+  }
+
+  /* Horizontal-scroll affordances ABOVE the table. The row is a
+     flex strip — ‹ button, twin scrollbar (flexes to fill), ›
+     button — sitting fully outside the table-wrap. Earlier we
+     tried absolute-positioning the buttons over the table to keep
+     the top scrollbar pixel-aligned with the bottom one, but in
+     practice the buttons landed on top of the first data row,
+     which clobbered click targets and looked like a render bug.
+     The flex layout costs ~64 px from the top scrollbar's
+     width — small enough that the top + bottom bars still read
+     as "the same control" without overlapping the table. */
+  .duckdb-hscroll-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 0;
+  }
+  .duckdb-htop {
+    flex: 1 1 auto;
+    overflow-x: scroll;
+    overflow-y: hidden;
+    height: 10px;              /* matches the native bottom scrollbar height */
+    /* Firefox: thin scrollbar; Chromium reads the ::-webkit-scrollbar
+       rules below. Track is transparent so the bar reads as a thin
+       line of accent against the card background, matching the
+       browser's native vertical scrollbar on the right of the page. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .duckdb-htop::-webkit-scrollbar { height: 10px; }
+  .duckdb-htop::-webkit-scrollbar-track { background: transparent; }
+  .duckdb-htop::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .duckdb-htop::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-faint);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  /* Apply the same style to the table's BOTTOM scrollbar so the two
+     horizontal scrollbars (top + bottom) and the vertical one all
+     look like the same family of control. */
+  .duckdb-table-wrap {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .duckdb-table-wrap::-webkit-scrollbar { height: 10px; }
+  .duckdb-table-wrap::-webkit-scrollbar-track { background: transparent; }
+  .duckdb-table-wrap::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .duckdb-table-wrap::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-faint);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  .duckdb-htop-inner {
+    height: 1px;   /* invisible content; only the width matters */
+  }
+
+  /* ‹/› chip buttons that flank the twin scrollbar in the row
+     above the table. Compact rectangular chips with the same
+     thin border treatment as the rest of the hub's secondary
+     controls (search input, pagination buttons). Hover fills
+     with --accent so the active affordance is obvious;
+     :disabled goes near-invisible to signal the scroll
+     extreme has been reached. */
+  .duckdb-hscroll-btn {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--surface-opaque, var(--surface));
+    color: var(--fg);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.85;
+    transition: opacity 0.15s ease, background-color 0.15s ease,
+                color 0.15s ease, border-color 0.15s ease;
+  }
+  .duckdb-hscroll-btn:hover:not(:disabled) {
+    opacity: 1;
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+  }
+  .duckdb-hscroll-btn:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+  }
+</style>
+<div style="display: flex; flex-direction: column; gap: 18px;">
+
+  <div class="card">
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="" width="20" height="20" loading="lazy" style="border-radius: 3px;">
+      {% endif %}
+      <div class="card-title" style="margin: 0;">About this source</div>
+      {% if homepage %}
+        <a href="{{ homepage }}" target="_blank" rel="noopener" class="btn btn-ghost"
+           style="margin-left: auto; font-size: 12px; padding: 4px 10px;">
+          Open {{ host }} ↗
+        </a>
+      {% endif %}
+    </div>
+    {% if description %}
+      <p style="margin: 6px 0 0; color: var(--fg);">{{ description }}</p>
+    {% endif %}
+    <p style="margin: 8px 0 0; color: var(--fg-muted); font-size: 13px;">
+      One of {{ '{:,}'.format(count) if count is not none else '?' }} entries indexed in the
+      <span class="mono">{{ collection_name }}</span> collection of gme-qdrant.
+      {% if host %}Each item resolves to a hub page on <span class="mono">{{ host }}</span>.{% endif %}
+      Pick one to walk the graph — clicking opens the entity's hub page with
+      its facts, related items, backlinks, and community context.
+    </p>
+  </div>
+
+  {# When the collection has a DuckDB backing (browsable=true), the
+     stats card + Rows table below replace the static Entry-points
+     sample. Otherwise fall back to the old sample list. #}
+  {% if not browsable %}
+    {% if not samples %}
+      <div class="card tone-warn">
+        <div class="card-title">No sample entries available</div>
+        <p style="margin: 6px 0 0;">
+          The collection is reachable but no point payloads exposed a public
+          URL we could resolve. The entries are still searchable in the
+          Databases console.
+        </p>
+      </div>
+    {% else %}
+      <div class="card">
+        <div class="card-title">Entry points</div>
+        <div class="card-meta" style="margin: 4px 0 12px;">
+          A sample of {{ samples|length }} entries from the collection. Click any
+          to land on its hub page.
+        </div>
+        <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px;">
+          {% for s in samples %}
+            <li>
+              <span class="hub-hover" data-preview-ref="{{ s.hub_url[5:] }}">
+                {% if source_type %}
+                  <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ source_type }}</span>
+                {% endif %}
+                <a href="{{ s.hub_url }}" class="mono" style="word-break: break-all;">{{ s.title }}</a>
+                {% if s.external_url %}
+                  <a href="{{ s.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>
+                {% endif %}
+                {% if s.badge %}
+                  <span class="card-meta" style="font-size: 11px;">· {{ s.badge }}</span>
+                {% endif %}
+                <span class="hub-preview" aria-hidden="true">
+                  <p class="hub-preview-title">{{ s.title }}</p>
+                  {% if source_type %}<div class="hub-preview-meta">{{ source_type }} · {{ collection_name }}</div>{% endif %}
+                  <div class="hub-preview-description"></div>
+                  {% if s.badge %}<div class="hub-preview-badge">{{ s.badge }}</div>{% endif %}
+                  <div class="hub-preview-hint">Click to open the hub page →</div>
+                </span>
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if browsable %}
+  {# ── DuckDB row browser ───────────────────────────────────────────
+       Top stats + search bar + paginated table backed by the
+       source-of-truth DuckDB. Mapping lives in
+       knowledge/duckdb_browser.py. Lazy-fetched on first render. #}
+  <div x-data='collectionRows({{ {"name": collection_name} | tojson }})' x-init="loadStats(); load(1)" style="display: flex; flex-direction: column; gap: 14px;">
+
+    {# ── 4 headline stats — only renders when stats arrive ─── #}
+    <div class="card" x-show="stats.length" x-cloak>
+      <div class="card-title" style="margin-bottom: 10px;">At a glance</div>
+      <div class="duckdb-stats">
+        <template x-for="s in stats" :key="s.label">
+          <div class="duckdb-stat-tile">
+            <div class="duckdb-stat-label" x-text="s.label"></div>
+            <div class="duckdb-stat-value mono" x-text="s.value"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    {# Skeleton placeholder that takes the same visual space as the
+       stats card above. Shows while ``loadStats()`` is in flight so
+       the user sees the page structure immediately instead of a
+       blank gap — important on the heavier DuckDB tables (snsf
+       outputs, openalex work_*) where /stats can take 1–3s cold. #}
+    <div class="card duckdb-skel-card" x-show="!stats.length" x-cloak>
+      <div class="card-title" style="margin-bottom: 10px;">At a glance</div>
+      <div class="duckdb-stats">
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-60" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-40 h-lg"></div>
+        </div>
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-70" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-50 h-lg"></div>
+        </div>
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-50" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-40 h-lg"></div>
+        </div>
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-60" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-30 h-lg"></div>
+        </div>
+      </div>
+    </div>
+
+    {# ── Rows table card ─── #}
+    <div class="card">
+
+      {# Header — title left, "X of Y rows · Z cols" right. #}
+      <div class="duckdb-rows-header">
+        <div class="card-title">Rows · DuckDB</div>
+        <span class="card-meta duckdb-rows-meta" x-show="meta.table" x-cloak
+              x-text="(meta.q && meta.matched !== meta.total
+                       ? (meta.matched||0).toLocaleString() + ' of ' + (meta.total||0).toLocaleString()
+                       : (meta.total||0).toLocaleString()) + ' rows · '
+                      + (meta.columns||[]).length + ' cols'
+                      + (meta.hidden && meta.hidden.length ? ' (+' + meta.hidden.length + ' hidden)' : '')"></span>
+      </div>
+
+      {# Search bar — clean input, no prefix icon. Examples float right. #}
+      <div class="duckdb-search-row" x-show="search.enabled" x-cloak>
+        <div class="duckdb-search-input-wrap">
+          <input type="text" x-model="q"
+                 @input.debounce.350ms="load(1)"
+                 @keydown.enter="load(1)"
+                 :placeholder="'Search ' + (search.columns || []).join(' · ')"
+                 class="duckdb-search-input">
+          <button type="button" class="duckdb-search-clear"
+                  x-show="q" @click="q = ''; load(1)" aria-label="clear">×</button>
+        </div>
+        <div class="duckdb-search-examples" x-show="search.examples && search.examples.length">
+          <span class="card-meta">try</span>
+          <template x-for="ex in (search.examples || [])" :key="ex">
+            <button type="button" class="duckdb-search-chip"
+                    @click="q = ex; load(1)"
+                    x-text="ex"></button>
+          </template>
+        </div>
+      </div>
+
+      {# Pagination strip — rendered ABOVE the table. #}
+      <div class="duckdb-pagination" data-pos="top">
+        <div class="duckdb-pagination-controls">
+          <button class="btn btn-ghost btn-tiny" @click="load(1)"
+                  :disabled="loading || (meta.page||1) <= 1" title="first">«</button>
+          <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) - 1)"
+                  :disabled="loading || (meta.page||1) <= 1">‹ prev</button>
+          <input type="number" min="1" :max="meta.pages || 1" x-model.number="jumpPage"
+                 @keydown.enter="load(jumpPage)"
+                 class="duckdb-pagination-jump">
+          <span class="duckdb-pagination-of" x-text="'of ' + (meta.pages || 1)"></span>
+          <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) + 1)"
+                  :disabled="loading || (meta.page||1) >= (meta.pages||1)">next ›</button>
+          <button class="btn btn-ghost btn-tiny" @click="load(meta.pages||1)"
+                  :disabled="loading || (meta.page||1) >= (meta.pages||1)" title="last">»</button>
+          <span class="duckdb-pagination-state" x-show="loading" style="margin-left: 8px;">loading…</span>
+          <span class="duckdb-pagination-state tone-bad" x-show="error" x-text="error" style="margin-left: 8px;"></span>
+        </div>
+        <div class="duckdb-pagination-size">
+          <span class="card-meta">items per page</span>
+          <select x-model.number="pageSize" @change="load(1)" class="duckdb-pagesize-select">
+            <option :value="25">25</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+            <option :value="200">200</option>
+          </select>
+        </div>
+      </div>
+
+      {# Skeleton rows while the first /rows fetch is in flight. Once
+         meta.columns lands the real table replaces this block. #}
+      <div x-show="loading && !meta.columns" x-cloak class="duckdb-skel-rows">
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-90"></div>
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-80"></div>
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-95"></div>
+        <p class="card-meta" style="margin-top: 12px; text-align: center;">
+          loading rows from the DuckDB store…
+        </p>
+      </div>
+
+      {# Horizontal-scroll affordances — see ``_measureHScroll`` /
+         ``scrollByColumn`` in the Alpine component. Twin scrollbar at
+         the TOP mirrors the position of the real bottom one (saves
+         scrolling the whole page down to reach it on long tables);
+         the ‹/› buttons next to it step by one column at a time so
+         a Windows user with a no-shift-wheel mouse can navigate
+         wide tables ergonomically. #}
+      <div class="duckdb-hscroll-row" x-show="meta.columns && meta.columns.length" x-cloak>
+        <button type="button" class="duckdb-hscroll-btn"
+                @click="scrollByColumn(-1)"
+                :disabled="!canScrollLeft"
+                aria-label="Scroll one column left"
+                title="Scroll one column left">‹</button>
+        <div class="duckdb-htop" @scroll="onHScrollTop()">
+          <div class="duckdb-htop-inner" :style="'width: ' + (hScrollWidth || 0) + 'px'"></div>
+        </div>
+        <button type="button" class="duckdb-hscroll-btn"
+                @click="scrollByColumn(+1)"
+                :disabled="!canScrollRight"
+                aria-label="Scroll one column right"
+                title="Scroll one column right">›</button>
+      </div>
+
+      <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap tree-table"
+           x-cloak @scroll="onTableScroll()">
+        <table class="data duckdb-table">
+          <thead>
+            <tr>
+              <template x-for="(col, ci) in meta.columns" :key="col">
+                <th :class="(isPinned(col) ? 'pinned-col ' : '') + 'sortable-col' + (sort.col === col ? ' sort-active' : '')"
+                    :data-col="col"
+                    @click="cycleSort(col)"
+                    :title="'Sort by ' + col">
+                  <div class="th-with-type">
+                    {# Pin toggle: 📌 → highlighted when pinned; click does
+                       NOT bubble to the th's sort handler. Pinning a column
+                       freezes it during horizontal scroll; multiple pins are
+                       allowed and stack left-to-right in click order. #}
+                    <button class="pin-btn"
+                            :class="isPinned(col) ? 'pinned' : ''"
+                            @click.stop="togglePin(col)"
+                            :title="isPinned(col) ? 'Unpin column' : 'Pin column (freeze during horizontal scroll)'"
+                            type="button">📌</button>
+                    <span class="th-label">
+                      <span x-text="col"></span>
+                      <span class="sort-indicator"
+                            x-text="sort.col === col ? (sort.dir === 'desc' ? '▼' : '▲') : '↕'"></span>
+                    </span>
+                    {# Per-column render type override. ``auto`` JSON-parses
+                       strings that look like JSON and renders arrays/objects
+                       as nested elements; the other modes force a specific
+                       render. @click.stop so changing the dropdown doesn't
+                       also trigger a sort on the surrounding th. #}
+                    <select class="th-type"
+                            @click.stop
+                            @change="setCellType(col, $event.target.value)"
+                            :title="'Render ' + col + ' as…'">
+                      <option value="auto" :selected="(cellTypes[col]||'auto') === 'auto'">auto</option>
+                      <option value="json" :selected="cellTypes[col] === 'json'">json</option>
+                      <option value="pretty" :selected="cellTypes[col] === 'pretty'">pretty</option>
+                      <option value="text" :selected="cellTypes[col] === 'text'">text</option>
+                      <option value="url" :selected="cellTypes[col] === 'url'">url</option>
+                      <option value="image" :selected="cellTypes[col] === 'image'">image</option>
+                    </select>
+                  </div>
+                </th>
+              </template>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(row, i) in rows" :key="i">
+              <tr>
+                <template x-for="(col, ci) in meta.columns" :key="col">
+                  <td :class="(isPinned(col) ? 'pinned-col ' : '') + 'copyable-cell'"
+                      :data-col="col"
+                      :title="formatCell(row[col]) + ' · click to copy'"
+                      @click="copyCell(row, col, $event)"
+                      x-html="renderCell(row[col], col)"></td>
+                </template>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <p class="card-meta" x-show="!loading && rows.length === 0 && !error" style="margin-top: 8px;">
+        No rows match.
+      </p>
+
+      {# Pagination strip — rendered BELOW the table (identical to top). #}
+      <div class="duckdb-pagination" data-pos="bottom">
+        <div class="duckdb-pagination-controls">
+          <button class="btn btn-ghost btn-tiny" @click="load(1)"
+                  :disabled="loading || (meta.page||1) <= 1" title="first">«</button>
+          <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) - 1)"
+                  :disabled="loading || (meta.page||1) <= 1">‹ prev</button>
+          <input type="number" min="1" :max="meta.pages || 1" x-model.number="jumpPage"
+                 @keydown.enter="load(jumpPage)"
+                 class="duckdb-pagination-jump">
+          <span class="duckdb-pagination-of" x-text="'of ' + (meta.pages || 1)"></span>
+          <button class="btn btn-ghost btn-tiny" @click="load((meta.page||1) + 1)"
+                  :disabled="loading || (meta.page||1) >= (meta.pages||1)">next ›</button>
+          <button class="btn btn-ghost btn-tiny" @click="load(meta.pages||1)"
+                  :disabled="loading || (meta.page||1) >= (meta.pages||1)" title="last">»</button>
+        </div>
+        <div class="duckdb-pagination-size">
+          <span class="card-meta">items per page</span>
+          <select x-model.number="pageSize" @change="load(1)" class="duckdb-pagesize-select">
+            <option :value="25">25</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+            <option :value="200">200</option>
+          </select>
+        </div>
+      </div>
+
+      {# Download toolbar — sits below everything else so it's the last
+         thing the user sees after scanning the table. Streams the FULL
+         filtered+sorted dataset (cap: 50k rows). #}
+      <div class="duckdb-export-row" x-show="meta.columns && meta.columns.length" x-cloak>
+        <span class="card-meta">download</span>
+        <button class="btn btn-tiny" @click="exportAs('csv')"      title="CSV (RFC 4180)">CSV</button>
+        <button class="btn btn-tiny" @click="exportAs('tsv')"      title="Tab-separated">TSV</button>
+        <button class="btn btn-tiny" @click="exportAs('md')"       title="Markdown table">MD</button>
+        <button class="btn btn-tiny" @click="exportAs('json-rec')" title="JSON: array of {col: value} records">JSON rec</button>
+        <button class="btn btn-tiny" @click="exportAs('json-col')" title="JSON: {col: [values]} columnar">JSON col</button>
+        <span class="card-meta duckdb-export-note" x-show="meta.matched > 50000" x-cloak>
+          capped at 50k rows
+        </span>
+        <span class="card-meta duckdb-export-state" x-show="sort.col" x-cloak
+              x-text="'sorted by ' + sort.col + ' ' + (sort.dir === 'desc' ? '↓' : '↑')"></span>
+      </div>
+    </div>
+
+  </div>
+  {% endif %}
+
+  <div>
+    <a class="btn btn-ghost" href="/hub">← Back to the hub home</a>
+  </div>
+
+</div>
+
+<script>
+function collectionRows(init) {
+  return {
+    name: init.name,
+    rows: [],
+    meta: {},          // {columns, hidden, total, matched, page, pages, size, table, q, sort}
+    stats: [],         // [{label, value}, ...]
+    search: { enabled: false, columns: [], examples: [] },
+    q: '',
+    sort: { col: '', dir: '' },   // dir: '' | 'asc' | 'desc'
+    pageSize: 50,
+    jumpPage: 1,
+    loading: false,
+    error: '',
+    // Ordered list of pinned columns. Pinned columns are frozen at the
+    // left of the viewport during horizontal scroll; the order in the
+    // array determines the stack order (first entry sits flush at left:0,
+    // each subsequent entry sits after the cumulative width of earlier
+    // pinned columns). The first column is auto-pinned on first load
+    // (preserves the legacy ``sticky-col`` behaviour) but can be unpinned.
+    pinnedCols: [],
+    _pinsInitialized: false,
+
+    // Per-column render override (set via the in-header dropdown):
+    //   auto    — try to JSON-parse strings that look like JSON; render
+    //             arrays/objects as nested table/list; auto-link URLs;
+    //             apply search-term highlight (the legacy behaviour
+    //             plus nested rendering for JSON-shaped cells)
+    //   json    — force JSON.parse + nested rendering even when the
+    //             column looks like prose
+    //   pretty  — multi-line indented JSON inside a <pre>
+    //   text    — single-line escaped string, no nesting, no auto-link
+    //   url     — render as <a href> for string values
+    //   image   — render as <img src> for string values
+    // Reset on every new page load (different query/filter → different
+    // schema). Persisting per-column overrides across pagination is the
+    // desired UX — a user who picked ``url`` for ``path`` shouldn't have
+    // to re-pick it after clicking "next ›".
+    cellTypes: {},
+    async loadStats() {
+      try {
+        const r = await fetch(`/api/hub/c/${encodeURIComponent(this.name)}/stats`);
+        if (!r.ok) return;
+        const j = await r.json();
+        this.stats = j.stats || [];
+        this.search = j.search || { enabled: false, columns: [], examples: [] };
+      } catch (_) { /* stats are optional; failure is silent */ }
+    },
+    _sortParam() {
+      if (!this.sort.col || !this.sort.dir) return '';
+      return this.sort.dir === 'desc' ? `${this.sort.col}:desc` : this.sort.col;
+    },
+    async load(p) {
+      const page = Math.max(1, Math.min(this.meta.pages || 1e9, parseInt(p || 1, 10) || 1));
+      this.loading = true;
+      this.error = '';
+      try {
+        const qs = new URLSearchParams({ page: String(page), size: String(this.pageSize) });
+        if (this.q) qs.set('q', this.q);
+        const sortParam = this._sortParam();
+        if (sortParam) qs.set('sort', sortParam);
+        const r = await fetch(`/api/hub/c/${encodeURIComponent(this.name)}/rows?${qs}`);
+        if (!r.ok) { this.error = `HTTP ${r.status}`; return; }
+        const j = await r.json();
+        this.meta = j;
+        this.rows = j.rows || [];
+        // First load: auto-pin the first column to match the legacy
+        // ``sticky-col`` UX. The user can unpin it (or pin others) and
+        // their choice persists across pagination.
+        if (!this._pinsInitialized && Array.isArray(this.meta.columns) && this.meta.columns.length) {
+          this.pinnedCols = [this.meta.columns[0]];
+          this._pinsInitialized = true;
+        }
+        this.jumpPage = j.page || 1;
+        this.$nextTick(() => this._measurePins());
+      } catch (e) {
+        this.error = e.message || 'request failed';
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async copyCell(row, col, ev) {
+      // Don't intercept clicks on links (let the user navigate), on the
+      // per-column dropdown/pin button (header controls — shouldn't fire
+      // here anyway, but defensive), or on images (clicking the image
+      // copies its URL via the surrounding td's value — that's the
+      // intent, but if a future caller embeds form controls in a cell
+      // we shouldn't swallow those either).
+      const t = ev.target;
+      if (t && (t.closest('a') || t.closest('button') || t.closest('select') || t.closest('input'))) {
+        return;
+      }
+      const v = row[col];
+      if (v === null || v === undefined) return;
+      const text = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        // Clipboard API requires a secure context (HTTPS or localhost).
+        // Fall back to the legacy execCommand path so copy still works
+        // on plain-HTTP intranet deployments.
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        } catch (_) { return; }
+      }
+      this._flashCell(ev.currentTarget);
+    },
+    _flashCell(td) {
+      if (!td) return;
+      // Re-trigger the CSS animation by removing the class on the next
+      // frame before re-adding — assigning the same class twice in a
+      // row wouldn't restart the keyframes otherwise.
+      td.classList.remove('cell-flash');
+      // Force reflow so the animation restarts on rapid successive clicks.
+      void td.offsetWidth;
+      td.classList.add('cell-flash');
+      setTimeout(() => td.classList.remove('cell-flash'), 500);
+    },
+    isPinned(col) {
+      return this.pinnedCols.includes(col);
+    },
+    togglePin(col) {
+      this.pinnedCols = this.isPinned(col)
+        ? this.pinnedCols.filter(c => c !== col)
+        : [...this.pinnedCols, col];
+      this.$nextTick(() => this._measurePins());
+    },
+    _measurePins() {
+      // Imperatively set ``left`` on each pinned <th>/<td> after Alpine
+      // re-renders. Column widths depend on content, so cumulative
+      // offsets can't be expressed in pure CSS — we measure the live
+      // DOM. Cells that are no longer pinned get their inline ``left``
+      // cleared so old offsets don't linger.
+      const table = document.querySelector('.duckdb-table-wrap.tree-table table.duckdb-table');
+      if (!table) return;
+      // Clear stale offsets on previously-pinned-now-unpinned cells.
+      table.querySelectorAll('[data-col]').forEach(el => {
+        if (!this.isPinned(el.dataset.col || '')) el.style.left = '';
+      });
+      // Apply cumulative offsets in pin order.
+      let offset = 0;
+      for (const col of this.pinnedCols) {
+        const cssCol = (window.CSS && CSS.escape) ? CSS.escape(col) : col.replace(/"/g, '\\"');
+        const th = table.querySelector(`thead th[data-col="${cssCol}"]`);
+        if (!th) continue;
+        th.style.left = offset + 'px';
+        table.querySelectorAll(`tbody td[data-col="${cssCol}"]`).forEach(td => {
+          td.style.left = offset + 'px';
+        });
+        offset += th.offsetWidth;
+      }
+      // Same nextTick that fires _measurePins is the right moment to
+      // measure the table's full scrollWidth — the cells just got
+      // their final widths from the browser layout. Update the twin
+      // scroll bar's inner width + the ‹›-button visibility.
+      this._measureHScroll();
+    },
+
+    // ── Horizontal scroll helpers ────────────────────────────────
+    // Two ergonomic improvements over the default browser scrollbar:
+    //   1. A twin scrollbar pinned ABOVE the table — mirrors the bottom
+    //      one so users can drag horizontally without scrolling the
+    //      page down first. Critical on Windows + non-trackpad mice
+    //      where shift-scroll-wheel isn't muscle memory.
+    //   2. ‹/› buttons that step exactly one column at a time using
+    //      the live width of the next visible <th>. Snaps cleanly to
+    //      column boundaries instead of the arbitrary 50-px jump the
+    //      browser's keyboard arrows use.
+    hScrollWidth: 0,
+    canScrollLeft: false,
+    canScrollRight: false,
+    _hScrollSyncing: false,
+
+    _hScroll() {
+      // Resolve the table-wrap div from the current Alpine root. We
+      // can't rely on ``this.$refs.tablewrap`` because the wrap is
+      // gated by ``x-show`` and Alpine doesn't update refs through
+      // x-cloak boundaries before nextTick fires.
+      return document.querySelector('.duckdb-table-wrap.tree-table');
+    },
+    _hScrollTop() {
+      return document.querySelector('.duckdb-htop');
+    },
+
+    _measureHScroll() {
+      const tw = this._hScroll();
+      if (!tw) return;
+      this.hScrollWidth = tw.scrollWidth;
+      this._updateHScrollState();
+    },
+
+    _updateHScrollState() {
+      const tw = this._hScroll();
+      if (!tw) return;
+      this.canScrollLeft  = tw.scrollLeft > 1;
+      this.canScrollRight = tw.scrollLeft + tw.clientWidth < tw.scrollWidth - 1;
+    },
+
+    onTableScroll() {
+      // Forward the table's horizontal position into the twin
+      // scrollbar at the top. The ``_hScrollSyncing`` re-entry guard
+      // stops the scroll events from ping-ponging.
+      if (this._hScrollSyncing) return;
+      const tw = this._hScroll();
+      const top = this._hScrollTop();
+      if (!tw || !top) return;
+      this._hScrollSyncing = true;
+      top.scrollLeft = tw.scrollLeft;
+      this._hScrollSyncing = false;
+      this._updateHScrollState();
+    },
+    onHScrollTop() {
+      if (this._hScrollSyncing) return;
+      const tw = this._hScroll();
+      const top = this._hScrollTop();
+      if (!tw || !top) return;
+      this._hScrollSyncing = true;
+      tw.scrollLeft = top.scrollLeft;
+      this._hScrollSyncing = false;
+      this._updateHScrollState();
+    },
+
+    scrollByColumn(direction) {
+      // Each click slides the table by exactly ONE column width
+      // against the pinned strip. The previous version anchored on
+      // "the first column whose right edge crosses the pinned strip"
+      // — which meant when you were mid-scroll, advancing to that
+      // column's right neighbour only nudged the bar by the
+      // remaining-clipped-pixels of the current column (often < 30 px)
+      // and felt like nothing moved.
+      //
+      // Fixed anchor: use the first column that is FULLY past the
+      // pinned strip (offsetLeft >= viewportStart). Mid-scroll skips
+      // the half-clipped column and treats the next aligned column
+      // as the anchor — so click › always reveals one full column of
+      // new content on the right while removing one column on the
+      // left; click ‹ does the reverse.
+      const tw = this._hScroll();
+      if (!tw) return;
+      const thead = tw.querySelector('thead');
+      if (!thead) {
+        tw.scrollBy({ left: direction * 160, behavior: 'smooth' });
+        setTimeout(() => this.onTableScroll(), 250);
+        return;
+      }
+      const pinnedWidth = Array.from(thead.querySelectorAll('th.pinned-col'))
+        .reduce((sum, th) => sum + th.offsetWidth, 0);
+      const ths = Array.from(thead.querySelectorAll('th:not(.pinned-col)'));
+      if (!ths.length) return;
+
+      // X coord in the table's content where the non-pinned viewport
+      // begins (right edge of the sticky pinned strip).
+      const viewportStart = tw.scrollLeft + pinnedWidth;
+      const EPS = 1;
+
+      // The "anchor" — index of the first non-pinned column whose
+      // LEFT edge is at or past the pinned strip. Mid-scroll, this
+      // is the first column that's fully (not partially) past the
+      // overlay; perfectly snapped, it's exactly the column at the
+      // overlay's right edge.
+      let anchorIdx = ths.findIndex(th => th.offsetLeft >= viewportStart - EPS);
+      // Past the right end? Treat the last column as anchor.
+      if (anchorIdx === -1) anchorIdx = ths.length - 1;
+
+      let targetIdx;
+      if (direction > 0) {
+        // Reveal one new column on the right by advancing the anchor.
+        targetIdx = Math.min(anchorIdx + 1, ths.length - 1);
+      } else {
+        // Going back: if the anchor is exactly snapped against the
+        // overlay, retreat by one column; otherwise jump back to the
+        // column immediately BEFORE the anchor (which is currently
+        // clipped behind the overlay) — that snaps it fully into view
+        // and is the natural "undo" for a forward click that happened
+        // from mid-scroll.
+        const exactlySnapped =
+          Math.abs(ths[anchorIdx].offsetLeft - viewportStart) < EPS;
+        targetIdx = exactlySnapped
+          ? Math.max(anchorIdx - 1, 0)
+          : Math.max(anchorIdx - 1, 0);
+      }
+
+      const target = ths[targetIdx];
+      const newScrollLeft = Math.max(0, target.offsetLeft - pinnedWidth);
+
+      tw.scrollTo({ left: newScrollLeft, behavior: 'smooth' });
+      // Sync the twin scrollbar + button-disabled state after the
+      // smooth scroll settles. 250 ms beats the default ~200 ms
+      // smooth-scroll duration in every browser we target.
+      setTimeout(() => {
+        this.onTableScroll();
+      }, 250);
+    },
+    cycleSort(col) {
+      // none → asc → desc → none
+      if (this.sort.col !== col) {
+        this.sort = { col, dir: 'asc' };
+      } else if (this.sort.dir === 'asc') {
+        this.sort = { col, dir: 'desc' };
+      } else {
+        this.sort = { col: '', dir: '' };
+      }
+      this.load(1);
+    },
+    exportAs(fmt) {
+      const qs = new URLSearchParams({ fmt });
+      if (this.q) qs.set('q', this.q);
+      const sortParam = this._sortParam();
+      if (sortParam) qs.set('sort', sortParam);
+      // Same-origin GET; browser handles Content-Disposition.
+      window.location.href = `/api/hub/c/${encodeURIComponent(this.name)}/export?${qs}`;
+    },
+    formatCell(v) {
+      // Raw text — used for the `title` tooltip (must not be HTML).
+      if (v === null || v === undefined) return '—';
+      if (typeof v === 'object') {
+        try { return JSON.stringify(v); } catch (_) { return String(v); }
+      }
+      return String(v);
+    },
+    escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+      ));
+    },
+    escapeRegex(s) {
+      return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    },
+    highlight(escapedText) {
+      // `escapedText` is already HTML-escaped — only injecting <mark> here.
+      if (!this.q) return escapedText;
+      const term = this.escapeRegex(this.q.trim());
+      if (!term) return escapedText;
+      try {
+        return escapedText.replace(new RegExp(`(${term})`, 'gi'), '<mark>$1</mark>');
+      } catch (_) { return escapedText; }
+    },
+    setCellType(col, t) {
+      // Replace the object so Alpine sees a property change (not a
+      // deep mutation). Re-render is automatic via x-html.
+      this.cellTypes = { ...this.cellTypes, [col]: t };
+    },
+    _maybeParseJson(s) {
+      // Returns the parsed value if `s` looks like JSON, else null.
+      // Cheap shape check first so we don't pay JSON.parse on every cell.
+      if (typeof s !== 'string') return null;
+      const t = s.trim();
+      if (!t) return null;
+      const first = t[0], last = t[t.length - 1];
+      if (!((first === '[' && last === ']') || (first === '{' && last === '}'))) return null;
+      try { return JSON.parse(t); } catch (_) { return null; }
+    },
+    _renderNested(value) {
+      // Compact HTML for an already-parsed JSON value. Arrays of objects
+      // → mini <table>; arrays of primitives → stacked <div> list; bare
+      // objects → key/value pairs in a mini <table>. No deep recursion
+      // beyond one level — DuckDB cells rarely nest deeper than that, and
+      // a runaway recursion would freeze the browser on a 50-row page.
+      if (Array.isArray(value)) {
+        if (!value.length) return '<span class="card-meta" style="font-style: italic;">∅</span>';
+        const allObj = value.every(v => v && typeof v === 'object' && !Array.isArray(v));
+        if (allObj) {
+          // Union of keys across items, in first-seen order.
+          const keys = [];
+          const seen = new Set();
+          for (const item of value) {
+            for (const k of Object.keys(item)) {
+              if (!seen.has(k)) { seen.add(k); keys.push(k); }
+            }
+          }
+          let html = '<table class="nested"><thead><tr>';
+          for (const k of keys) html += `<th>${this.escapeHtml(k)}</th>`;
+          html += '</tr></thead><tbody>';
+          for (const item of value) {
+            html += '<tr>';
+            for (const k of keys) {
+              const cell = item[k];
+              html += `<td>${this._renderInlineLeaf(cell)}</td>`;
+            }
+            html += '</tr>';
+          }
+          html += '</tbody></table>';
+          return html;
+        }
+        // Array of primitives or mixed: stacked list.
+        let html = '<div class="nested-list">';
+        for (const item of value) {
+          html += `<div>${this._renderInlineLeaf(item)}</div>`;
+        }
+        html += '</div>';
+        return html;
+      }
+      if (value && typeof value === 'object') {
+        const keys = Object.keys(value);
+        if (!keys.length) return '<span class="card-meta" style="font-style: italic;">{}</span>';
+        let html = '<table class="nested"><tbody>';
+        for (const k of keys) {
+          html += `<tr><th>${this.escapeHtml(k)}</th><td>${this._renderInlineLeaf(value[k])}</td></tr>`;
+        }
+        html += '</tbody></table>';
+        return html;
+      }
+      return this._renderInlineLeaf(value);
+    },
+    _renderInlineLeaf(v) {
+      // Single-cell rendering inside a nested table: escape + auto-link
+      // URLs + search highlight. Mirrors the legacy renderCell behaviour
+      // so cells inside the nested structure feel like cells outside.
+      if (v === null || v === undefined) return '<span class="cell-null">—</span>';
+      if (Array.isArray(v) || (v && typeof v === 'object')) {
+        return this.highlight(this.escapeHtml(JSON.stringify(v)));
+      }
+      const s = String(v);
+      if (/^https?:\/\//i.test(s)) {
+        const href = this.escapeHtml(s);
+        const text = this.highlight(this.escapeHtml(s));
+        return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+      }
+      return this.highlight(this.escapeHtml(s));
+    },
+    renderCell(v, col) {
+      // Honors the per-column type dropdown; falls back to ``auto`` which
+      // is the legacy behaviour + JSON-shape detection for cells whose
+      // raw string looks like JSON. The DuckDB browser stores
+      // ``*_json`` columns as serialized strings so this is where they
+      // become navigable structures.
+      if (v === null || v === undefined) return '<span class="cell-null">—</span>';
+      const t = (col && this.cellTypes[col]) || 'auto';
+
+      if (t === 'text') {
+        const s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+        return this.highlight(this.escapeHtml(s));
+      }
+      if (t === 'url') {
+        const s = String(v);
+        const href = this.escapeHtml(s);
+        const text = this.highlight(this.escapeHtml(s));
+        return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+      }
+      if (t === 'image') {
+        const safe = this.escapeHtml(String(v));
+        return `<img src="${safe}" loading="lazy" alt="" class="cell-img"/>`;
+      }
+      if (t === 'pretty') {
+        // pretty: if it parses as JSON, indent it; otherwise show the raw
+        // string in a <pre> so multi-line text stays multi-line.
+        let parsed = (typeof v === 'object') ? v : this._maybeParseJson(v);
+        const text = (parsed !== null && typeof parsed === 'object')
+          ? JSON.stringify(parsed, null, 2)
+          : String(v);
+        return `<pre class="cell-pretty">${this.highlight(this.escapeHtml(text))}</pre>`;
+      }
+      if (t === 'json') {
+        // Force-parse + nested render. Falls back to text if parse fails.
+        let parsed = (typeof v === 'object') ? v : this._maybeParseJson(v);
+        if (parsed === null) return this.highlight(this.escapeHtml(String(v)));
+        return this._renderNested(parsed);
+      }
+
+      // ── auto ──
+      // Native object → render nested.
+      if (typeof v === 'object') return this._renderNested(v);
+      // String that smells like JSON → parse + render nested.
+      const parsed = this._maybeParseJson(v);
+      if (parsed !== null && (Array.isArray(parsed) || typeof parsed === 'object')) {
+        return this._renderNested(parsed);
+      }
+      // Plain string: auto-link URLs + highlight (legacy behaviour).
+      const s = String(v);
+      if (/^https?:\/\//i.test(s)) {
+        const href = this.escapeHtml(s);
+        const text = this.highlight(this.escapeHtml(s));
+        return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+      }
+      return this.highlight(this.escapeHtml(s));
+    },
+  };
+}
+</script>
+{% endblock %}

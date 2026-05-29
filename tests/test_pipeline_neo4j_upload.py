@@ -89,10 +89,17 @@ def _sample_graph() -> dict[str, Any]:
 # -- Neo4jService.upload (driver mocked) --------------------------------------
 
 
-def test_upload_invokes_eight_writes_with_correct_counts(
+# 3 node-type writes (users/orgs/repos) + 12 edge-type writes (5 legacy
+# + 7 PR-8 extra edges) = 15 ``execute_write`` calls per ``upload``.
+# Keep this in sync with ``Neo4jService.upload`` if more edge types
+# get wired in.
+EXPECTED_WRITE_COUNT = 15
+
+
+def test_upload_invokes_writes_with_correct_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One execute_write per node-type and edge-type — 8 total."""
+    """One execute_write per node-type and edge-type."""
     monkeypatch.setenv("NEO4J_AUTH", "neo4j/secret")
 
     fake_session = MagicMock()
@@ -106,7 +113,7 @@ def test_upload_invokes_eight_writes_with_correct_counts(
 
     counts = svc.upload(_sample_graph())
 
-    assert fake_session.execute_write.call_count == 8
+    assert fake_session.execute_write.call_count == EXPECTED_WRITE_COUNT
     assert counts["users"] == 1
     assert counts["orgs"] == 1
     assert counts["repos"] == 3
@@ -116,6 +123,16 @@ def test_upload_invokes_eight_writes_with_correct_counts(
     assert counts["contributor_edges"] == 2
     assert counts["fork_edges"] == 1  # acme/lib FORK_OF upstream/lib
     assert counts["dependency_edges"] == 0  # _sample_graph has none
+    # PR-8 extra-edges — all zero on the sample graph which doesn't
+    # populate ``following`` / ``starred_repositories`` / ``commenters``
+    # / ``issue_authors`` / etc.
+    assert counts["follow_edges"] == 0
+    assert counts["starred_edges"] == 0
+    assert counts["watches_edges"] == 0
+    assert counts["opened_issue_edges"] == 0
+    assert counts["opened_pr_edges"] == 0
+    assert counts["commented_edges"] == 0
+    assert counts["reviewed_pr_edges"] == 0
 
 
 def test_upload_handles_empty_graph(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -132,9 +149,10 @@ def test_upload_handles_empty_graph(monkeypatch: pytest.MonkeyPatch) -> None:
 
     counts = svc.upload({"users": {}, "orgs": {}, "repos": {}})
 
-    # Still 8 calls — the merge fns short-circuit internally when rows=[]
-    # but the session.execute_write call itself happens.
-    assert fake_session.execute_write.call_count == 8
+    # Still EXPECTED_WRITE_COUNT calls — the merge fns short-circuit
+    # internally when rows=[] but the session.execute_write call
+    # itself happens.
+    assert fake_session.execute_write.call_count == EXPECTED_WRITE_COUNT
     assert counts == {
         "users": 0,
         "orgs": 0,
@@ -144,6 +162,13 @@ def test_upload_handles_empty_graph(monkeypatch: pytest.MonkeyPatch) -> None:
         "contributor_edges": 0,
         "fork_edges": 0,
         "dependency_edges": 0,
+        "follow_edges": 0,
+        "starred_edges": 0,
+        "watches_edges": 0,
+        "opened_issue_edges": 0,
+        "opened_pr_edges": 0,
+        "commented_edges": 0,
+        "reviewed_pr_edges": 0,
     }
 
 
@@ -178,9 +203,18 @@ def test_upload_emits_dependency_edges_in_both_directions(
 
     assert counts["dependency_edges"] == 2
 
-    # Inspect the rows passed into _merge_dependency_edges (last call).
-    last_call = fake_session.execute_write.call_args_list[-1]
-    rows = last_call.args[1]  # second positional arg after the tx fn
+    # Find the ``_merge_dependency_edges`` call by name rather than by
+    # position — extra edges (FOLLOWS / STARRED / …) appended after
+    # the dependency write make ``call_args_list[-1]`` brittle.
+    from open_pulse.services.neo4j import _merge_dependency_edges
+
+    dep_calls = [
+        c
+        for c in fake_session.execute_write.call_args_list
+        if c.args and c.args[0] is _merge_dependency_edges
+    ]
+    assert len(dep_calls) == 1, "expected exactly one dependency-edge write"
+    rows = dep_calls[0].args[1]  # second positional arg after the tx fn
     pairs = sorted((r["consumer"], r["package"]) for r in rows)
     assert pairs == [
         ("downstream/app", "owner/lib"),  # from dependents[]

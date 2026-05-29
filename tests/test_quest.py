@@ -111,7 +111,11 @@ def test_quest_config_rejects_removed_step_endpoints(tmp_path: Path) -> None:
 
 def test_build_tasks_all_enabled() -> None:
     cfg = QuestFileConfig()
+    # Several steps default to disabled — flip them on so the assertion
+    # below exercises every step in STEP_NAMES (the "all enabled" contract).
+    cfg.quest.steps.frontier_extend.enabled = True
     cfg.quest.steps.apply_grimoire_projects.enabled = True
+    cfg.quest.steps.archive_outputs.enabled = True
     tasks = build_tasks(cfg)
     assert [t.name for t in tasks] == list(STEP_NAMES)
 
