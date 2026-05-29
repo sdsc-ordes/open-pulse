@@ -316,7 +316,7 @@ services:
     cpus: ${OXIGRAPH_CPUS:-1.0}
 
   sparql-proxy:
-    image: caddy:2.8-alpine
+    image: caddy:2.11-alpine
     container_name: sparql-proxy-open-pulse
     profiles:
       - sparql
@@ -443,7 +443,7 @@ services:
   # Profile: `edge`. Bring up alongside the rest with
   # `docker compose --profile edge --profile hub --profile crawler … up -d`.
   edge-proxy:
-    image: caddy:2.8-alpine
+    image: caddy:2.11-alpine
     container_name: openpulse-edge-proxy
     profiles:
       - edge
