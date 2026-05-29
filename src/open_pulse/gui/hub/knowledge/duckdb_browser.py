@@ -845,6 +845,19 @@ def _build_auto_backing(collection: str) -> Backing | None:
     # PRAGMA table_info returns (cid, name, type, notnull, dflt_value, pk).
     cols = [(row[1], (row[2] or "").upper()) for row in schema]
     names = [c[0] for c in cols]
+    # JSON / nested types can't go into an ILIKE search — DuckDB raises
+    # "Vector::Reference used on vector of different type" and (worse)
+    # poisons the read-only parent connection for the whole pool. Limit
+    # priority + fallback to scalar types only. Plain JSON_COL stays
+    # browsable in the row view (it's rendered as text); we just don't
+    # let the search box hit it.
+    _searchable = {
+        n.lower(): n
+        for n, t in cols
+        if not (t.startswith("JSON") or t.startswith("STRUCT")
+                or t.startswith("LIST") or t.startswith("MAP")
+                or t.startswith("UNION"))
+    }
     lowered = {c.lower(): c for c in names}
 
     # Optional WHERE clause that scopes the Backing to a regional /
@@ -871,10 +884,13 @@ def _build_auto_backing(collection: str) -> Backing | None:
                 stats.append(Stat(label, tmpl.format(c=real, t=table), unit=unit))
                 break
 
-    # Search columns — prioritised text-ish names, capped at 4.
+    # Search columns — prioritised text-ish names, capped at 4. We
+    # source from ``_searchable`` (scalar columns only) so a column
+    # like snsf.persons.responsible_applicant_grants (JSON) never
+    # ends up under an ILIKE — see the comment above.
     search_cols: list[str] = []
     for p in _AUTO_SEARCH_PRIORITY:
-        real = lowered.get(p)
+        real = _searchable.get(p)
         if real and real not in search_cols:
             search_cols.append(real)
         if len(search_cols) >= 4:
@@ -968,53 +984,10 @@ def _json_safe(v: Any) -> Any:
     return str(v)
 
 
-# Persistent parent connections — one per DuckDB file. Each ``_connect``
-# returns a fresh CURSOR off the parent, which is the cheap operation
-# (microseconds). Without this pool every request paid the cold-open
-# cost (~3s for snsf.duckdb's 12 tables / 1M rows, ~1s for openalex's
-# 11 tables / 3M rows) on its own, which made tile drilldowns feel
-# slow even when the actual query was sub-millisecond.
-#
-# Read-only opens are safe to share across threads — DuckDB serialises
-# query execution internally per connection, and cursors from the same
-# parent run independently. The parent stays alive for the process
-# lifetime; an on-disk file swap (rare; we only rebuild DuckDB stores
-# behind a hub restart) requires the hub to restart anyway.
-_PARENT_CONNS: dict[Path, duckdb.DuckDBPyConnection] = {}
-_PARENT_LOCK = threading.Lock()
-
-
-class _CursorContext:
-    """Yield a fresh cursor off the cached parent; close on exit.
-
-    Implements the same ``with _connect(...) as con:`` contract callers
-    already use — the only difference is that exit closes the cursor
-    (cheap) instead of the parent file connection (~seconds on cold
-    re-open). Drop-in replacement.
-    """
-
-    def __init__(self, parent: duckdb.DuckDBPyConnection) -> None:
-        self._cur = parent.cursor()
-
-    def __enter__(self) -> duckdb.DuckDBPyConnection:
-        return self._cur
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        try:
-            self._cur.close()
-        except Exception:  # noqa: BLE001
-            pass
-
-
-def _connect(db_path: Path) -> _CursorContext:
+def _connect(db_path: Path) -> duckdb.DuckDBPyConnection:
     if not db_path.is_file():
         raise FileNotFoundError(f"DuckDB file missing: {db_path}")
-    with _PARENT_LOCK:
-        parent = _PARENT_CONNS.get(db_path)
-        if parent is None:
-            parent = duckdb.connect(str(db_path), read_only=True)
-            _PARENT_CONNS[db_path] = parent
-    return _CursorContext(parent)
+    return duckdb.connect(str(db_path), read_only=True)
 
 
 def _source_expr(b: Backing) -> str:

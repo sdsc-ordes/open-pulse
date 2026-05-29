@@ -23,6 +23,57 @@
    cells and the per-column type dropdown in the header. Scoped under
    .tree-table so it doesn't bleed elsewhere on the page. #}
 <link rel="stylesheet" href="/static/css/tree-table.css" />
+
+{# Skeleton-loading placeholders for the stats card + first rows
+   fetch. Page-local since these only appear on the collection view;
+   keeps the global stylesheet small. The pulse animation is a
+   2-stop opacity ramp — soft enough not to distract, fast enough
+   to read as "loading" rather than "broken".
+
+   Width classes (.w-30 .. .w-100) drive the per-line randomisation
+   so the skeleton doesn't look like a mechanical block — closer to
+   what a real row of data looks like. #}
+<style>
+  @keyframes op-skel-pulse {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 0.20; }
+  }
+  .duckdb-skel-line {
+    height: 12px;
+    background: var(--surface-2, #1f2937);
+    border-radius: 6px;
+    animation: op-skel-pulse 1.4s ease-in-out infinite;
+  }
+  .duckdb-skel-line.h-lg { height: 22px; }
+  .duckdb-skel-line.w-30  { width: 30%; }
+  .duckdb-skel-line.w-40  { width: 40%; }
+  .duckdb-skel-line.w-50  { width: 50%; }
+  .duckdb-skel-line.w-60  { width: 60%; }
+  .duckdb-skel-line.w-70  { width: 70%; }
+  .duckdb-skel-line.w-80  { width: 80%; }
+  .duckdb-skel-line.w-90  { width: 90%; }
+  .duckdb-skel-line.w-95  { width: 95%; }
+  .duckdb-skel-line.w-100 { width: 100%; }
+  .duckdb-skel-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 0 4px;
+  }
+  /* Stagger pulse phases so the lines don't blink in lock-step;
+     reads as "asynchronous loading" rather than a single spinner. */
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(2) { animation-delay: 0.15s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(3) { animation-delay: 0.30s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(4) { animation-delay: 0.45s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(5) { animation-delay: 0.60s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(6) { animation-delay: 0.75s; }
+  .duckdb-skel-rows .duckdb-skel-line:nth-child(7) { animation-delay: 0.90s; }
+  /* Light-theme override: the dark surface-2 default is invisible on
+     the white background; pick a slightly tinted gray that reads. */
+  html:not([data-theme="dark"]) .duckdb-skel-line {
+    background: #e5e7eb;
+  }
+</style>
 <div style="display: flex; flex-direction: column; gap: 18px;">
 
   <div class="card">
@@ -119,6 +170,33 @@
       </div>
     </div>
 
+    {# Skeleton placeholder that takes the same visual space as the
+       stats card above. Shows while ``loadStats()`` is in flight so
+       the user sees the page structure immediately instead of a
+       blank gap — important on the heavier DuckDB tables (snsf
+       outputs, openalex work_*) where /stats can take 1–3s cold. #}
+    <div class="card duckdb-skel-card" x-show="!stats.length" x-cloak>
+      <div class="card-title" style="margin-bottom: 10px;">At a glance</div>
+      <div class="duckdb-stats">
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-60" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-40 h-lg"></div>
+        </div>
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-70" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-50 h-lg"></div>
+        </div>
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-50" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-40 h-lg"></div>
+        </div>
+        <div class="duckdb-stat-tile">
+          <div class="duckdb-skel-line w-60" style="margin-bottom: 8px;"></div>
+          <div class="duckdb-skel-line w-30 h-lg"></div>
+        </div>
+      </div>
+    </div>
+
     {# ── Rows table card ─── #}
     <div class="card">
 
@@ -181,6 +259,21 @@
             <option :value="200">200</option>
           </select>
         </div>
+      </div>
+
+      {# Skeleton rows while the first /rows fetch is in flight. Once
+         meta.columns lands the real table replaces this block. #}
+      <div x-show="loading && !meta.columns" x-cloak class="duckdb-skel-rows">
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-90"></div>
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-80"></div>
+        <div class="duckdb-skel-line w-100"></div>
+        <div class="duckdb-skel-line w-95"></div>
+        <p class="card-meta" style="margin-top: 12px; text-align: center;">
+          loading rows from the DuckDB store…
+        </p>
       </div>
 
       <div x-show="meta.columns && meta.columns.length" class="duckdb-table-wrap tree-table" x-cloak>
