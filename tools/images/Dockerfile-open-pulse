@@ -13,7 +13,7 @@
 #            (used by the cli orchestrator container so we can `docker exec`
 #            into it; in compose this is a one-line `entrypoint:` override.)
 
-FROM python:3.11-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
