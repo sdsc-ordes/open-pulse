@@ -216,9 +216,15 @@ def test_upload_emits_dependency_edges_in_both_directions(
     assert len(dep_calls) == 1, "expected exactly one dependency-edge write"
     rows = dep_calls[0].args[1]  # second positional arg after the tx fn
     pairs = sorted((r["consumer"], r["package"]) for r in rows)
+    # Endpoints are normalised to canonical GitHub URLs so they join the
+    # URL-keyed node set (and match the hub's ``_to_gh_url`` read side),
+    # even when the crawler payload still uses bare ``owner/repo`` shorthand
+    # in the edge lists. See ``_gh_url`` in ``services/neo4j.py``.
     assert pairs == [
-        ("downstream/app", "owner/lib"),  # from dependents[]
-        ("owner/lib", "other/utils"),  # from dependencies[]
+        # from dependents[]
+        ("https://github.com/downstream/app", "https://github.com/owner/lib"),
+        # from dependencies[]
+        ("https://github.com/owner/lib", "https://github.com/other/utils"),
     ]
 
 

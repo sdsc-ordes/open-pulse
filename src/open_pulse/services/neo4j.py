@@ -196,12 +196,42 @@ class Neo4jService:
         self._closed = True
 
 
+# -- Identifier normalisation -------------------------------------------------
+
+_GH_URL_PREFIX = "https://github.com/"
+
+
+def _gh_url(value: str | None) -> str:
+    """Normalise a GitHub identifier to its canonical public URL.
+
+    The crawler ≥2.0 keys its node dicts by canonical URL
+    (``https://github.com/<login>`` / ``…/<owner>/<repo>``) but keeps the
+    edge-list entries (``contributors``, ``members``, ``following``, …) as
+    bare shorthand (``login`` / ``owner/repo``). The hub's read side
+    (``chaoss/metrics.py``, ``knowledge/stores.py``) queries Neo4j on the
+    URL form via its own ``_to_gh_url`` helper, so the uploader has to emit
+    URL identifiers on **both** node keys and edge endpoints or the edges
+    land on orphan bare-login nodes that never join the URL-keyed ones.
+
+    Idempotent: an already-canonical ``https://…`` value passes through
+    unchanged, so this is safe for both the URL-keyed node dict keys and
+    the shorthand edge lists, and for older crawler output that still keys
+    by bare shorthand. Mirrors ``open_pulse.gui.hub.knowledge.stores._to_gh_url``
+    (kept local so the service layer doesn't import from the GUI layer).
+    """
+    if not value:
+        return ""
+    return value if value.startswith("https://") else _GH_URL_PREFIX + value
+
+
 # -- Row builders -------------------------------------------------------------
 
 
-def _user_row(login: str, u: dict[str, Any]) -> dict[str, Any]:
+def _user_row(key: str, u: dict[str, Any]) -> dict[str, Any]:
     return {
-        "login": login,
+        # Prefer the node's own canonical ``url`` (crawler ≥2.0); fall back
+        # to URL-ifying the dict key for older bare-login-keyed output.
+        "login": _gh_url(u.get("url") or key),
         "name": u.get("name", "") or "",
         "id": u.get("id", 0) or 0,
         "type": u.get("type", "User"),
@@ -210,9 +240,9 @@ def _user_row(login: str, u: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _org_row(login: str, o: dict[str, Any]) -> dict[str, Any]:
+def _org_row(key: str, o: dict[str, Any]) -> dict[str, Any]:
     return {
-        "login": login,
+        "login": _gh_url(o.get("url") or key),
         "name": o.get("name", "") or "",
         "id": o.get("id", 0) or 0,
         "type": o.get("type", "Organization"),
@@ -221,14 +251,18 @@ def _org_row(login: str, o: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _repo_row(full_name: str, r: dict[str, Any]) -> dict[str, Any]:
-    # Fall back to the owner segment of ``full_name`` when the crawler didn't
-    # write an explicit ``owner`` field — this is the case for repos that were
-    # only referenced (as a dependent/dependency) without ever being explored.
-    # Keeps every Repo node queryable by owner without forcing a re-crawl.
+def _repo_row(key: str, r: dict[str, Any]) -> dict[str, Any]:
+    # Fall back to the owner segment when the crawler didn't write an explicit
+    # ``owner`` field — this is the case for repos that were only referenced
+    # (as a dependent/dependency) without ever being explored. ``owner`` is a
+    # display property (kept bare, not an identity key); derive it from the
+    # bare ``owner/repo`` form regardless of whether the key is URL-prefixed.
+    full_name = _gh_url(r.get("url") or key)
     owner = r.get("owner", "") or ""
-    if not owner and "/" in full_name:
-        owner = full_name.split("/", 1)[0]
+    if not owner:
+        bare = full_name[len(_GH_URL_PREFIX):] if full_name.startswith(_GH_URL_PREFIX) else full_name
+        if "/" in bare:
+            owner = bare.split("/", 1)[0]
     return {
         "full_name": full_name,
         "name": r.get("name", "") or "",
@@ -246,25 +280,28 @@ def _owner_edges(
 ) -> list[dict[str, Any]]:
     """Build (User|Org)-[:OWNS]->(Repo) edges from authored_repositories[]."""
     rows: list[dict[str, Any]] = []
-    for login, u in users.items():
+    for key, u in users.items():
+        login = _gh_url(u.get("url") or key)
         for repo in u.get("authored_repositories") or []:
-            rows.append({"owner_login": login, "owner_label": "User", "repo": repo})
+            rows.append({"owner_login": login, "owner_label": "User", "repo": _gh_url(repo)})
         for repo in u.get("forked_repositories") or []:
-            rows.append({"owner_login": login, "owner_label": "User", "repo": repo})
-    for login, o in orgs.items():
+            rows.append({"owner_login": login, "owner_label": "User", "repo": _gh_url(repo)})
+    for key, o in orgs.items():
+        login = _gh_url(o.get("url") or key)
         for repo in o.get("authored_repositories") or []:
-            rows.append({"owner_login": login, "owner_label": "Org", "repo": repo})
+            rows.append({"owner_login": login, "owner_label": "Org", "repo": _gh_url(repo)})
         for repo in o.get("forked_repositories") or []:
-            rows.append({"owner_login": login, "owner_label": "Org", "repo": repo})
+            rows.append({"owner_login": login, "owner_label": "Org", "repo": _gh_url(repo)})
     return rows
 
 
 def _member_edges(orgs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Build (User)-[:MEMBER_OF]->(Org) edges from org.members[]."""
     rows: list[dict[str, Any]] = []
-    for login, o in orgs.items():
+    for key, o in orgs.items():
+        org = _gh_url(o.get("url") or key)
         for member in o.get("members") or []:
-            rows.append({"member": member, "org": login})
+            rows.append({"member": _gh_url(member), "org": org})
     return rows
 
 
@@ -273,23 +310,27 @@ def _contributor_edges(
 ) -> list[dict[str, Any]]:
     """Build (User)-[:CONTRIBUTES_TO]->(Repo) edges from repo.contributors[]."""
     rows: list[dict[str, Any]] = []
-    for full_name, r in repos.items():
+    for key, r in repos.items():
+        repo = _gh_url(r.get("url") or key)
         for contrib in r.get("contributors") or []:
-            rows.append({"contributor": contrib, "repo": full_name})
+            rows.append({"contributor": _gh_url(contrib), "repo": repo})
     return rows
 
 
 def _fork_edges(repos: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Build (Repo)-[:FORK_OF]->(Repo) edges when fork info present."""
     rows: list[dict[str, Any]] = []
-    for full_name, r in repos.items():
+    for key, r in repos.items():
+        fork = _gh_url(r.get("url") or key)
         parent = (
             r.get("parent_full_name")
             or r.get("source_full_name")
             or r.get("forked_from")
         )
-        if isinstance(parent, str) and parent and parent != full_name:
-            rows.append({"fork": full_name, "parent": parent})
+        if isinstance(parent, str) and parent:
+            parent_url = _gh_url(parent)
+            if parent_url != fork:
+                rows.append({"fork": fork, "parent": parent_url})
     return rows
 
 
@@ -303,11 +344,12 @@ def _dependency_edges(
     we just flip the direction when reading from ``dependents``.
     """
     rows: list[dict[str, Any]] = []
-    for full_name, r in repos.items():
+    for key, r in repos.items():
+        repo = _gh_url(r.get("url") or key)
         for dep in r.get("dependencies") or []:
-            rows.append({"consumer": full_name, "package": dep})
+            rows.append({"consumer": repo, "package": _gh_url(dep)})
         for dependent in r.get("dependents") or []:
-            rows.append({"consumer": dependent, "package": full_name})
+            rows.append({"consumer": _gh_url(dependent), "package": repo})
     return rows
 
 
@@ -467,11 +509,15 @@ def _follow_edges(
     double up the same edge with no extra information.
     """
     rows: list[dict[str, Any]] = []
-    for login, u in users.items():
+    for key, u in users.items():
+        login = _gh_url(u.get("url") or key)
         for target in u.get("following") or []:
-            if not isinstance(target, str) or not target or target == login:
+            if not isinstance(target, str) or not target:
                 continue
-            rows.append({"follower": login, "followed": target})
+            followed = _gh_url(target)
+            if followed == login:
+                continue
+            rows.append({"follower": login, "followed": followed})
     return rows
 
 
@@ -480,10 +526,11 @@ def _starred_edges(
 ) -> list[dict[str, Any]]:
     """Build (User)-[:STARRED]->(Repo) edges from ``user.starred_repositories``."""
     rows: list[dict[str, Any]] = []
-    for login, u in users.items():
+    for key, u in users.items():
+        login = _gh_url(u.get("url") or key)
         for repo in u.get("starred_repositories") or []:
             if isinstance(repo, str) and repo:
-                rows.append({"user": login, "repo": repo})
+                rows.append({"user": login, "repo": _gh_url(repo)})
     return rows
 
 
@@ -492,10 +539,11 @@ def _watches_edges(
 ) -> list[dict[str, Any]]:
     """Build (User)-[:WATCHES]->(Repo) edges from ``user.watched_repositories``."""
     rows: list[dict[str, Any]] = []
-    for login, u in users.items():
+    for key, u in users.items():
+        login = _gh_url(u.get("url") or key)
         for repo in u.get("watched_repositories") or []:
             if isinstance(repo, str) and repo:
-                rows.append({"user": login, "repo": repo})
+                rows.append({"user": login, "repo": _gh_url(repo)})
     return rows
 
 
@@ -504,10 +552,11 @@ def _opened_issue_edges(
 ) -> list[dict[str, Any]]:
     """Build (User)-[:OPENED_ISSUE]->(Repo) edges from ``repo.issue_authors``."""
     rows: list[dict[str, Any]] = []
-    for full_name, r in repos.items():
+    for key, r in repos.items():
+        repo = _gh_url(r.get("url") or key)
         for author in r.get("issue_authors") or []:
             if isinstance(author, str) and author:
-                rows.append({"user": author, "repo": full_name})
+                rows.append({"user": _gh_url(author), "repo": repo})
     return rows
 
 
@@ -516,10 +565,11 @@ def _opened_pr_edges(
 ) -> list[dict[str, Any]]:
     """Build (User)-[:OPENED_PR]->(Repo) edges from ``repo.pr_authors``."""
     rows: list[dict[str, Any]] = []
-    for full_name, r in repos.items():
+    for key, r in repos.items():
+        repo = _gh_url(r.get("url") or key)
         for author in r.get("pr_authors") or []:
             if isinstance(author, str) and author:
-                rows.append({"user": author, "repo": full_name})
+                rows.append({"user": _gh_url(author), "repo": repo})
     return rows
 
 
@@ -534,10 +584,11 @@ def _commented_edges(
     types here.
     """
     rows: list[dict[str, Any]] = []
-    for full_name, r in repos.items():
+    for key, r in repos.items():
+        repo = _gh_url(r.get("url") or key)
         for user in r.get("commenters") or []:
             if isinstance(user, str) and user:
-                rows.append({"user": user, "repo": full_name})
+                rows.append({"user": _gh_url(user), "repo": repo})
     return rows
 
 
@@ -551,10 +602,11 @@ def _reviewed_pr_edges(
     not just any commenter on the PR conversation.
     """
     rows: list[dict[str, Any]] = []
-    for full_name, r in repos.items():
+    for key, r in repos.items():
+        repo = _gh_url(r.get("url") or key)
         for user in r.get("pr_reviewers") or []:
             if isinstance(user, str) and user:
-                rows.append({"user": user, "repo": full_name})
+                rows.append({"user": _gh_url(user), "repo": repo})
     return rows
 
 
