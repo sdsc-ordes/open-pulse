@@ -1057,7 +1057,8 @@ def top_stats(collection: str) -> list[dict[str, str]] | None:
     if not b.stats:
         return []
     out: list[dict[str, str]] = []
-    with _connect(b.db_path) as con:
+    con = _connect(b.db_path)
+    try:
         for stat in b.stats:
             try:
                 row = con.execute(stat.sql).fetchone()
@@ -1066,7 +1067,25 @@ def top_stats(collection: str) -> list[dict[str, str]] | None:
             except Exception as exc:  # noqa: BLE001
                 log.warning("stat %r failed on %s: %s", stat.label, collection, exc)
                 value = "—"
+                # Some DuckDB INTERNAL/FATAL errors (notably the upstream
+                # Vector::Reference bug that fires on auto-stat
+                # COUNT(DISTINCT type) over snsf.output_publications)
+                # poison the whole connection — every subsequent
+                # execute() on it raises "database has been invalidated".
+                # Reopen so the remaining stats don't all return "—".
+                msg = str(exc)
+                if "invalidated" in msg or "FATAL" in msg:
+                    try:
+                        con.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    con = _connect(b.db_path)
             out.append({"label": stat.label, "value": value})
+    finally:
+        try:
+            con.close()
+        except Exception:  # noqa: BLE001
+            pass
     return out
 
 
