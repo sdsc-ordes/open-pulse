@@ -1013,27 +1013,10 @@ def _json_safe(v: Any) -> Any:
     return str(v)
 
 
-def _snapshot_path(db_path: Path) -> Path:
-    """The GME-published read-only snapshot beside a live store.
-
-    ``…/openalex.duckdb`` → ``…/openalex.ro.duckdb`` (see
-    ``src/index/_snapshot.py`` in the git-metadata-extractor).
-    """
-    return db_path.with_name(db_path.stem + ".ro.duckdb")
-
-
 def _connect(db_path: Path) -> duckdb.DuckDBPyConnection:
-    # Prefer the GME-published read-only snapshot. The live ``.duckdb`` is
-    # held read-WRITE by the extractor, so opening it read-only from here
-    # fails with "Conflicting lock is held" (DuckDB allows N readers OR 1
-    # writer). The ``.ro.duckdb`` snapshot is a separate file the GME
-    # refreshes after each ingest — no contention. Fall back to the live
-    # file when no snapshot exists yet (fresh deploy / un-snapshotted store).
-    ro_path = _snapshot_path(db_path)
-    target = ro_path if ro_path.is_file() else db_path
-    if not target.is_file():
-        raise FileNotFoundError(f"DuckDB file missing: {target}")
-    return duckdb.connect(str(target), read_only=True)
+    if not db_path.is_file():
+        raise FileNotFoundError(f"DuckDB file missing: {db_path}")
+    return duckdb.connect(str(db_path), read_only=True)
 
 
 def _source_expr(b: Backing) -> str:
