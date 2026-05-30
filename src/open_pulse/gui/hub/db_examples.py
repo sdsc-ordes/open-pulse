@@ -820,7 +820,7 @@ CYPHER: list[dict[str, str]] = [
         "body": "// Center on one Repo and emit every 1-hop neighbor with full props.\n"
         "// Swap full_name to pivot the inspection — works as-is for the\n"
         "// crawler-backfilled owner field.\n"
-        "WITH 'sdsc-ordes/gimie' AS target\n"
+        "WITH 'https://github.com/sdsc-ordes/gimie' AS target\n"
         "MATCH (r:Repo {full_name: target})\n"
         "OPTIONAL MATCH (r)-[rel]-(n)\n"
         "RETURN labels(r)[0]              AS center_label,\n"
