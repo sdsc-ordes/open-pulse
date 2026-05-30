@@ -524,6 +524,40 @@ CYPHER: list[dict[str, str]] = [
         "ORDER BY n DESC",
     },
     {
+        "id": "cypher-by-platform",
+        "name": "Nodes by platform",
+        "summary": "Multi-platform breakdown — github / zenodo / infoscience / huggingface / …",
+        "body": "// Crawler >=3.0 tags every node with the source platform.\n"
+        "// Older nodes (pre-3.0 ingest) have a null platform until re-crawled.\n"
+        "MATCH (n)\n"
+        "RETURN coalesce(n.platform, '(untagged)') AS platform,\n"
+        "       labels(n)[0] AS label, count(*) AS n\n"
+        "ORDER BY n DESC",
+    },
+    {
+        "id": "cypher-by-subkind",
+        "name": "Nodes by subkind",
+        "summary": "Concrete node kind (GitHubRepository / ZenodoRecord / InfoscienceItem / …).",
+        "body": "// ZenodoRecord / InfoscienceItem / HuggingFaceRepo all share the\n"
+        "// :Repo label; subkind keeps the platform-specific identity.\n"
+        "MATCH (n)\n"
+        "RETURN coalesce(n.subkind, '(stub)') AS subkind, count(*) AS n\n"
+        "ORDER BY n DESC",
+    },
+    {
+        "id": "cypher-explored-vs-frontier",
+        "name": "Explored vs frontier",
+        "summary": "How much of the graph is fully crawled vs edge-only frontier stubs.",
+        "body": "// is_explored=true → fetched + expanded; null/false → a frontier\n"
+        "// node known only from an edge endpoint (valuable for topology,\n"
+        "// thin on properties). Re-crawling a frontier node enriches it.\n"
+        "MATCH (n)\n"
+        "RETURN labels(n)[0] AS label,\n"
+        "       n.is_explored = true AS explored,\n"
+        "       count(*) AS n\n"
+        "ORDER BY label, explored",
+    },
+    {
         "id": "cypher-schema-sample",
         "name": "Sample one of each label",
         "summary": "Peek at a single node per label to learn property names.",
@@ -573,9 +607,9 @@ CYPHER: list[dict[str, str]] = [
         "id": "cypher-repo-neighbours",
         "name": "1-hop neighbours of a repo",
         "summary": "Every contributor, owner, and fork of a single repository.",
-        "body": "// Swap the slug below to point at a different repo. The query\n"
-        "// returns one row per edge so you can see the kind explicitly.\n"
-        "MATCH (n:Repo {full_name: 'sdsc-ordes/gimie'})\n"
+        "body": "// Swap the URL below to point at a different repo. Node ids are\n"
+        "// the canonical public URL (crawler >=2.0), not the bare owner/repo.\n"
+        "MATCH (n:Repo {full_name: 'https://github.com/sdsc-ordes/gimie'})\n"
         "OPTIONAL MATCH (n)-[r]-(m)\n"
         "RETURN type(r) AS rel,\n"
         "       startNode(r) = n AS outgoing,\n"
@@ -587,8 +621,9 @@ CYPHER: list[dict[str, str]] = [
         "id": "cypher-user-profile",
         "name": "Profile a user",
         "summary": "All repos a user owns AND contributes to, plus their org memberships.",
-        "body": "// Replace 'cmdoret' below with the login you want to inspect.\n"
-        "MATCH (u:User {login: 'cmdoret'})\n"
+        "body": "// Replace the URL below with the user you want to inspect.\n"
+        "// Node ids are canonical URLs (https://github.com/<login>).\n"
+        "MATCH (u:User {login: 'https://github.com/cmdoret'})\n"
         "OPTIONAL MATCH (u)-[:OWNS]->(o:Repo)\n"
         "OPTIONAL MATCH (u)-[:CONTRIBUTES_TO]->(c:Repo)\n"
         "OPTIONAL MATCH (u)-[:MEMBER_OF]->(g:Org)\n"
@@ -603,7 +638,8 @@ CYPHER: list[dict[str, str]] = [
         "summary": "Users contributing to repos in both EPFL-themed orgs at once.",
         "body": "// Set ``orgA`` and ``orgB`` to the two communities you want to\n"
         "// intersect; returns users active in repos from both.\n"
-        "WITH 'sdsc-ordes' AS orgA, 'SwissDataScienceCenter' AS orgB\n"
+        "WITH 'https://github.com/sdsc-ordes' AS orgA,\n"
+        "     'https://github.com/SwissDataScienceCenter' AS orgB\n"
         "MATCH (a:Org {login: orgA})-[:OWNS]->(ra:Repo)<-[:CONTRIBUTES_TO]-(u:User)\n"
         "MATCH (b:Org {login: orgB})-[:OWNS]->(rb:Repo)<-[:CONTRIBUTES_TO]-(u)\n"
         "RETURN u.login AS login, u.name AS name,\n"
@@ -618,7 +654,7 @@ CYPHER: list[dict[str, str]] = [
         "summary": "Walk both directions of FORK_OF from a chosen repo.",
         "body": "// Inbound = repos that forked the seed; outbound = the seed's own\n"
         "// upstream. Replace the seed below.\n"
-        "MATCH (seed:Repo {full_name: 'sdsc-ordes/gimie'})\n"
+        "MATCH (seed:Repo {full_name: 'https://github.com/sdsc-ordes/gimie'})\n"
         "OPTIONAL MATCH (down:Repo)-[:FORK_OF]->(seed)\n"
         "OPTIONAL MATCH (seed)-[:FORK_OF]->(up:Repo)\n"
         "RETURN seed.full_name AS seed,\n"
@@ -644,7 +680,7 @@ CYPHER: list[dict[str, str]] = [
         "body": "// Swap the login below. Returns the listed members; might be\n"
         "// smaller than the active-contributor set since not every user\n"
         "// announces their org membership publicly.\n"
-        "MATCH (u:User)-[:MEMBER_OF]->(o:Org {login: 'sdsc-ordes'})\n"
+        "MATCH (u:User)-[:MEMBER_OF]->(o:Org {login: 'https://github.com/sdsc-ordes'})\n"
         "RETURN u.login AS login, u.name AS name\n"
         "ORDER BY login\n"
         "LIMIT 50",
