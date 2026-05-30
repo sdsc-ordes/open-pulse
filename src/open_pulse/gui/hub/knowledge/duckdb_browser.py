@@ -473,6 +473,17 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
         "users",
     ),
+    # Renkulab membership joins — who belongs to which group / project.
+    # Surfaced directly (like the other N:M join tables) so the row
+    # browser can answer "members of group X" / "members of project Y".
+    "renkulab_group_members": (
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
+        "group_members",
+    ),
+    "renkulab_project_members": (
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
+        "project_members",
+    ),
     # ROR — same ``records`` table for every regional flavour; the
     # per-tile WHERE clause that turns ``ror_switzerland`` into the
     # 1.8k-row Swiss subset lives in ``_AUTO_FILTERS`` below.
@@ -542,6 +553,23 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
     "swissubase_institutions": (
         _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
         "institutions",
+    ),
+    # SwissUBase ``datasets`` is the per-study data-file inventory (the
+    # studies are the headline records; datasets are their deposited
+    # resources). ``study_persons`` / ``study_institutions`` are the N:M
+    # joins the comment above refers to — surfaced directly so the row
+    # browser can answer "which persons/institutions back study X".
+    "swissubase_datasets": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "datasets",
+    ),
+    "swissubase_study_persons": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "study_persons",
+    ),
+    "swissubase_study_institutions": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "study_institutions",
     ),
     # Zenodo — ``zenodo_records`` is hand-tuned in ``_BACKING`` above
     # (it joins ``record_communities`` to expose a per-record community
@@ -662,6 +690,7 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "swissubase_institutions": (
         "FORS", "Lausanne", "Bern", "Switzerland",
     ),
+    "swissubase_datasets": ("survey", "data", "wave", "panel"),
     # Zenodo
     "zenodo_records": ("dataset", "epfl", "10.5281", "machine learning"),
     "zenodo_communities": ("epfl", "swiss", "open", "research"),
