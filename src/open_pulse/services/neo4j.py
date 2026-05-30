@@ -224,28 +224,72 @@ def _gh_url(value: str | None) -> str:
     return value if value.startswith("https://") else _GH_URL_PREFIX + value
 
 
+# Canonical platform name per known host. The crawler ≥3.0 stamps a
+# ``platform`` field on every node it returns; this map is the fallback for
+# nodes that arrive without one (older payloads, or edge-only stub nodes
+# whose platform we can still infer from the URL host).
+_HOST_PLATFORM = {
+    "github.com": "github",
+    "gitlab.com": "gitlab",
+    "huggingface.co": "huggingface",
+    "zenodo.org": "zenodo",
+    "infoscience.epfl.ch": "infoscience",
+    "orcid.org": "orcid",
+    "ror.org": "ror",
+}
+
+
+def _platform_of(url: str) -> str:
+    """Best-effort platform name for a node, derived from its URL host.
+
+    Used as a fallback when the crawler node carries no ``platform`` field.
+    Returns the mapped name for known hosts (``github.com`` → ``github``),
+    or the bare host for anything else (e.g. ``gitlab.epfl.ch``), or ``""``
+    when the URL has no parseable host.
+    """
+    if not url:
+        return ""
+    from urllib.parse import urlparse
+
+    host = urlparse(url).netloc.lower()
+    if not host:
+        return ""
+    return _HOST_PLATFORM.get(host, host)
+
+
 # -- Row builders -------------------------------------------------------------
 
 
 def _user_row(key: str, u: dict[str, Any]) -> dict[str, Any]:
+    url = _gh_url(u.get("url") or key)
     return {
         # Prefer the node's own canonical ``url`` (crawler ≥2.0); fall back
         # to URL-ifying the dict key for older bare-login-keyed output.
-        "login": _gh_url(u.get("url") or key),
+        "login": url,
         "name": u.get("name", "") or "",
         "id": u.get("id", 0) or 0,
         "type": u.get("type", "User"),
+        # Multi-platform discriminators (crawler ≥3.0). ``subkind`` is the
+        # concrete node class (GitHubUser / ZenodoUser / HuggingFaceUser /
+        # InfosciencePerson / …); ``platform`` the source platform. Both are
+        # kept as properties so a single ``:User`` label still carries the
+        # platform-specific identity for queries + reconciliation downstream.
+        "subkind": u.get("subkind") or "",
+        "platform": u.get("platform") or _platform_of(url),
         "is_explored": bool(u.get("is_explored", False)),
         "exploration_timestamp": u.get("exploration_timestamp"),
     }
 
 
 def _org_row(key: str, o: dict[str, Any]) -> dict[str, Any]:
+    url = _gh_url(o.get("url") or key)
     return {
-        "login": _gh_url(o.get("url") or key),
+        "login": url,
         "name": o.get("name", "") or "",
         "id": o.get("id", 0) or 0,
         "type": o.get("type", "Organization"),
+        "subkind": o.get("subkind") or "",
+        "platform": o.get("platform") or _platform_of(url),
         "is_explored": bool(o.get("is_explored", False)),
         "exploration_timestamp": o.get("exploration_timestamp"),
     }
@@ -269,6 +313,12 @@ def _repo_row(key: str, r: dict[str, Any]) -> dict[str, Any]:
         "id": r.get("id", 0) or 0,
         "type": r.get("type", "Repository"),
         "owner": owner,
+        # GitHubRepository / ZenodoRecord / InfoscienceItem / HuggingFaceRepo
+        # / DataCiteWork / … all subclass RepoModel and so land in the
+        # ``repos`` dict → a single ``:Repo`` label. ``subkind`` / ``platform``
+        # preserve which concrete kind + platform each one is.
+        "subkind": r.get("subkind") or "",
+        "platform": r.get("platform") or _platform_of(full_name),
         "is_explored": bool(r.get("is_explored", False)),
         "exploration_timestamp": r.get("exploration_timestamp"),
     }
@@ -369,6 +419,8 @@ def _merge_users(tx: Any, rows: list[dict[str, Any]]) -> None:
         SET n.name = row.name,
             n.id = row.id,
             n.type = row.type,
+            n.subkind = row.subkind,
+            n.platform = row.platform,
             n.is_explored = row.is_explored,
             n.exploration_timestamp = row.exploration_timestamp
         """,
@@ -386,6 +438,8 @@ def _merge_orgs(tx: Any, rows: list[dict[str, Any]]) -> None:
         SET n.name = row.name,
             n.id = row.id,
             n.type = row.type,
+            n.subkind = row.subkind,
+            n.platform = row.platform,
             n.is_explored = row.is_explored,
             n.exploration_timestamp = row.exploration_timestamp
         """,
@@ -404,6 +458,8 @@ def _merge_repos(tx: Any, rows: list[dict[str, Any]]) -> None:
             n.id = row.id,
             n.type = row.type,
             n.owner = row.owner,
+            n.subkind = row.subkind,
+            n.platform = row.platform,
             n.is_explored = row.is_explored,
             n.exploration_timestamp = row.exploration_timestamp
         """,
