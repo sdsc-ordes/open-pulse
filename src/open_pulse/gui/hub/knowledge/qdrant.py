@@ -850,11 +850,18 @@ _BACKLINK_URL_FIELDS = (
 # Keyed by collection name, falls back to "" (no tag rendered).
 _SOURCE_TYPE_BY_COLLECTION: dict[str, str] = {
     "github_repos": "GitHub",
+    "github_users": "GitHub",
+    "github_organizations": "GitHub",
     "zenodo_records": "Zenodo",
+    "communities": "Zenodo",
     "hf_models": "HuggingFace",
     "hf_datasets": "HuggingFace",
     "hf_spaces": "HuggingFace",
     "hf_orgs": "HuggingFace",
+    "huggingface_models": "HuggingFace",
+    "huggingface_datasets": "HuggingFace",
+    "huggingface_spaces": "HuggingFace",
+    "huggingface_organizations": "HuggingFace",
     "ror_worldwide": "ROR",
     "ror_europe": "ROR",
     "ror_switzerland": "ROR",
