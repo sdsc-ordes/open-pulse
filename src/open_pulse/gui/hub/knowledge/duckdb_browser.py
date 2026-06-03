@@ -79,9 +79,9 @@ _DATA_ROOT = Path(os.environ.get("HUB_DATA_DIR_HOST", "/data"))
 
 _BACKING: dict[str, Backing] = {
     "github_repos": Backing(
-        db_path=_DATA_ROOT / "index/github/duckdb/github.duckdb",
+        db_path=_DATA_ROOT / "index/github_repos/duckdb/github_repos.duckdb",
         table="repos",
-        hidden_cols=("languages", "topics", "raw"),
+        hidden_cols=(),
         stats=(
             Stat("Total repositories", "SELECT COUNT(*) FROM repos"),
             Stat("Distinct owners", "SELECT COUNT(DISTINCT owner) FROM repos"),
@@ -296,6 +296,33 @@ _BACKING: dict[str, Backing] = {
 # across regional Qdrant collections; we point each to the full table
 # and let the search bar narrow it.
 _AUTO_TABLES: dict[str, tuple[Path, str]] = {
+    # GitHub split stores — people + orgs of the crawled ecosystem.
+    # (``github_repos`` has a hand-tuned Backing above.)
+    "github_users": (
+        _DATA_ROOT / "index/github_users/duckdb/github_users.duckdb",
+        "users",
+    ),
+    "github_organizations": (
+        _DATA_ROOT / "index/github_organizations/duckdb/github_organizations.duckdb",
+        "organizations",
+    ),
+    # Split HuggingFace stores (GME 3.0.0rc1 layout) — browsable row tables.
+    "huggingface_models": (
+        _DATA_ROOT / "index/huggingface_models/duckdb/huggingface_models.duckdb",
+        "models",
+    ),
+    "huggingface_datasets": (
+        _DATA_ROOT / "index/huggingface_datasets/duckdb/huggingface_datasets.duckdb",
+        "datasets",
+    ),
+    "huggingface_organizations": (
+        _DATA_ROOT / "index/huggingface_organizations/duckdb/huggingface_organizations.duckdb",
+        "organizations",
+    ),
+    "huggingface_spaces": (
+        _DATA_ROOT / "index/huggingface_spaces/duckdb/huggingface_spaces.duckdb",
+        "spaces",
+    ),
     # OpenAlex — shared by the generic "authors" / "concepts" / ...
     "authors": (
         _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
@@ -847,6 +874,29 @@ _AUTO_FILTERS: dict[str, str] = {
 }
 
 
+# Cross-table links: ``{source_collection: {column: target_collection}}``.
+# When a row in ``source_collection`` is rendered, cells in ``column`` become
+# clickable links to ``/hub/c/<target_collection>?q=<cell value>`` — i.e. they
+# jump to the target table with that value pre-filled in its search box. The
+# value must match one of the target collection's ``search_cols`` for the
+# pre-filter to land. Exposed to the row browser via ``list_rows`` → meta.
+_CROSS_LINKS: dict[str, dict[str, str]] = {
+    # Zenodo record → its community: click the community id, land on the
+    # communities table filtered to that community.
+    "zenodo_records": {
+        "primary_community_id": "communities",
+    },
+    # GitHub repo → its owner's people/org page in the index.
+    "github_repos": {
+        "owner": "github_users",
+    },
+    # GitHub org → the repos it owns (search github_repos by owner login).
+    "github_organizations": {
+        "login": "github_repos",
+    },
+}
+
+
 def _build_auto_backing(collection: str) -> Backing | None:
     """Construct a ``Backing`` for ``collection`` by sniffing the DuckDB schema.
 
@@ -1195,9 +1245,12 @@ def _resolve_visible_cols(
         all_cols = [d[0] for d in (cur.description or [])]
     else:
         all_cols = [c[0] for c in con.execute(f'DESCRIBE "{b.table}"').fetchall()]
-    visible = [c for c in all_cols if c not in b.hidden_cols]
-    if not visible:
-        visible = all_cols
+    # Reflect ALL columns in the row browser (the row tables carry no
+    # high-dimensional vector columns — embeddings live in Qdrant / the
+    # ``chunks`` table — so showing every column is safe and is what the
+    # browser is expected to surface). ``hidden_cols`` is kept on the
+    # Backing for other consumers but no longer drops columns from view.
+    visible = list(all_cols)
     return all_cols, visible
 
 
@@ -1266,6 +1319,7 @@ def list_rows(
         "columns": visible_cols,
         "all_columns": all_cols,
         "hidden": list(b.hidden_cols),
+        "cross_links": _CROSS_LINKS.get(collection, {}),
         "rows": rows_out,
         "page": page,
         "size": size,

@@ -145,11 +145,19 @@ def _logo_for_host(host: str) -> str:
 # the raw qdrant names are uppercase-y / under-scored.
 _COLLECTION_LABELS: dict[str, tuple[str, str]] = {
     "github_repos": ("GitHub repositories", "github.com"),
+    "github_users": ("GitHub users", "github.com"),
+    "github_organizations": ("GitHub organizations", "github.com"),
     "zenodo_records": ("Zenodo records", "zenodo.org"),
+    "communities": ("Zenodo communities", "zenodo.org"),
     "hf_models": ("HuggingFace models", "huggingface.co"),
     "hf_datasets": ("HuggingFace datasets", "huggingface.co"),
     "hf_spaces": ("HuggingFace spaces", "huggingface.co"),
     "hf_orgs": ("HuggingFace organizations", "huggingface.co"),
+    # Split HuggingFace stores (GME 3.0.0rc1 layout) — same brand, new names.
+    "huggingface_models": ("HuggingFace models", "huggingface.co"),
+    "huggingface_datasets": ("HuggingFace datasets", "huggingface.co"),
+    "huggingface_spaces": ("HuggingFace spaces", "huggingface.co"),
+    "huggingface_organizations": ("HuggingFace organizations", "huggingface.co"),
     "ror_worldwide": ("ROR organizations (world)", "ror.org"),
     "ror_europe": ("ROR organizations (Europe)", "ror.org"),
     "ror_switzerland": ("ROR organizations (CH)", "ror.org"),
@@ -324,8 +332,11 @@ def hub_top_stats(request: Request, topic: str) -> HTMLResponse:
     response_class=HTMLResponse,
     dependencies=[Depends(maybe_require_auth)],
 )
-def hub_collection(request: Request, name: str) -> HTMLResponse:
+def hub_collection(request: Request, name: str, q: str = "") -> HTMLResponse:
     """Collection landing page — label, count, and sample entries.
+
+    ``q`` pre-fills the row browser's search box (used by cross-table links
+    that jump here from another collection with a value to filter on).
 
     Each sample resolves to a hub URL the visitor can click straight
     into. Declared BEFORE the catch-all ``/hub/{ref:path}`` so the
@@ -371,6 +382,7 @@ def hub_collection(request: Request, name: str) -> HTMLResponse:
         {
             "page": "hub",
             "collection_name": name,
+            "initial_q": q,
             "label": label,
             "host": host,
             "count": count,
