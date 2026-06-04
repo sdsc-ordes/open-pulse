@@ -18,10 +18,17 @@ services:
   valkey:
     image: valkey/valkey:8
     restart: unless-stopped
+    # SortingHat (server + worker) authenticate with SORTINGHAT_REDIS_PASSWORD,
+    # so Valkey must require that same password — otherwise the worker's AUTH is
+    # rejected ("AUTH called without any password configured"), it crash-loops,
+    # and Mordred's identities/enrichment phase stalls.
+    command: ["valkey-server", "--requirepass", "${SORTINGHAT_REDIS_PASSWORD:-replace-me}"]
     expose:
       - "6379"
     healthcheck:
-      test: ["CMD", "valkey-cli", "--raw", "incr", "ping"]
+      # Must authenticate now that requirepass is set, else the healthcheck fails
+      # and sortinghat_worker's `depends_on: service_healthy` never releases.
+      test: ["CMD", "valkey-cli", "-a", "${SORTINGHAT_REDIS_PASSWORD:-replace-me}", "--no-auth-warning", "--raw", "incr", "ping"]
       retries: 5
     volumes:
       - ${GRIMOIRE_DATA_DIR:-${OPEN_PULSE_DATA_DIR:-./data}/grimoirelab}/valkey:/data
