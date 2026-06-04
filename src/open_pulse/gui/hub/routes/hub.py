@@ -21,7 +21,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -218,26 +220,81 @@ _COLLECTION_LABELS: dict[str, tuple[str, str]] = {
 _STATS_CACHE: dict[str, object] = {"at": 0.0, "rows": []}
 _STATS_TTL_SECONDS = 60.0
 
+# Coalesce concurrent recomputes of the collection stats. The home page
+# now lazy-loads the Sources grid, so a single page view fires the shell
+# GET /hub *and* the fragment GET /api/hub/collections; on a cold or
+# TTL-expired cache, both would otherwise run the full count gather at
+# once. The lock makes the losers wait and pick up the winner's freshly
+# cached rows instead of duplicating the serial DuckDB/Qdrant scan.
+_STATS_REFRESH_LOCK = threading.Lock()
+# Thread-pool width for the per-collection count fan-out below. Mirrors
+# the autocomplete scroll pool in qdrant.py.
+_STATS_COUNT_WORKERS = 8
 
-def _collection_stats() -> list[dict[str, object]]:
+
+def _cached_collection_stats() -> list[dict[str, object]] | None:
+    """Return the memoised rows if still within the TTL, else ``None``."""
     now = time.monotonic()
     if now - float(_STATS_CACHE["at"]) < _STATS_TTL_SECONDS and _STATS_CACHE["rows"]:
         return list(_STATS_CACHE["rows"])  # type: ignore[arg-type]
+    return None
 
+
+def _collection_stats() -> list[dict[str, object]]:
+    # Fast path: serve memoised rows without taking the refresh lock.
+    cached = _cached_collection_stats()
+    if cached is not None:
+        return cached
+
+    # Slow path: single-flight. Only one thread runs the gather; the rest
+    # block on the lock, then return the now-fresh cache on the re-check.
+    with _STATS_REFRESH_LOCK:
+        cached = _cached_collection_stats()
+        if cached is not None:
+            return cached
+        rows = _compute_collection_stats()
+        _STATS_CACHE["at"] = time.monotonic()
+        _STATS_CACHE["rows"] = rows
+        return list(rows)
+
+
+def _compute_collection_stats() -> list[dict[str, object]]:
+    """Gather per-collection counts + presentation metadata (uncached).
+
+    The per-collection counts are the expensive bit — a cold DuckDB
+    ``COUNT(*)`` (some over joins / filtered scans) or a Qdrant
+    ``/points/count`` fallback. They're independent and I/O-bound, so we
+    fan them out across a small thread pool (mirroring the autocomplete /
+    backlinks scrolls in ``qdrant.py``) rather than summing them serially.
+    Each DuckDB count opens its own read-only connection and runs a plain
+    ``COUNT(*)``, so concurrent reads are safe.
+    """
     names = qdrant.list_collections()
+
+    def _count_for(name: str) -> int | None:
+        # Prefer the source-of-truth DuckDB row count over Qdrant
+        # ``count_points`` when the collection has a registered backing.
+        # Qdrant points include text chunks (a single repo with a long
+        # README becomes 3+ points), which inflates the tile number 3-4×
+        # and confuses visitors who then click into the row browser and
+        # see a smaller table. Collections with no DuckDB backing fall
+        # back to the Qdrant count as before.
+        ddb_count = duckdb_browser.row_count_for(name)
+        if ddb_count is not None:
+            return ddb_count
+        return qdrant.count_points(name)
+
+    counts: list[int | None] = []
+    if names:
+        with ThreadPoolExecutor(
+            max_workers=min(_STATS_COUNT_WORKERS, len(names))
+        ) as pool:
+            counts = list(pool.map(_count_for, names))
+
     rows: list[dict[str, object]] = []
-    for name in names:
+    for name, count in zip(names, counts):
         label, host = _COLLECTION_LABELS.get(name, (name, ""))
         meta = _SOURCE_METADATA.get(host, {})
-        # Prefer the source-of-truth DuckDB row count over Qdrant
-        # ``count_points`` when the collection has a registered
-        # backing. Qdrant points include text chunks (a single repo
-        # with a long README becomes 3+ points), which inflates the
-        # tile number 3-4× and confuses visitors who then click into
-        # the row browser and see a smaller table. Collections with
-        # no DuckDB backing fall back to the Qdrant count as before.
-        ddb_count = duckdb_browser.row_count_for(name)
-        count = ddb_count if ddb_count is not None else qdrant.count_points(name)
         rows.append(
             {
                 "name": name,
@@ -269,10 +326,13 @@ def _collection_stats() -> list[dict[str, object]]:
     # Heat-tier per tile: bucket the per-collection counts by their
     # log10 position relative to the deployment's largest collection.
     # Tiles get t1 (coldest, near-empty) → t4 (hottest, top decile).
+    # Computed across the whole set (needs the global max), which is why
+    # the lazy fragment renders all tiles in one server-side pass rather
+    # than fanning out one fetch per tile.
     import math
 
-    counts = [int(r["count"] or 0) for r in rows if r.get("count")]
-    log_max = math.log10(max(counts) + 1) if counts else 1.0
+    present = [int(r["count"] or 0) for r in rows if r.get("count")]
+    log_max = math.log10(max(present) + 1) if present else 1.0
     for r in rows:
         c = int(r["count"] or 0)
         frac = math.log10(c + 1) / log_max if log_max > 0 else 0.0
@@ -288,9 +348,7 @@ def _collection_stats() -> list[dict[str, object]]:
         else:
             r["heat_tier"] = 1
 
-    _STATS_CACHE["at"] = now
-    _STATS_CACHE["rows"] = rows
-    return list(rows)
+    return rows
 
 
 @router.get(
@@ -487,15 +545,42 @@ def hub_collection_stats(name: str) -> dict[str, Any]:
     dependencies=[Depends(maybe_require_auth)],
 )
 def hub_home(request: Request) -> HTMLResponse:
-    """Front-door for the knowledge surface — search + examples + stats."""
+    """Front-door for the knowledge surface — search + examples + stats.
+
+    The shell (search box + examples + lazy stat panels) renders
+    immediately. The Sources grid — whose per-collection counts can be
+    multi-second DuckDB ``COUNT(*)`` scans on a cold cache — is fetched
+    afterwards from :func:`hub_collections` so the page paints without
+    blocking on the count gather.
+    """
     return templates.TemplateResponse(
         request,
         "hub/home.html",
         {
             "page": "hub",
             "examples": _HOME_EXAMPLES,
-            "collections": _collection_stats(),
         },
+    )
+
+
+@router.get(
+    "/api/hub/collections",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_collections(request: Request) -> HTMLResponse:
+    """Render the Sources grid as a standalone fragment.
+
+    Fetched lazily by the hub home after first paint. Returns the whole
+    ranked tile set in one response (the heat-tier math needs the global
+    max across all collections), or the "Qdrant unreachable" warn card
+    when the count gather came back empty. Counts are memoised for
+    ``_STATS_TTL_SECONDS`` so repeat hits are sub-100 ms.
+    """
+    return templates.TemplateResponse(
+        request,
+        "hub/_sources_body.html",
+        {"collections": _collection_stats()},
     )
 
 
