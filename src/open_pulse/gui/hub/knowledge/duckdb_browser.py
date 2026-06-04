@@ -79,9 +79,9 @@ _DATA_ROOT = Path(os.environ.get("HUB_DATA_DIR_HOST", "/data"))
 
 _BACKING: dict[str, Backing] = {
     "github_repos": Backing(
-        db_path=_DATA_ROOT / "index/github/duckdb/github.duckdb",
+        db_path=_DATA_ROOT / "index/github_repos/duckdb/github_repos.duckdb",
         table="repos",
-        hidden_cols=("languages", "topics", "raw"),
+        hidden_cols=(),
         stats=(
             Stat("Total repositories", "SELECT COUNT(*) FROM repos"),
             Stat("Distinct owners", "SELECT COUNT(DISTINCT owner) FROM repos"),
@@ -296,6 +296,33 @@ _BACKING: dict[str, Backing] = {
 # across regional Qdrant collections; we point each to the full table
 # and let the search bar narrow it.
 _AUTO_TABLES: dict[str, tuple[Path, str]] = {
+    # GitHub split stores — people + orgs of the crawled ecosystem.
+    # (``github_repos`` has a hand-tuned Backing above.)
+    "github_users": (
+        _DATA_ROOT / "index/github_users/duckdb/github_users.duckdb",
+        "users",
+    ),
+    "github_organizations": (
+        _DATA_ROOT / "index/github_organizations/duckdb/github_organizations.duckdb",
+        "organizations",
+    ),
+    # Split HuggingFace stores (GME 3.0.0rc1 layout) — browsable row tables.
+    "huggingface_models": (
+        _DATA_ROOT / "index/huggingface_models/duckdb/huggingface_models.duckdb",
+        "models",
+    ),
+    "huggingface_datasets": (
+        _DATA_ROOT / "index/huggingface_datasets/duckdb/huggingface_datasets.duckdb",
+        "datasets",
+    ),
+    "huggingface_organizations": (
+        _DATA_ROOT / "index/huggingface_organizations/duckdb/huggingface_organizations.duckdb",
+        "organizations",
+    ),
+    "huggingface_spaces": (
+        _DATA_ROOT / "index/huggingface_spaces/duckdb/huggingface_spaces.duckdb",
+        "spaces",
+    ),
     # OpenAlex — shared by the generic "authors" / "concepts" / ...
     "authors": (
         _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
@@ -473,6 +500,17 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
         "users",
     ),
+    # Renkulab membership joins — who belongs to which group / project.
+    # Surfaced directly (like the other N:M join tables) so the row
+    # browser can answer "members of group X" / "members of project Y".
+    "renkulab_group_members": (
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
+        "group_members",
+    ),
+    "renkulab_project_members": (
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
+        "project_members",
+    ),
     # ROR — same ``records`` table for every regional flavour; the
     # per-tile WHERE clause that turns ``ror_switzerland`` into the
     # 1.8k-row Swiss subset lives in ``_AUTO_FILTERS`` below.
@@ -542,6 +580,23 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
     "swissubase_institutions": (
         _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
         "institutions",
+    ),
+    # SwissUBase ``datasets`` is the per-study data-file inventory (the
+    # studies are the headline records; datasets are their deposited
+    # resources). ``study_persons`` / ``study_institutions`` are the N:M
+    # joins the comment above refers to — surfaced directly so the row
+    # browser can answer "which persons/institutions back study X".
+    "swissubase_datasets": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "datasets",
+    ),
+    "swissubase_study_persons": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "study_persons",
+    ),
+    "swissubase_study_institutions": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "study_institutions",
     ),
     # Zenodo — ``zenodo_records`` is hand-tuned in ``_BACKING`` above
     # (it joins ``record_communities`` to expose a per-record community
@@ -662,6 +717,7 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "swissubase_institutions": (
         "FORS", "Lausanne", "Bern", "Switzerland",
     ),
+    "swissubase_datasets": ("survey", "data", "wave", "panel"),
     # Zenodo
     "zenodo_records": ("dataset", "epfl", "10.5281", "machine learning"),
     "zenodo_communities": ("epfl", "swiss", "open", "research"),
@@ -818,6 +874,29 @@ _AUTO_FILTERS: dict[str, str] = {
 }
 
 
+# Cross-table links: ``{source_collection: {column: target_collection}}``.
+# When a row in ``source_collection`` is rendered, cells in ``column`` become
+# clickable links to ``/hub/c/<target_collection>?q=<cell value>`` — i.e. they
+# jump to the target table with that value pre-filled in its search box. The
+# value must match one of the target collection's ``search_cols`` for the
+# pre-filter to land. Exposed to the row browser via ``list_rows`` → meta.
+_CROSS_LINKS: dict[str, dict[str, str]] = {
+    # Zenodo record → its community: click the community id, land on the
+    # communities table filtered to that community.
+    "zenodo_records": {
+        "primary_community_id": "communities",
+    },
+    # GitHub repo → its owner's people/org page in the index.
+    "github_repos": {
+        "owner": "github_users",
+    },
+    # GitHub org → the repos it owns (search github_repos by owner login).
+    "github_organizations": {
+        "login": "github_repos",
+    },
+}
+
+
 def _build_auto_backing(collection: str) -> Backing | None:
     """Construct a ``Backing`` for ``collection`` by sniffing the DuckDB schema.
 
@@ -965,6 +1044,28 @@ def row_count_for(collection: str) -> int | None:
         return None
 
 
+def fresh_row_count(collection: str) -> int | None:
+    """Uncached row count for a browsable collection.
+
+    Same backing resolution as :func:`row_count_for` — including the
+    ``.ro.duckdb`` snapshot preference and any ``select_sql`` filter — but
+    bypasses ``_COUNT_CACHE`` and re-runs ``COUNT(*)`` on every call. Used
+    by callers that sample the same collection over time (the overview's
+    60s growth chart), where the process-lifetime cache would otherwise
+    freeze the series at its first reading.
+    """
+    b = _BACKING.get(collection)
+    if b is None:
+        return None
+    try:
+        with _connect(b.db_path) as con:
+            n = con.execute(f"SELECT COUNT(*) FROM {_source_expr(b)}").fetchone()[0]
+        return int(n)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("fresh_row_count(%s) failed: %s", collection, exc)
+        return None
+
+
 def _json_safe(v: Any) -> Any:
     """Coerce a DuckDB cell value into something the JSON encoder can handle.
 
@@ -984,10 +1085,27 @@ def _json_safe(v: Any) -> Any:
     return str(v)
 
 
+def _snapshot_path(db_path: Path) -> Path:
+    """The GME-published read-only snapshot beside a live store.
+
+    ``…/openalex.duckdb`` → ``…/openalex.ro.duckdb`` (see
+    ``src/index/_snapshot.py`` in the git-metadata-extractor).
+    """
+    return db_path.with_name(db_path.stem + ".ro.duckdb")
+
+
 def _connect(db_path: Path) -> duckdb.DuckDBPyConnection:
-    if not db_path.is_file():
-        raise FileNotFoundError(f"DuckDB file missing: {db_path}")
-    return duckdb.connect(str(db_path), read_only=True)
+    # Prefer the GME-published read-only snapshot. The live ``.duckdb`` is
+    # held read-WRITE by the extractor, so opening it read-only from here
+    # fails with "Conflicting lock is held" (DuckDB allows N readers OR 1
+    # writer). The ``.ro.duckdb`` snapshot is a separate file the GME
+    # refreshes after each ingest — no contention. Fall back to the live
+    # file when no snapshot exists yet (fresh deploy / un-snapshotted store).
+    ro_path = _snapshot_path(db_path)
+    target = ro_path if ro_path.is_file() else db_path
+    if not target.is_file():
+        raise FileNotFoundError(f"DuckDB file missing: {target}")
+    return duckdb.connect(str(target), read_only=True)
 
 
 def _source_expr(b: Backing) -> str:
@@ -1149,9 +1267,12 @@ def _resolve_visible_cols(
         all_cols = [d[0] for d in (cur.description or [])]
     else:
         all_cols = [c[0] for c in con.execute(f'DESCRIBE "{b.table}"').fetchall()]
-    visible = [c for c in all_cols if c not in b.hidden_cols]
-    if not visible:
-        visible = all_cols
+    # Reflect ALL columns in the row browser (the row tables carry no
+    # high-dimensional vector columns — embeddings live in Qdrant / the
+    # ``chunks`` table — so showing every column is safe and is what the
+    # browser is expected to surface). ``hidden_cols`` is kept on the
+    # Backing for other consumers but no longer drops columns from view.
+    visible = list(all_cols)
     return all_cols, visible
 
 
@@ -1220,6 +1341,7 @@ def list_rows(
         "columns": visible_cols,
         "all_columns": all_cols,
         "hidden": list(b.hidden_cols),
+        "cross_links": _CROSS_LINKS.get(collection, {}),
         "rows": rows_out,
         "page": page,
         "size": size,
