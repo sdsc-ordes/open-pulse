@@ -1044,6 +1044,28 @@ def row_count_for(collection: str) -> int | None:
         return None
 
 
+def fresh_row_count(collection: str) -> int | None:
+    """Uncached row count for a browsable collection.
+
+    Same backing resolution as :func:`row_count_for` — including the
+    ``.ro.duckdb`` snapshot preference and any ``select_sql`` filter — but
+    bypasses ``_COUNT_CACHE`` and re-runs ``COUNT(*)`` on every call. Used
+    by callers that sample the same collection over time (the overview's
+    60s growth chart), where the process-lifetime cache would otherwise
+    freeze the series at its first reading.
+    """
+    b = _BACKING.get(collection)
+    if b is None:
+        return None
+    try:
+        with _connect(b.db_path) as con:
+            n = con.execute(f"SELECT COUNT(*) FROM {_source_expr(b)}").fetchone()[0]
+        return int(n)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("fresh_row_count(%s) failed: %s", collection, exc)
+        return None
+
+
 def _json_safe(v: Any) -> Any:
     """Coerce a DuckDB cell value into something the JSON encoder can handle.
 

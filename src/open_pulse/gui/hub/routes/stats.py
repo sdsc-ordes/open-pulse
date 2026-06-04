@@ -373,60 +373,46 @@ async def _opensearch_counts(client: httpx.AsyncClient) -> dict[str, int | None]
         return {"repos": repos, "users": users, "orgs": None}
 
 
-# Per-provider DuckDB files. Each provider keeps its catalog in its
-# own .duckdb under ``OPEN_PULSE_DATA_DIR/extractor/index/<name>/duckdb/``;
-# the hub mounts that read-only at ``/data/`` so we can open them from
-# the API process.
-_DUCKDB_PROBES: tuple[tuple[str, str, str], ...] = (
-    (
-        "github_repos",
-        "/data/extractor/index/github/duckdb/github.duckdb",
-        "SELECT COUNT(*) FROM repos",
-    ),
-    (
-        "zenodo_records",
-        "/data/extractor/index/zenodo/duckdb/zenodo.duckdb",
-        "SELECT COUNT(*) FROM records",
-    ),
-    (
-        # HF has datasets + models + spaces tables; the panel shows a
-        # single "huggingface" line, so we sum the three. Excluding
-        # ``orgs`` and ``chunks`` because the user-facing meaning is
-        # "published artifacts on HF" not "people / embedding chunks".
-        "huggingface_items",
-        "/data/extractor/index/huggingface/duckdb/huggingface.duckdb",
-        "SELECT "
-        "(SELECT COUNT(*) FROM datasets) + "
-        "(SELECT COUNT(*) FROM models) + "
-        "(SELECT COUNT(*) FROM spaces)",
-    ),
+# Per-provider DuckDB row counts surfaced on the overview marquee + chart.
+# These reuse the hub's ``duckdb_browser`` registry — the same source of
+# truth the /hub Sources tiles read — instead of hardcoding file paths.
+# That keeps the overview on the current GME layout (split stores under
+# ``/data/index/<name>/duckdb/``) rather than the stale, frozen
+# ``extractor/index/`` copies this used to read, and inherits the
+# ``.ro.duckdb`` snapshot preference (no writer-lock contention).
+#
+# HuggingFace is split across models / datasets / spaces stores in the
+# current layout, so we sum those published-artifact collections to match
+# the panel's single "HF" line — excluding orgs / people / chunks, whose
+# user-facing meaning isn't "published artifacts on HF".
+_HF_ITEM_COLLECTIONS: tuple[str, ...] = (
+    "huggingface_models",
+    "huggingface_datasets",
+    "huggingface_spaces",
 )
 
 
 def _duckdb_counts() -> dict[str, int | None]:
-    """Row counts from the three provider DuckDBs the Hub overview tracks.
+    """Row counts from the provider DuckDBs the Hub overview tracks.
 
     Sync because DuckDB's Python connector is sync; runs off the asyncio
     event loop via ``asyncio.to_thread`` in :func:`_gather` so a slow
     backing file doesn't block the marquee.
-    """
-    try:
-        import duckdb  # type: ignore[import-untyped]
-    except ImportError:
-        return {k: None for k, _, _ in _DUCKDB_PROBES}
 
-    out: dict[str, int | None] = {}
-    for name, path, query in _DUCKDB_PROBES:
-        try:
-            c = duckdb.connect(path, read_only=True)
-            try:
-                row = c.execute(query).fetchone()
-                out[name] = int(row[0]) if row else None
-            finally:
-                c.close()
-        except Exception:  # noqa: BLE001 — every backing is optional
-            out[name] = None
-    return out
+    Uses the *uncached* ``duckdb_browser.fresh_row_count`` so each 60s
+    sample re-reads the live count and the growth chart keeps moving —
+    the memoised ``row_count_for`` would freeze the series until restart.
+    """
+    from ..knowledge import duckdb_browser
+
+    hf_parts = [duckdb_browser.fresh_row_count(c) for c in _HF_ITEM_COLLECTIONS]
+    hf_known = [n for n in hf_parts if n is not None]
+
+    return {
+        "github_repos": duckdb_browser.fresh_row_count("github_repos"),
+        "zenodo_records": duckdb_browser.fresh_row_count("zenodo_records"),
+        "huggingface_items": sum(hf_known) if hf_known else None,
+    }
 
 
 async def _gather() -> dict[str, Any]:
