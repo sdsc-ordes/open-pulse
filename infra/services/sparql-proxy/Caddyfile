@@ -21,6 +21,15 @@
 }
 
 :7878 {
+	# ── Liveness probe ────────────────────────────────────────────────
+	# Public (no auth, no data): just confirms Caddy is up. Lets Docker's
+	# healthcheck succeed without exposing the auth-gated SPARQL surface.
+	# Matched by its own `handle` so it terminates before the read-auth /
+	# reverse-proxy directives below.
+	handle /healthz {
+		respond "ok" 200
+	}
+
 	# ── Static dashboard UI ───────────────────────────────────────────
 	# Single-page BYOK dashboard for talking to Open Pulse services.
 	# Mounted from infra/services/sparql-proxy/projects-ui in the host.
