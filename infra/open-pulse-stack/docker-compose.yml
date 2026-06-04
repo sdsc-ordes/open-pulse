@@ -341,7 +341,9 @@ services:
       - ${OPEN_PULSE_DATA_DIR:-./data}/sparql-proxy/data:/data
       - ${OPEN_PULSE_DATA_DIR:-./data}/sparql-proxy/config:/config
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ || exit 1"]
+      # Probe the public /healthz route (Caddyfile) — the SPARQL surface on
+      # `/` stays auth-gated, so hitting `/` here would 401 and false-fail.
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
