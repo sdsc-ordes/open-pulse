@@ -88,56 +88,18 @@
       <div class="card-title">Sources</div>
       <span class="card-meta">point counts from gme-qdrant · refreshed every minute</span>
     </div>
-    {% if not collections %}
-      <div class="card tone-warn">
-        <div class="card-title">Qdrant unreachable</div>
-        <p style="margin: 6px 0 0;">
-          The hub can't reach gme-qdrant right now. Bring up
-          <span class="kbd">--profile extractor</span> to start it.
-        </p>
+    {# Lazy-loaded so the per-collection DuckDB counts don't block the
+       first paint of the page. One fetch returns the whole ranked tile
+       set as a server-rendered fragment (the heat tiers need the global
+       max across all collections, so this can't be a per-tile fan-out).
+       Mirrors the hubTopPanel pattern used by the leaderboards below. #}
+    <div x-data="hubSources()" x-init="load()">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 10px;">
+        <span class="hub-spinner"></span>
+        <span class="card-meta">counting entries across sources…</span>
       </div>
-    {% else %}
-      <div class="grid-stats">
-        {% for c in collections %}
-          {% set tier = c.heat_tier if c.heat_tier is defined else 0 %}
-          {% set frac = c.fraction if c.fraction is defined else 0 %}
-          {# Wrapper holds two anchors as siblings: the main tile link
-             and a small ↗ to the source homepage positioned over it.
-             Browsers + screen readers don't permit anchors-inside-
-             anchors, hence the sibling pattern. #}
-          <div style="position: relative;">
-            <a class="card tone-info hub-tile t{{ tier }}"
-               href="/hub/c/{{ c.name }}"
-               title="{{ c.label }} · {{ c.description or c.name }} — click to explore"
-               aria-label="Explore {{ c.label }} ({{ '{:,}'.format(c.count) if c.count is not none else 'unknown' }} entries)">
-              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                {% if c.logo_url %}
-                  <img src="{{ c.logo_url }}" alt="" width="16" height="16"
-                       loading="lazy"
-                       style="border-radius: 3px; flex-shrink: 0;">
-                {% endif %}
-                <div class="card-title" style="margin: 0; flex: 1;">{{ c.label }}</div>
-              </div>
-              <div class="stat-value {% if c.count is none %}muted{% endif %}">
-                {% if c.count is none %}—{% else %}{{ '{:,}'.format(c.count) }}{% endif %}
-              </div>
-              <div class="card-meta mono" style="margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                {% if c.host %}{{ c.host }} · {% endif %}{{ c.name }}
-              </div>
-              <div class="hub-tile-heat t{{ tier }}"
-                   style="width: {{ (frac * 100) | round(1) }}%;"
-                   aria-hidden="true"></div>
-            </a>
-            {% if c.homepage %}
-              <a href="{{ c.homepage }}"
-                 target="_blank" rel="noopener"
-                 class="hub-tile-ext"
-                 title="Open {{ c.host }} in a new tab">↗</a>
-            {% endif %}
-          </div>
-        {% endfor %}
-      </div>
-    {% endif %}
+      <div x-show="!loading" x-html="html"></div>
+    </div>
   </div>
 
   {# ── Top across the network — leaderboards, after the source grid
@@ -250,6 +212,34 @@ function hubSearch() {
       const v = this.normalize(this.value);
       if (!v) return;
       window.location.href = '/hub/' + v;
+    },
+  };
+}
+
+// Lazy-loaded Sources grid. One fetch returns the whole ranked tile
+// set as a server-rendered fragment (the heat tiers need the global
+// max across all collections, so this is one call, not per-tile). The
+// fragment itself renders the 'Qdrant unreachable' warn card when the
+// gather came back empty; a failed fetch degrades to a retry hint.
+function hubSources() {
+  return {
+    loading: true,
+    html: '',
+    async load() {
+      try {
+        const r = await fetch('/api/hub/collections', { credentials: 'include' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        this.html = (await r.text()).trim();
+      } catch (e) {
+        console.warn('hub sources failed:', e);
+        this.html =
+          '<div class="card tone-warn">' +
+          '<div class="card-title">Couldn’t load sources</div>' +
+          '<p style="margin: 6px 0 0;">The source counts failed to load. ' +
+          'Refresh to retry.</p></div>';
+      } finally {
+        this.loading = false;
+      }
     },
   };
 }

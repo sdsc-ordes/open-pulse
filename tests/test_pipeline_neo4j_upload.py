@@ -216,9 +216,15 @@ def test_upload_emits_dependency_edges_in_both_directions(
     assert len(dep_calls) == 1, "expected exactly one dependency-edge write"
     rows = dep_calls[0].args[1]  # second positional arg after the tx fn
     pairs = sorted((r["consumer"], r["package"]) for r in rows)
+    # Endpoints are normalised to canonical GitHub URLs so they join the
+    # URL-keyed node set (and match the hub's ``_to_gh_url`` read side),
+    # even when the crawler payload still uses bare ``owner/repo`` shorthand
+    # in the edge lists. See ``_gh_url`` in ``services/neo4j.py``.
     assert pairs == [
-        ("downstream/app", "owner/lib"),  # from dependents[]
-        ("owner/lib", "other/utils"),  # from dependencies[]
+        # from dependents[]
+        ("https://github.com/downstream/app", "https://github.com/owner/lib"),
+        # from dependencies[]
+        ("https://github.com/owner/lib", "https://github.com/other/utils"),
     ]
 
 
@@ -288,3 +294,75 @@ def test_run_neo4j_upload_raises_when_file_missing(tmp_path: Path) -> None:
 def test_run_neo4j_upload_requires_services_context() -> None:
     with pytest.raises(RuntimeError, match="ServiceContainer"):
         run_neo4j_upload({"step_config": {}})
+
+
+def test_upload_preserves_subkind_and_platform() -> None:
+    """v3 multi-platform nodes keep their ``subkind`` + ``platform``.
+
+    A ZenodoRecord / InfoscienceItem / HuggingFaceRepo all subclass
+    RepoModel and so land in the ``repos`` dict under a single ``:Repo``
+    label; the discriminators must survive as node properties. ``platform``
+    falls back to the URL host when the crawler omits the field.
+    """
+    fake_session = MagicMock()
+    fake_session.__enter__.return_value = fake_session
+    fake_session.__exit__.return_value = False
+    fake_driver = MagicMock()
+    fake_driver.session.return_value = fake_session
+
+    svc = Neo4jService(endpoint="bolt://stub:7687")
+    svc._driver = fake_driver
+
+    graph = {
+        "users": {
+            "https://huggingface.co/julien-c": {
+                "url": "https://huggingface.co/julien-c",
+                "subkind": "HuggingFaceUser",
+                "platform": "huggingface",
+                "login": "julien-c",
+            },
+            # platform field omitted on purpose → derived from the URL host
+            "https://orcid.org/0000-0002-1234-5678": {
+                "url": "https://orcid.org/0000-0002-1234-5678",
+                "subkind": "DataCitePerson",
+            },
+        },
+        "orgs": {},
+        "repos": {
+            "https://zenodo.org/records/6494797": {
+                "url": "https://zenodo.org/records/6494797",
+                "subkind": "ZenodoRecord",
+                "platform": "zenodo",
+            },
+            "https://github.com/sdsc-ordes/gimie": {
+                "url": "https://github.com/sdsc-ordes/gimie",
+                "subkind": "GitHubRepository",
+                "platform": "github",
+            },
+        },
+    }
+    svc.upload(graph)
+
+    from open_pulse.services.neo4j import _merge_repos, _merge_users
+
+    def _rows(fn: Any) -> list[dict[str, Any]]:
+        calls = [
+            c
+            for c in fake_session.execute_write.call_args_list
+            if c.args and c.args[0] is fn
+        ]
+        assert len(calls) == 1
+        return calls[0].args[1]
+
+    users = {r["login"]: r for r in _rows(_merge_users)}
+    repos = {r["full_name"]: r for r in _rows(_merge_repos)}
+
+    assert users["https://huggingface.co/julien-c"]["subkind"] == "HuggingFaceUser"
+    assert users["https://huggingface.co/julien-c"]["platform"] == "huggingface"
+    # platform missing in payload → derived from orcid.org host
+    assert users["https://orcid.org/0000-0002-1234-5678"]["subkind"] == "DataCitePerson"
+    assert users["https://orcid.org/0000-0002-1234-5678"]["platform"] == "orcid"
+
+    assert repos["https://zenodo.org/records/6494797"]["subkind"] == "ZenodoRecord"
+    assert repos["https://zenodo.org/records/6494797"]["platform"] == "zenodo"
+    assert repos["https://github.com/sdsc-ordes/gimie"]["platform"] == "github"
