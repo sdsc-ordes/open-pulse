@@ -75,6 +75,33 @@ def test_run_crawler_writes_graph_file(tmp_path: Path) -> None:
     assert submitted_body["max_rounds"] == 1
     assert "output_dir" not in submitted_body  # local-IO fields must not leak
     assert "poll_interval_seconds" not in submitted_body
+    assert "api_version" not in submitted_body  # routing field, not a body field
+    # Defaults to v1 across the whole lifecycle.
+    assert crawler.submit_crawl.call_args.kwargs["api_version"] == "v1"
+    assert crawler.wait_for_completion.call_args.kwargs["api_version"] == "v1"
+    assert crawler.get_graph.call_args.kwargs["api_version"] == "v1"
+
+
+def test_run_crawler_threads_api_version_v2(tmp_path: Path) -> None:
+    crawler = MagicMock(spec=CrawlerService)
+    crawler.submit_crawl.return_value = "job-v2"
+    crawler.wait_for_completion.return_value = {"status": "completed"}
+    crawler.get_graph.return_value = {"users": [], "orgs": [], "repos": []}
+
+    services = _make_container(crawler)
+    ctx = {
+        "services": services,
+        "step_config": _step_config(tmp_path, api_version="v2"),
+    }
+
+    run_crawler(ctx)
+
+    # api_version must reach submit + poll + graph fetch so all three hit v2.
+    assert crawler.submit_crawl.call_args.kwargs["api_version"] == "v2"
+    assert crawler.wait_for_completion.call_args.kwargs["api_version"] == "v2"
+    assert crawler.get_graph.call_args.kwargs["api_version"] == "v2"
+    # It is a routing choice, not a crawler body field.
+    assert "api_version" not in crawler.submit_crawl.call_args.args[0]
 
 
 def test_run_crawler_raises_on_empty_seeds(tmp_path: Path) -> None:

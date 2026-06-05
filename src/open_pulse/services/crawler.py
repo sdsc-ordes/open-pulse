@@ -44,6 +44,17 @@ class CrawlerJobTimeoutError(TimeoutError):
     """Raised when ``wait_for_completion`` exceeds its deadline."""
 
 
+_VALID_API_VERSIONS = ("v1", "v2")
+
+
+def _check_api_version(api_version: str) -> None:
+    if api_version not in _VALID_API_VERSIONS:
+        raise ValueError(
+            f"crawler api_version must be one of {_VALID_API_VERSIONS}, "
+            f"got {api_version!r}"
+        )
+
+
 class CrawlerService:
     """Lightweight HTTP client for the Open Pulse Crawler API."""
 
@@ -79,17 +90,36 @@ class CrawlerService:
     # -- Job lifecycle -----------------------------------------------------
 
     def submit_crawl(
-        self, request: dict[str, object], *, use_graphql: bool = True
+        self,
+        request: dict[str, object],
+        *,
+        use_graphql: bool = True,
+        api_version: str = "v1",
     ) -> str:
         """Start a crawl job and return its ``job_id``.
 
-        ``use_graphql`` selects the endpoint variant. Both accept the
-        same ``CrawlRequest`` body schema; GraphQL is the project
-        default because it batches what REST does in N round-trips
-        into a single multi-resource query (lower GitHub rate-limit
-        cost for the same payload).
+        ``api_version`` selects the crawler API surface:
+
+        * ``"v1"`` — github.com seeds only. ``use_graphql`` then picks the
+          endpoint variant (both accept the same ``CrawlRequest`` body);
+          GraphQL is the project default because it batches what REST does
+          in N round-trips into a single multi-resource query (lower GitHub
+          rate-limit cost for the same payload).
+        * ``"v2"`` — the multi-platform surface: in addition to github.com
+          it classifies GitLab (incl. self-hosted), Renku, Zenodo,
+          Infoscience and DataCite/ORCID URL seeds. v2 exposes a single
+          ``POST /api/v2/crawl`` endpoint (no GraphQL variant), so
+          ``use_graphql`` is ignored.
+
+        Seeds for non-github platforms must be full URLs — the crawler
+        classifies by URL host/shape; a bare ``"name"`` is treated as a
+        github login, not a person.
         """
-        path = "/api/v1/crawl/graphql" if use_graphql else "/api/v1/crawl"
+        _check_api_version(api_version)
+        if api_version == "v2":
+            path = "/api/v2/crawl"
+        else:
+            path = "/api/v1/crawl/graphql" if use_graphql else "/api/v1/crawl"
         url = f"{self.endpoint}{path}"
         resp = self._client.post(url, json=request, headers=self._bearer_headers())
         if resp.status_code != 202:
@@ -99,9 +129,10 @@ class CrawlerService:
         body = resp.json()
         return str(body["job_id"])
 
-    def get_status(self, job_id: str) -> dict[str, object]:
+    def get_status(self, job_id: str, *, api_version: str = "v1") -> dict[str, object]:
         """Return the current status payload for *job_id*."""
-        url = f"{self.endpoint}/api/v1/crawl/{job_id}"
+        _check_api_version(api_version)
+        url = f"{self.endpoint}/api/{api_version}/crawl/{job_id}"
         resp = self._client.get(url, headers=self._bearer_headers())
         if resp.status_code != 200:
             raise RuntimeError(
@@ -109,9 +140,13 @@ class CrawlerService:
             )
         return resp.json()
 
-    def get_graph(self, job_id: str) -> dict[str, object]:
-        """Return the full graph payload for *job_id* (must be COMPLETED)."""
-        url = f"{self.endpoint}/api/v1/graph/{job_id}"
+    def get_graph(self, job_id: str, *, api_version: str = "v1") -> dict[str, object]:
+        """Return the full graph payload for *job_id* (must be COMPLETED).
+
+        v1 and v2 both serve the same graph DTO at ``/api/{version}/graph/{id}``.
+        """
+        _check_api_version(api_version)
+        url = f"{self.endpoint}/api/{api_version}/graph/{job_id}"
         resp = self._client.get(url, headers=self._bearer_headers())
         if resp.status_code != 200:
             raise RuntimeError(
@@ -131,6 +166,7 @@ class CrawlerService:
         *,
         poll_interval: float = _DEFAULT_POLL_INTERVAL,
         timeout: float | None = _DEFAULT_TIMEOUT,
+        api_version: str = "v1",
     ) -> dict[str, object]:
         """Poll ``get_status`` until the job leaves a non-terminal state.
 
@@ -154,7 +190,7 @@ class CrawlerService:
         consecutive_failures = 0
         while True:
             try:
-                status = self.get_status(job_id)
+                status = self.get_status(job_id, api_version=api_version)
             except httpx.HTTPError as exc:
                 # Transient network/timeout errors during polling are common
                 # when the crawler is busy. Treat the first few as warnings

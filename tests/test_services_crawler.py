@@ -94,6 +94,60 @@ def test_submit_crawl_use_graphql_false_routes_to_rest(
     assert job_id == "rest-1"
 
 
+def test_submit_crawl_v2_routes_to_v2_crawl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_TOKEN", "secret-value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        # v2 has a single POST /api/v2/crawl (no graphql variant); the
+        # use_graphql flag is ignored on this surface.
+        assert request.url.path == "/api/v2/crawl"
+        body = json.loads(request.content)
+        assert body["seeds"] == ["https://orcid.org/0000-0001-6315-4398"]
+        return httpx.Response(202, json={"job_id": "v2-1", "status": "pending"})
+
+    svc = _service(httpx.MockTransport(handler))
+    job_id = svc.submit_crawl(
+        {"seeds": ["https://orcid.org/0000-0001-6315-4398"]},
+        use_graphql=True,
+        api_version="v2",
+    )
+    assert job_id == "v2-1"
+
+
+def test_submit_crawl_rejects_unknown_api_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEST_TOKEN", "secret-value")
+    svc = _service(httpx.MockTransport(lambda r: httpx.Response(202, json={})))
+    with pytest.raises(ValueError, match="api_version"):
+        svc.submit_crawl({"seeds": ["x"]}, api_version="v3")
+
+
+def test_get_status_v2_hits_v2_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_TOKEN", "secret-value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/crawl/job-9"
+        return httpx.Response(200, json={"status": "completed"})
+
+    svc = _service(httpx.MockTransport(handler))
+    assert svc.get_status("job-9", api_version="v2")["status"] == "completed"
+
+
+def test_get_graph_v2_hits_v2_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_TOKEN", "secret-value")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/graph/job-9"
+        return httpx.Response(200, json={"graph": {"nodes": []}})
+
+    svc = _service(httpx.MockTransport(handler))
+    assert svc.get_graph("job-9", api_version="v2") == {"nodes": []}
+
+
 def test_submit_crawl_raises_when_token_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TEST_TOKEN", raising=False)
 

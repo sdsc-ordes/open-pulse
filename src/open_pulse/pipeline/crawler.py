@@ -95,19 +95,27 @@ def run_crawler(context: dict[str, object]) -> None:
     # ``CrawlerStepConfig.use_graphql`` for the rationale. Quests can
     # opt out by setting ``use_graphql: false`` in their YAML.
     use_graphql = bool(step_cfg.get("use_graphql", True))
+    # API surface: ``v1`` (github-only) or ``v2`` (multi-platform seeds —
+    # GitLab/Renku/Zenodo/Infoscience/DataCite/ORCID). See
+    # ``CrawlerStepConfig.api_version``. v2 has no GraphQL variant.
+    api_version = str(step_cfg.get("api_version", "v1"))
 
-    job_id = services.crawler.submit_crawl(request, use_graphql=use_graphql)
+    job_id = services.crawler.submit_crawl(
+        request, use_graphql=use_graphql, api_version=api_version
+    )
     logger.info(
-        "crawler: submitted job_id=%s seeds=%d endpoint=%s",
+        "crawler: submitted job_id=%s seeds=%d api=%s endpoint=%s",
         job_id,
         len(seeds),
-        "graphql" if use_graphql else "rest",
+        api_version,
+        "rest" if api_version == "v2" else ("graphql" if use_graphql else "rest"),
     )
 
     final = services.crawler.wait_for_completion(
         job_id,
         poll_interval=poll_interval,
         timeout=timeout,
+        api_version=api_version,
     )
     logger.info(
         "crawler: job %s completed (users=%s orgs=%s repos=%s)",
@@ -117,7 +125,7 @@ def run_crawler(context: dict[str, object]) -> None:
         final.get("repos", 0),
     )
 
-    graph = services.crawler.get_graph(job_id)
+    graph = services.crawler.get_graph(job_id, api_version=api_version)
 
     output_dir = Path(str(step_cfg.get("output_dir", ".quest-artifacts/crawler-json")))
     output_filename = str(step_cfg.get("output_filename", "crawler-graph.json"))

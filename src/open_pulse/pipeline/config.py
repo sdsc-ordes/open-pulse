@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -71,6 +71,12 @@ class CrawlerStepConfig(StepConfig):
     # False to fall back to the legacy REST endpoint at
     # ``/api/v1/crawl`` (e.g. to bisect a suspected GraphQL regression).
     use_graphql: bool = True
+    api_version: Literal["v1", "v2"] = "v1"
+    """Crawler API surface. ``v1`` (default) accepts github.com seeds only.
+    ``v2`` adds multi-platform seeds — GitLab (incl. self-hosted), Renku,
+    Zenodo, Infoscience and DataCite/ORCID — classified by URL host/shape, so
+    non-github seeds must be full URLs (a bare name is read as a github login).
+    ``v2`` ignores ``use_graphql`` (it has a single ``POST /api/v2/crawl``)."""
     output_dir: str = ".quest-artifacts/crawler-json"
     output_filename: str = "crawler-graph.json"
     poll_interval_seconds: float = 5.0
