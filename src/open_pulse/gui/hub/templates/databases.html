@@ -7,6 +7,13 @@
    page's Alpine x-data via spread; CSS is scoped under .tree-table). #}
 <link rel="stylesheet" href="/static/css/tree-table.css" />
 <script src="/static/js/tree-table.js"></script>
+{# D3 chart layer for the result panel (Table → Time series / Scatter).
+   D3 from a CDN, like Chart.js on the overview page; the glue (d3-viz.js)
+   + scoped CSS are first-party. The Table view never needs D3, so a
+   blocked CDN degrades gracefully to table-only. #}
+<link rel="stylesheet" href="/static/css/d3-viz.css" />
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="/static/js/d3-viz.js"></script>
 {# highlight.js for the snippet codeblock. CDN load — the dark theme
    (atom-one-dark) plays nicely with the existing dark code panel
    in both light and dark hub themes. #}
@@ -511,6 +518,45 @@
           ⬡ View as graph
         </button>
         <span class="card-meta" x-show="engine === 'cypher' && hasGraphData()" style="margin: 0 6px;">·</span>
+        <!-- View-as: render the same {columns, rows} as a D3 chart. Works
+             for every engine; Table is the default. Non-table options
+             disable when the result shape can't support them. -->
+        <div class="viz-controls">
+          <span class="viz-label">view as</span>
+          <select x-model="viewMode" @change="onViewModeChange()"
+                  title="How to render the result">
+            <option value="table">Table</option>
+            <option value="timeseries"
+                    :disabled="!applicableViews().includes('timeseries')">Time series</option>
+            <option value="scatter"
+                    :disabled="!applicableViews().includes('scatter')">2-D Scatter</option>
+          </select>
+          <span class="viz-axes" x-show="viewMode !== 'table'" x-cloak>
+            <span class="viz-axis"><span>x</span>
+              <select x-model="axisX" @change="renderViz()">
+                <template x-for="c in columns" :key="'vx'+c"><option :value="c" x-text="c"></option></template>
+              </select>
+            </span>
+            <span class="viz-axis"><span>y</span>
+              <select x-model="axisY" @change="renderViz()">
+                <template x-for="c in columns" :key="'vy'+c"><option :value="c" x-text="c"></option></template>
+              </select>
+            </span>
+            <span class="viz-axis" x-show="viewMode === 'scatter'"><span>color</span>
+              <select x-model="axisColor" @change="renderViz()">
+                <option value="">(none)</option>
+                <template x-for="c in columns" :key="'vc'+c"><option :value="c" x-text="c"></option></template>
+              </select>
+            </span>
+            <span class="viz-axis" x-show="viewMode === 'scatter'"><span>size</span>
+              <select x-model="axisSize" @change="renderViz()">
+                <option value="">(none)</option>
+                <template x-for="c in columns" :key="'vs'+c"><option :value="c" x-text="c"></option></template>
+              </select>
+            </span>
+          </span>
+        </div>
+        <span class="card-meta" style="margin: 0 6px;">·</span>
         <span class="card-meta" style="margin-right: 4px;">download</span>
         <button class="btn"        @click="download('csv')"      title="CSV (RFC 4180)">CSV</button>
         <button class="btn"        @click="download('md')"       title="Markdown table">MD</button>
@@ -525,11 +571,17 @@
          are escaped before injection (see _escape). The per-column type
          dropdown lives inside the level-0 thead cells; selecting one
          dispatches a delegated change handler that rewrites cellTypes. -->
-    <div x-show="rows.length" class="tree-table"
+    <div x-show="rows.length && viewMode === 'table'" class="tree-table"
          style="overflow: auto; max-height: 60vh; margin-top: 12px;"
          x-html="renderTreeTable()"
          @change="onCellTypeChange($event)"
          @click="onHeaderClick($event)"></div>
+
+    <!-- D3 chart container — sibling of the tree-table; exactly one shows
+         (gated on viewMode). Built/redrawn by renderViz() in d3-viz.js. -->
+    <div x-show="rows.length && viewMode !== 'table'" class="d3-viz" x-cloak>
+      <svg x-ref="d3Root" role="img" aria-label="query result chart"></svg>
+    </div>
 
     <p x-show="!rows.length && !busy" class="card-meta" style="font-style: italic; margin-top: 12px;">No rows yet — pick an example above or run a query.</p>
     <pre x-show="rawDump" class="console mt-3" x-text="rawDump"></pre>
@@ -1563,6 +1615,12 @@ function dbConsole() {
     // (Alpine merges by spread order — later wins).
     ...window.treeTable(),
 
+    // Generic D3 chart layer: "View as" table / time series / scatter,
+    // driven by the same columns/rows the tree-table owns — so it works
+    // for every engine. Spread AFTER treeTable; all its keys (viewMode,
+    // axis*, _col*, _viz*) are namespaced so nothing collides.
+    ...window.d3Viz(),
+
     // Tab order + default match the reading order on the entity
     // pages: graph relations first (who connects to what), then
     // semantic properties, then operational data.
@@ -1671,6 +1729,9 @@ function dbConsole() {
       const first = this.tabs.find(t => t.engine === this.engine) || this.tabs[0];
       this.engine = first.engine;
       this.switchTab(first.id);
+      // Start polling for the CDN D3 so the chart layer is ready by the
+      // time a result lands (fire-and-forget; render gates on window.d3).
+      this._waitForD3();
 
       this.$watch('query', () => {
         this.recomputeGutter();
@@ -2607,6 +2668,9 @@ function dbConsole() {
         this.sortDir = 'asc';
         // New schema → drop any per-column type overrides from the previous query.
         this.cellTypes = {};
+        // Re-infer column types + default chart axes for this result, and
+        // demote the chart view back to Table if it no longer applies.
+        this.onResult();
         // Log the successful run for the session-log panel.
         this.appendSessionLog({
           ts: new Date().toISOString(),

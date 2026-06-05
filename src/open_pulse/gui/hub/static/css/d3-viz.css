@@ -1,0 +1,61 @@
+/* d3-viz.css — scoped styles for the query-console chart layer.
+ * Scoped under .d3-viz / .viz-controls and uses app.css theme vars so the
+ * charts track the hub's light/dark toggle (mirrors tree-table.css). */
+
+.d3-viz {
+  overflow: auto;
+  max-height: 60vh;
+  margin-top: 12px;
+}
+.d3-viz svg {
+  display: block;
+  max-width: 100%;
+  font-family: inherit;
+}
+
+/* "View as" + axis pickers in the result toolbar. */
+.viz-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.viz-controls .viz-label {
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.viz-controls select {
+  background: var(--surface-sunk);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 3px 6px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  max-width: 160px;
+}
+.viz-controls select:disabled {
+  opacity: 0.5;
+}
+.viz-axes {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+.viz-axes .viz-axis {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.viz-axes .viz-axis > span {
+  font-size: 10px;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
