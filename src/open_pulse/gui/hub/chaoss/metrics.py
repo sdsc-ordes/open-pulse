@@ -4214,6 +4214,274 @@ def _metric_pr_time_to_close(
     )
 
 
+# ── Metric · Upstream Code Dependencies ───────────────────────────────────
+
+
+def _metric_upstream_dependencies(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Snapshot: how many other repositories does this one depend on?
+
+    Counts outbound ``DEPENDS_ON`` edges in Neo4j — the dependency graph
+    the crawler resolved from manifests (``requirements.txt``,
+    ``pyproject.toml``, ``package.json``, …) onto concrete upstream
+    repositories. CHAOSS "Upstream Code Dependencies".
+    """
+    traces: list[QueryTrace] = []
+    repo_url = _to_gh_url(full)
+    cypher = (
+        "// Outbound DEPENDS_ON edges — the upstream repositories this\n"
+        "// project resolves to from its dependency manifests. DISTINCT\n"
+        "// so a package pinned twice isn't double-counted.\n"
+        f"MATCH (r:Repo {{full_name: '{repo_url}'}})-[:DEPENDS_ON]->(dep:Repo)\n"
+        "RETURN count(DISTINCT dep) AS direct_dependencies"
+    )
+    top_cypher = (
+        f"MATCH (r:Repo {{full_name: '{repo_url}'}})-[:DEPENDS_ON]->(dep:Repo)\n"
+        "RETURN DISTINCT dep.full_name AS dep ORDER BY dep LIMIT 12"
+    )
+    n = 0
+    tops: list[str] = []
+    try:
+        rows = stores.neo4j_run(cypher)
+        n = int(rows[0].get("direct_dependencies") or 0) if rows else 0
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title=f"Direct upstream dependencies of {full}",
+                query=cypher,
+                result_summary=f"{n} direct dependencies",
+            )
+        )
+        if n:
+            rows2 = stores.neo4j_run(top_cypher)
+            tops = [_from_gh_url(r.get("dep")) for r in rows2 if r.get("dep")]
+            traces.append(
+                QueryTrace(
+                    store="Neo4j",
+                    engine="cypher",
+                    title=f"Sample upstream dependencies of {full}",
+                    query=top_cypher,
+                    result_summary=f"{len(tops)} shown",
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title=f"Direct upstream dependencies of {full}",
+                query=cypher,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
+        return MetricResult(
+            slug="upstream_dependencies",
+            value="—",
+            label="no dependency data",
+            secondary=None,
+            queries=traces,
+            notes="No resolved upstream dependencies in the graph for this repo.",
+        )
+
+    return MetricResult(
+        slug="upstream_dependencies",
+        value=f"{n:,}",
+        label="direct upstream dependencies",
+        secondary=(", ".join(tops[:5]) + ("…" if len(tops) > 5 else "")) or None,
+        queries=traces,
+        examples=[{"dependency": d} for d in tops],
+        notes=(
+            "Counts distinct outbound ``DEPENDS_ON`` edges resolved to "
+            "concrete upstream repositories. Reflects what the crawler "
+            "resolved from dependency manifests — unresolved / private "
+            "packages aren't edges, so this is a floor, not the full "
+            "lock-file count. Edge data carries no version, so an "
+            "'outdated' breakdown isn't available."
+        ),
+        unification=(
+            "Single Cypher ``count(DISTINCT dep)`` over outbound "
+            "``DEPENDS_ON`` edges from the repo node."
+        ),
+        headline_tone="info",
+    )
+
+
+# ── Metric · Documentation Discoverability ────────────────────────────────
+
+
+def _gh_repos_index_row(full: str) -> tuple[dict[str, Any] | None, str]:
+    """One repo's metadata row from the ``github_repos`` DuckDB index.
+
+    Returns ``(row_or_None, sql)`` — the SQL is echoed in the metric's
+    QueryTrace for transparency. Reads the GME-published ``.ro.duckdb``
+    snapshot read-only; never touches the graph stores.
+    """
+    owner, _, name = full.partition("/")
+    sql = (
+        "SELECT homepage, license_spdx, readme_path, primary_language, raw\n"
+        "FROM repos\n"
+        f"WHERE lower(owner) = lower('{owner}') "
+        f"AND lower(name) = lower('{name}')\nLIMIT 1"
+    )
+    try:
+        # Local import: keeps the heavy duckdb dependency out of module
+        # import time and avoids a cycle with the knowledge package.
+        from ..knowledge.duckdb_browser import _DATA_ROOT, _connect
+
+        db_path = _DATA_ROOT / "index/github_repos/duckdb/github_repos.duckdb"
+        with _connect(db_path) as con:
+            r = con.execute(
+                "SELECT homepage, license_spdx, readme_path, primary_language, raw "
+                "FROM repos WHERE lower(owner)=lower(?) AND lower(name)=lower(?) LIMIT 1",
+                [owner, name],
+            ).fetchone()
+        if not r:
+            return None, sql
+        raw = {}
+        if r[4]:
+            try:
+                raw = json.loads(r[4])
+            except (TypeError, ValueError):
+                raw = {}
+        return (
+            {
+                "homepage": r[0],
+                "license_spdx": r[1],
+                "readme_path": r[2],
+                "primary_language": r[3],
+                "has_wiki": bool(raw.get("has_wiki")),
+                "has_pages": bool(raw.get("has_pages")),
+                "has_discussions": bool(raw.get("has_discussions")),
+            },
+            sql,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("github_repos index read failed for %s: %s", full, exc)
+        return None, sql
+
+
+def _metric_docs_discoverability(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Snapshot: can a newcomer actually find the docs?
+
+    Scores four discoverability signals extracted by the GME into the
+    ``github_repos`` index — a README, a homepage / docs link, a wiki,
+    and a GitHub Pages site. CHAOSS "Documentation Discoverability".
+    """
+    row, sql = _gh_repos_index_row(full)
+    trace = QueryTrace(
+        store="Index · github_repos",
+        engine="duckdb",
+        title=f"Documentation signals for {full}",
+        query=sql,
+        result_summary="1 row" if row else "no row",
+    )
+    if row is None:
+        return MetricResult(
+            slug="docs_discoverability",
+            value="—",
+            label="repo not in index",
+            secondary=None,
+            queries=[trace],
+            notes="No row in the github_repos index for this repository.",
+        )
+
+    homepage = (row.get("homepage") or "").strip()
+    signals = [
+        ("README", bool(row.get("readme_path"))),
+        ("Homepage / docs link", bool(homepage)),
+        ("Wiki", row.get("has_wiki", False)),
+        ("Pages site", row.get("has_pages", False)),
+    ]
+    present = [name for name, ok in signals if ok]
+    total = len(signals)
+    n = len(present)
+    fraction = n / total
+    tone = "good" if n >= 3 else "warn" if n >= 1 else "danger"
+    return MetricResult(
+        slug="docs_discoverability",
+        value=f"{n}/{total}",
+        label="documentation signals present",
+        secondary=(", ".join(present) or "none"),
+        queries=[trace],
+        examples=[
+            {"signal": name, "present": "yes" if ok else "no"} for name, ok in signals
+        ],
+        visual={"kind": "donut", "fraction": fraction, "tone": tone},
+        notes=(
+            "Four discoverability signals from the GME-extracted "
+            "metadata: a README file, a homepage / documentation link, "
+            "a project wiki, and a GitHub Pages site. A high score means "
+            "a newcomer can find the docs without reading the source."
+        ),
+        unification=(
+            "Fraction of four boolean signals present "
+            "(README · homepage · wiki · pages)."
+        ),
+        headline_tone=tone,
+    )
+
+
+# ── Metric · License Coverage ─────────────────────────────────────────────
+
+
+def _metric_license_coverage(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Snapshot: does the repo carry a declared license?
+
+    Repo-level this is a 0/1 — a declared SPDX license or none. The
+    value comes into its own at *project* scope, where the mean across
+    member repos reads as "share of repositories with a declared
+    license". CHAOSS "License Coverage".
+    """
+    row, sql = _gh_repos_index_row(full)
+    trace = QueryTrace(
+        store="Index · github_repos",
+        engine="duckdb",
+        title=f"Declared license for {full}",
+        query=sql,
+        result_summary="1 row" if row else "no row",
+    )
+    if row is None:
+        return MetricResult(
+            slug="license_coverage",
+            value="—",
+            label="repo not in index",
+            secondary=None,
+            queries=[trace],
+            notes="No row in the github_repos index for this repository.",
+        )
+
+    spdx = (row.get("license_spdx") or "").strip()
+    has = bool(spdx)
+    return MetricResult(
+        slug="license_coverage",
+        value=spdx if has else "✗",
+        label="declared license" if has else "no declared license",
+        secondary=None,
+        queries=[trace],
+        visual={
+            "kind": "donut",
+            "fraction": 1.0 if has else 0.0,
+            "tone": "good" if has else "danger",
+        },
+        notes=(
+            "Whether the repository declares a license (SPDX id from the "
+            "GME ``license_spdx`` field). Per-repo it's yes/no; across a "
+            "project the mean is the share of repositories that declare "
+            "a license. Per-*file* coverage needs file-level scanning, "
+            "which isn't collected — this is the repo-level signal."
+        ),
+        unification="1 if ``license_spdx`` is set, else 0; project mean = coverage.",
+        headline_tone="good" if has else "warn",
+    )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────
 
 REGISTRY: list[MetricSpec] = [
@@ -4648,6 +4916,51 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=True,
         compute=_metric_pr_time_to_close,
+    ),
+    MetricSpec(
+        slug="upstream_dependencies",
+        name="Upstream Code Dependencies",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-upstream-code-dependencies/",
+        question="What does this project build on?",
+        description=(
+            "Count of distinct upstream repositories this project "
+            "depends on, resolved from its dependency manifests into the "
+            "Neo4j `DEPENDS_ON` graph."
+        ),
+        is_time_based=False,
+        compute=_metric_upstream_dependencies,
+    ),
+    MetricSpec(
+        slug="docs_discoverability",
+        name="Documentation Discoverability",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-documentation-discoverability/",
+        question="Can a newcomer find the docs?",
+        description=(
+            "Scores four discoverability signals from the GME-extracted "
+            "metadata — a README, a homepage / docs link, a wiki, and a "
+            "GitHub Pages site."
+        ),
+        is_time_based=False,
+        compute=_metric_docs_discoverability,
+    ),
+    MetricSpec(
+        slug="license_coverage",
+        name="License Coverage",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-license-coverage/",
+        question="Does the project declare a license?",
+        description=(
+            "Whether the repo declares an SPDX license. Per-repo it's "
+            "yes/no; the project mean reads as the share of repositories "
+            "with a declared license."
+        ),
+        is_time_based=False,
+        compute=_metric_license_coverage,
     ),
 ]
 
