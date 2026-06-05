@@ -4482,6 +4482,257 @@ def _metric_license_coverage(
     )
 
 
+# ── Metric · Committers ───────────────────────────────────────────────────
+
+
+def _metric_committers(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """How many distinct people *committed* code in the window?
+
+    CHAOSS "Committers" — distinct ``committer_name`` on commits
+    GrimoireLab indexed. This is the commit-landing view, deliberately
+    narrower than ``contributors`` (which counts ``author_name`` and so
+    includes people whose patches someone else committed).
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+    origin = f"https://github.com/{full}"
+    # The git backend indexes the clone URL, which usually carries a
+    # ``.git`` suffix (``…/dataverse.git``) — match both forms so we
+    # don't silently miss a repo on the suffix alone.
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"terms": {"origin": [origin, origin + ".git"]}},
+                    {"range": {"grimoire_creation_date": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_committer": {"cardinality": {"field": "committer_name"}},
+            "by_month": {
+                "date_histogram": {
+                    "field": "grimoire_creation_date",
+                    "calendar_interval": "month",
+                    "min_doc_count": 0,
+                },
+                "aggs": {"unique_committers": {"cardinality": {"field": "committer_name"}}},
+            },
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    series: list[dict[str, Any]] = []
+    if raw is None:
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Distinct committers on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or git index empty",
+            )
+        )
+        return MetricResult(
+            slug="committers",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
+            notes="No git commits indexed for this repo in the window.",
+            unification=(
+                "Distinct ``committer_name`` on windowed commits via an "
+                "**OpenSearch** cardinality agg."
+            ),
+        )
+
+    aggs = raw.get("aggregations") or {}
+    n = int((aggs.get("by_committer") or {}).get("value") or 0)
+    for b in (aggs.get("by_month") or {}).get("buckets", []):
+        ts_ms = int(b.get("key") or 0)
+        c = int((b.get("unique_committers") or {}).get("value") or 0)
+        series.append(
+            {
+                "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                .date()
+                .isoformat()[:7],
+                "value": c,
+            }
+        )
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Distinct committers on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{n} committers · {len(series)} months",
+        )
+    )
+    return MetricResult(
+        slug="committers",
+        value=str(n),
+        label=f"committers · last {window_days} days",
+        secondary=None,
+        queries=traces,
+        series=series,
+        series_unit="committers",
+        notes=(
+            "Distinct ``committer_name`` values on commits GrimoireLab "
+            "indexed in the window. Committers are whoever landed the "
+            "commit — narrower than *contributors* (``author_name``), "
+            "which also counts authors whose patch someone else committed."
+        ),
+        unification=(
+            "Distinct ``committer_name`` on windowed commits via an "
+            "**OpenSearch** cardinality agg."
+        ),
+        headline_tone="info",
+    )
+
+
+# ── Metric · Issue Response Time ──────────────────────────────────────────
+
+
+def _metric_issue_response_time(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Median hours to the first response on *issues* (PRs excluded).
+
+    The issue-scoped sibling of ``first_response`` — same
+    ``time_to_first_attention_without_bot`` enrichment, filtered to
+    ``pull_request:false``. CHAOSS "Issue Response Time".
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"term": {"pull_request": False}},
+                    {"range": {"created_at": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "median": {
+                "percentiles": {
+                    "field": "time_to_first_attention_without_bot",
+                    "percents": [50],
+                }
+            },
+            "p90": {
+                "percentiles": {
+                    "field": "time_to_first_attention_without_bot",
+                    "percents": [90],
+                }
+            },
+            "count_with_response": {
+                "filter": {"exists": {"field": "time_to_first_attention_without_bot"}}
+            },
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    if raw is None:
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"P50/P90 issue response time on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
+        return MetricResult(
+            slug="issue_response_time",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "GrimoireLab hasn't indexed issue traffic for this repo. "
+                "The query above is what we'd run once github_*_enriched "
+                "starts receiving documents."
+            ),
+            unification=(
+                "P50 of GrimoireLab's `time_to_first_attention_without_bot` "
+                "on issues (`pull_request:false`) via an **OpenSearch** "
+                "percentiles agg."
+            ),
+        )
+
+    aggs = raw.get("aggregations") or {}
+    n = int(((aggs.get("count_with_response") or {}).get("doc_count") or 0))
+    p50_raw = ((aggs.get("median") or {}).get("values") or {}).get("50.0")
+    p90_raw = ((aggs.get("p90") or {}).get("values") or {}).get("90.0")
+    p50 = float(p50_raw) if p50_raw is not None else None
+    p90 = float(p90_raw) if p90_raw is not None else None
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"P50/P90 issue response time on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=(
+                f"{n} answered issues · P50 {p50:.1f} h · P90 {p90:.1f} h"
+                if p50 is not None and p90 is not None
+                else f"{n} answered issues, no percentile available"
+            ),
+        )
+    )
+    if not n or p50 is None:
+        return MetricResult(
+            slug="issue_response_time",
+            value="—",
+            label="no answered issues in window",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "No issues in the window carried a "
+                "time_to_first_attention_without_bot value — either no "
+                "issues opened, or none answered yet."
+            ),
+            unification=(
+                "P50 of GrimoireLab's `time_to_first_attention_without_bot` "
+                "on issues (`pull_request:false`) via an **OpenSearch** "
+                "percentiles agg."
+            ),
+        )
+    return MetricResult(
+        slug="issue_response_time",
+        value=f"{p50:.1f} h",
+        label="median first response · issues",
+        secondary=f"P90 {p90:.1f} h · {n} answered issues" if p90 is not None else None,
+        queries=traces,
+        notes=(
+            "Median hours from issue creation to the first non-author, "
+            "non-bot response. Pull requests are excluded "
+            "(``pull_request:false``) — the PR-and-issue blend is the "
+            "separate ``first_response`` metric."
+        ),
+        unification=(
+            "P50 of GrimoireLab's `time_to_first_attention_without_bot` "
+            "on issues (`pull_request:false`) via an **OpenSearch** "
+            "percentiles agg."
+        ),
+        headline_tone="info",
+    )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────
 
 REGISTRY: list[MetricSpec] = [
@@ -4961,6 +5212,36 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=False,
         compute=_metric_license_coverage,
+    ),
+    MetricSpec(
+        slug="committers",
+        name="Committers",
+        category="Contributor",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-committers/",
+        question="Who landed code recently?",
+        description=(
+            "Distinct people who committed code in the window "
+            "(`committer_name`). Narrower than Contributors — counts who "
+            "landed the commit, not every patch author."
+        ),
+        is_time_based=True,
+        compute=_metric_committers,
+    ),
+    MetricSpec(
+        slug="issue_response_time",
+        name="Issue Response Time",
+        category="Lifecycle",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-issue-response-time/",
+        question="How fast do issues get a first reply?",
+        description=(
+            "Median hours from issue creation to the first non-author, "
+            "non-bot response. Issues only (`pull_request:false`) — the "
+            "issue-scoped sibling of Time to First Response."
+        ),
+        is_time_based=True,
+        compute=_metric_issue_response_time,
     ),
 ]
 
