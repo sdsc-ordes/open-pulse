@@ -152,6 +152,9 @@ _SLUG_CATEGORY: dict[str, str] = {
     "cr_reviews": "Quality",
     "cr_accepted": "Quality",
     "cr_declined": "Quality",
+    "upstream_dependencies": "Quality",
+    "docs_discoverability": "Quality",
+    "license_coverage": "Quality",
     # Everything else (contributors, activity, responsiveness, issues,
     # bus-factor, review duration) is Community — handled by the default.
 }
@@ -204,6 +207,20 @@ def _open_in_databases(engine: str, query: str, mode: str | None = None) -> str:
     if mode:
         parts["os_mode"] = mode
     return "/databases#" + urllib.parse.urlencode(parts)
+
+
+# Engines the /databases console can actually run. Index reads (DuckDB)
+# are transparent in the trace but have no console tab, so they get no
+# "Run query" deep link.
+_CONSOLE_ENGINES = {"cypher", "sparql", "opensearch"}
+
+
+def _deep_link(engine: str, query: str, mode: str | None = None) -> str | None:
+    """Console deep link for a trace, or None when the engine isn't one
+    the /databases page can execute (e.g. ``duckdb`` index reads)."""
+    if engine not in _CONSOLE_ENGINES:
+        return None
+    return _open_in_databases(engine, query, mode)
 
 
 @router.get(
@@ -342,7 +359,7 @@ def chaoss_metric_card(
                 "query": t.query,
                 "result_summary": t.result_summary,
                 "error": t.error,
-                "deep_link": _open_in_databases(t.engine, t.query, t.mode),
+                "deep_link": _deep_link(t.engine, t.query, t.mode),
             }
         )
     return templates.TemplateResponse(
@@ -416,7 +433,7 @@ def _trace_to_dict(t: metrics_mod.QueryTrace) -> dict[str, Any]:
         "query": t.query,
         "result_summary": t.result_summary,
         "error": t.error,
-        "deep_link": _open_in_databases(t.engine, t.query, t.mode),
+        "deep_link": _deep_link(t.engine, t.query, t.mode),
     }
 
 
@@ -651,6 +668,10 @@ def chaoss_api_repo_metric_one(
 _AGG_RULE: dict[str, str] = {
     "closure_ratio": "mean",
     "technical_fork": "mean",
+    # Avg direct deps per repo; donut-fraction metrics average to a share.
+    "upstream_dependencies": "mean",
+    "docs_discoverability": "mean",
+    "license_coverage": "mean",
 }
 _AGG_APPROX = {"contributors", "new_contributors", "org_diversity"}
 # Bound on fan-out per request; larger projects are truncated (reported)
