@@ -32,11 +32,30 @@
     </form>
     <p class="card-meta" style="margin: 10px 0 0;">
       Time-based metrics use the selected window. Snapshot metrics
-      (forks, licenses) ignore it. CHAOSS supports many more — the
-      ones below are the first "Level 0" must-haves from the
+      (forks, licenses) ignore it. The catalogue below groups every
+      metric into three plain-language buckets — Community, Popularity
+      and Quality — each drawn from the
       <a href="https://chaoss.community/" target="_blank" rel="noopener">CHAOSS catalogue</a>.
     </p>
   </div>
+
+  {# ── Project entry point — GrimoireLab projects (projects.json) ── #}
+  {% if projects %}
+  <div class="card">
+    <div class="card-title">…or pick a GrimoireLab project</div>
+    <p class="card-meta" style="margin: 6px 0 10px;">
+      Metrics aggregated across every repository in the project — the native
+      GrimoireLab grouping ({{ projects | length }} defined).
+    </p>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+      {% for p in projects %}
+        <a class="btn" href="/chaoss/projects/{{ p.project }}?window={{ default_window }}"
+           title="{{ p.title }} — {{ p.repo_count }} repositories">{{ p.project }}<span
+           class="card-meta" style="font-size: 11px; margin-left: 5px;">{{ p.repo_count }}</span></a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 
   {# ── Try it (sits right below the selector so visitors get a
        1-click way in before having to read the catalogue) ───────── #}
@@ -113,7 +132,7 @@
               <div class="card-meta" style="font-size: 12px;">{{ m.question }}</div>
               <p class="chaoss-notes" style="margin: 0; font-size: 13px; color: var(--fg-muted);">{{ m.description | md }}</p>
               <div style="margin-top: auto; padding-top: 6px; display: flex; gap: 10px; font-size: 11px;">
-                <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener" class="card-meta">{{ m.chaoss_level }} ↗</a>
+                <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener" class="card-meta">CHAOSS · {{ m.chaoss_topic }} ↗</a>
               </div>
             </div>
           {% endfor %}
