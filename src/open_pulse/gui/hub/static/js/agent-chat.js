@@ -37,6 +37,11 @@
         { id: 'run_opensearch', label: 'OpenSearch', on: true },
         { id: 'run_cypher', label: 'Cypher', on: true },
         { id: 'run_sparql', label: 'SPARQL', on: true },
+        { id: 'gme_search', label: 'GME search', on: true },
+        // Job-spawning actions — off by default; opt in to let the agent
+        // kick off an extraction / crawl.
+        { id: 'extract_metadata', label: 'Extract · gimie', on: false, action: true },
+        { id: 'run_crawler', label: 'Crawler', on: false, action: true },
       ],
       models: [],
       settingsOpen: false,
@@ -490,6 +495,9 @@
           { key: '/opensearch', hint: 'Query GrimoireLab activity', insert: 'Using run_opensearch, ' },
           { key: '/cypher', hint: 'Query the community graph', insert: 'Using run_cypher, ' },
           { key: '/sparql', hint: 'Query repository properties', insert: 'Using run_sparql, ' },
+          { key: '/search', hint: 'Semantic search a GME index', insert: 'Using gme_search, find ' },
+          { key: '/extract', hint: 'Extract a repo (gimie) — needs the tool on', insert: 'Extract metadata for ' },
+          { key: '/crawl', hint: 'Start a crawl — needs the tool on', insert: 'Crawl these GitHub seeds: ' },
           { key: '/plot', hint: 'Ask for a Vega-Lite chart', insert: 'Plot as a Vega-Lite chart: ' },
         ];
       },
