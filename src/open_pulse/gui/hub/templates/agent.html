@@ -70,13 +70,15 @@
         <div class="agent-set-label">Tools</div>
         <div class="agent-tool-toggles">
           <template x-for="t in tools" :key="t.id">
-            <label class="agent-tool-toggle">
+            <label class="agent-tool-toggle" :class="t.action ? 'is-action' : ''"
+                   :title="t.action ? 'Action — can start a job' : 'Read-only query tool'">
               <input type="checkbox" :checked="t.on" @change="toggleTool(t.id)" />
               <span x-text="t.label"></span>
+              <span x-show="t.action" class="agent-tool-act" title="kicks off a job">⚡</span>
             </label>
           </template>
         </div>
-        <div class="card-meta">file read/list tools stay on for attachments</div>
+        <div class="card-meta">⚡ actions start jobs (off by default) · file read/list tools always on</div>
       </div>
 
       <div class="agent-set-block agent-set-wide">

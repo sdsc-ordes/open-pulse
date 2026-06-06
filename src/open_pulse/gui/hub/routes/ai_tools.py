@@ -52,6 +52,9 @@ FILE_READ_CAP = 20_000  # bytes returned to the model per read_file call
 # doesn't blow the token budget on a single turn.
 TOOL_ROW_CAP = 1000
 TOOL_TIMEOUT_SECONDS = 20.0
+# Semantic search (embed query + vector search + rerank) is much slower
+# than a SQL/SPARQL round-trip, so gme_search gets its own longer budget.
+SEARCH_TIMEOUT_SECONDS = 60.0
 MAX_TOOL_TURNS = 5
 
 
@@ -203,6 +206,91 @@ TOOLS_SPEC: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "gme_search",
+            "description": (
+                "Semantic search one of the GME's federated index stores (vector "
+                "search + rerank). Pick an ``index`` and pass a free-text "
+                "``query``. Valid indices: github_repos, github_users, "
+                "github_organizations, zenodo_records, zenodo_communities, "
+                "openalex, orcid, ror, infoscience, snsf, swissubase, "
+                "ethz_research_collection, renkulab, epfl_graph, oamonitor, "
+                "dockerhub, huggingface_models, huggingface_datasets, "
+                "huggingface_spaces, huggingface_organizations, "
+                "huggingface_papers. Multi-entity indices (openalex, "
+                "huggingface_*, ethz_research_collection) take an optional "
+                "``target`` to pick the entity type. Returns ranked hits "
+                "(id / title / url / score / payload)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "string", "description": "Index store name (see list)."},
+                    "query": {"type": "string", "description": "Free-text query."},
+                    "top_k": {"type": "integer", "description": "Max hits (1-50, default 10)."},
+                    "target": {"type": "string", "description": "Entity type for multi-entity indices (optional)."},
+                },
+                "required": ["index", "query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_metadata",
+            "description": (
+                "ACTION (kicks off a job): run the GME metadata extractor on a "
+                "GitHub repo / user / org URL — this is gimie under the hood. "
+                "``runtime``: ``rule_based`` = deterministic gimie extraction "
+                "(fast), ``hybrid`` = gimie + LLM agent refinement, ``llm`` = "
+                "agent-only. Returns a job_id (the extraction runs "
+                "asynchronously). Only call this when the user explicitly asks "
+                "to extract / enrich a repository."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_url": {"type": "string", "description": "GitHub repo / user / org URL or handle."},
+                    "runtime": {
+                        "type": "string",
+                        "enum": ["rule_based", "hybrid", "llm"],
+                        "description": "Extraction runtime; rule_based = gimie-only (default).",
+                    },
+                },
+                "required": ["source_url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_crawler",
+            "description": (
+                "ACTION (kicks off a job): start an open-pulse crawl from seed "
+                "GitHub orgs / users / ``owner/repo`` handles. BFS over the "
+                "community graph for ``max_rounds`` rounds; optionally follow "
+                "dependency / dependent edges. Returns a crawl job_id (runs "
+                "asynchronously). Only call this when the user explicitly asks "
+                "to crawl / seed new repositories."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "seeds": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Seed nodes: GitHub orgs, users, or owner/repo.",
+                    },
+                    "max_rounds": {"type": "integer", "description": "BFS rounds (1-5, default 2)."},
+                    "crawl_dependencies": {"type": "boolean", "description": "Also crawl each repo's dependencies."},
+                    "crawl_dependents": {"type": "boolean", "description": "Also crawl each repo's dependents."},
+                },
+                "required": ["seeds"],
             },
         },
     },
@@ -545,6 +633,156 @@ def _read_file(name: str) -> dict[str, Any]:
     }
 
 
+def _gme_base() -> str:
+    return os.environ.get(
+        "HUB_EXTRACTOR_URL", "http://git-metadata-extractor:1234"
+    ).rstrip("/")
+
+
+def _gme_headers() -> dict[str, str]:
+    h = {"Content-Type": "application/json"}
+    tok = os.environ.get("EXTRACTOR_API_TOKEN", "")
+    if tok:
+        h["Authorization"] = f"Bearer {tok}"
+    return h
+
+
+def _crawler_base() -> str:
+    return os.environ.get("HUB_CRAWLER_URL", "http://crawler:8000").rstrip("/")
+
+
+def _crawler_headers() -> dict[str, str]:
+    h = {"Content-Type": "application/json"}
+    tok = os.environ.get("CRAWLER_API_TOKEN", "")
+    if tok:
+        h["Authorization"] = f"Bearer {tok}"
+    return h
+
+
+def _run_gme_search(
+    index: str, query: str, top_k: int = 10, target: str | None = None
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"query": query, "top_k": max(1, min(int(top_k or 10), 50))}
+    if target:
+        body["target"] = target
+    try:
+        resp = httpx.post(
+            f"{_gme_base()}/v2/indices/{index}/search",
+            json=body,
+            headers=_gme_headers(),
+            # Semantic search embeds the query + reranks, so it's much slower
+            # than a SQL round-trip — give it a longer budget than the
+            # shared TOOL_TIMEOUT_SECONDS.
+            timeout=SEARCH_TIMEOUT_SECONDS,
+        )
+    except httpx.TimeoutException as exc:
+        raise ToolError(
+            "GME search timed out — the index embedder/reranker may be cold "
+            "or unavailable on this deployment. Try a SQL/DuckDB query instead."
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise ToolError(f"GME search request failed: {exc}") from exc
+    if resp.status_code == 404:
+        raise ToolError(f"Unknown index {index!r}. See the index list in the tool description.")
+    if resp.status_code != 200:
+        raise ToolError(f"GME search HTTP {resp.status_code}: {resp.text[:300]}")
+    hits = (resp.json() or {}).get("hits") or []
+    out = []
+    for h in hits[:TOOL_ROW_CAP]:
+        pay = h.get("payload") or {}
+        out.append(
+            {
+                "id": h.get("id"),
+                "score": h.get("rerank_score") if h.get("rerank_score") is not None else h.get("vector_score"),
+                "title": pay.get("title") or pay.get("name") or pay.get("full_name"),
+                "url": pay.get("url") or pay.get("html_url"),
+                "payload": pay,
+            }
+        )
+    return {
+        "engine": "gme_search",
+        "index": index,
+        "target": target,
+        "query": query,
+        "hits": out,
+        "count": len(out),
+    }
+
+
+_EXTRACT_RUNTIMES = {"rule_based", "llm", "hybrid"}
+
+
+def _run_extract(source_url: str, runtime: str | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {"source_url": source_url}
+    if runtime:
+        rt = str(runtime).lower()
+        if rt not in _EXTRACT_RUNTIMES:
+            raise ToolError(
+                "runtime must be rule_based (gimie-only) / hybrid / llm."
+            )
+        body["agent_runtime"] = rt
+    try:
+        resp = httpx.post(
+            f"{_gme_base()}/v2/extract",
+            json=body,
+            headers=_gme_headers(),
+            timeout=TOOL_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        raise ToolError(f"extract request failed: {exc}") from exc
+    if resp.status_code not in (200, 202):
+        raise ToolError(f"extract HTTP {resp.status_code}: {resp.text[:300]}")
+    j = resp.json()
+    return {
+        "engine": "gme_extract",
+        "submitted": True,
+        "source_url": source_url,
+        "agent_runtime": body.get("agent_runtime", "server default"),
+        "job_id": j.get("job_id"),
+        "status": j.get("status"),
+        "note": "Extraction runs asynchronously — poll the job or watch the Pipeline page.",
+    }
+
+
+def _run_crawler(
+    seeds: Any,
+    max_rounds: int = 2,
+    crawl_dependencies: bool = False,
+    crawl_dependents: bool = False,
+) -> dict[str, Any]:
+    if isinstance(seeds, str):
+        seeds = [s.strip() for s in re.split(r"[\s,]+", seeds) if s.strip()]
+    if not seeds:
+        raise ToolError("``seeds`` (GitHub orgs / users / owner/repo) is required.")
+    body = {
+        "seeds": list(seeds),
+        "max_rounds": max(1, min(int(max_rounds or 2), 5)),
+        "crawl_dependencies": bool(crawl_dependencies),
+        "crawl_dependents": bool(crawl_dependents),
+    }
+    try:
+        resp = httpx.post(
+            f"{_crawler_base()}/api/v1/crawl",
+            json=body,
+            headers=_crawler_headers(),
+            timeout=TOOL_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        raise ToolError(f"crawler request failed: {exc}") from exc
+    if resp.status_code not in (200, 201, 202):
+        raise ToolError(f"crawler HTTP {resp.status_code}: {resp.text[:300]}")
+    j = resp.json()
+    return {
+        "engine": "crawler",
+        "submitted": True,
+        "seeds": body["seeds"],
+        "max_rounds": body["max_rounds"],
+        "job_id": j.get("job_id") or j.get("id"),
+        "status": j.get("status"),
+        "note": "Crawl runs asynchronously — watch the Pipeline page for progress.",
+    }
+
+
 def run_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Dispatch to the named tool. Always returns a dict; raises ``ToolError``
     only for conditions the model should see (write-guard rejection,
@@ -578,4 +816,25 @@ def run_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if not fname.strip():
             raise ToolError("``name`` argument is empty.")
         return _read_file(fname)
+    if name == "gme_search":
+        a = arguments or {}
+        index = (a.get("index") or "").strip()
+        query = (a.get("query") or "").strip()
+        if not index or not query:
+            raise ToolError("``index`` and ``query`` are required.")
+        return _run_gme_search(index, query, a.get("top_k", 10), a.get("target"))
+    if name == "extract_metadata":
+        a = arguments or {}
+        url = (a.get("source_url") or a.get("url") or "").strip()
+        if not url:
+            raise ToolError("``source_url`` is required.")
+        return _run_extract(url, a.get("runtime"))
+    if name == "run_crawler":
+        a = arguments or {}
+        return _run_crawler(
+            a.get("seeds"),
+            a.get("max_rounds", 2),
+            a.get("crawl_dependencies", False),
+            a.get("crawl_dependents", False),
+        )
     raise ToolError(f"Unknown tool: {name}")

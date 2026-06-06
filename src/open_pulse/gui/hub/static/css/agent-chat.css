@@ -227,6 +227,8 @@
 }
 .agent-tool-toggle:hover { border-color: var(--border-strong); }
 .agent-tool-toggle input { accent-color: var(--accent); }
+.agent-tool-toggle.is-action { border-style: dashed; }
+.agent-tool-act { font-size: 10px; }
 .agent-note {
   width: 100%; resize: vertical; min-height: 40px;
   background: var(--surface); color: var(--fg);
