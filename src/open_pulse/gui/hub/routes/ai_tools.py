@@ -26,8 +26,10 @@ an agentic loop accidentally wipe the store.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -35,6 +37,13 @@ import httpx
 from ..auth import get_settings
 
 log = logging.getLogger(__name__)
+
+# Scratch space for files attached in the Agent chat. Lives in /tmp by
+# default (ephemeral — wiped on host reboot). ``read_file`` / ``list_files``
+# are confined to this directory; path traversal out of it is rejected, so
+# nothing else on the host filesystem is reachable through the tools.
+AGENT_FILES_DIR = Path(os.environ.get("HUB_AGENT_FILES_DIR", "/tmp/op-agent-files"))
+FILE_READ_CAP = 20_000  # bytes returned to the model per read_file call
 
 # Hard caps the agent operates under regardless of what the model
 # requests. Per-tool timeout is short so a slow / hung query doesn't
@@ -159,6 +168,41 @@ TOOLS_SPEC: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["sql"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": (
+                "List the files the user attached to this chat (they live in a "
+                "scratch dir under /tmp). Returns each file's name, size, and "
+                "absolute path. Use the path with run_duckdb's read_csv / "
+                "read_parquet / read_json for tabular files, or read_file for text."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": (
+                "Read the (text) contents of an attached file by name — at most "
+                f"{FILE_READ_CAP} bytes, UTF-8 with replacement. For CSV / Parquet "
+                "/ JSON prefer run_duckdb (``SELECT * FROM "
+                "read_csv('<path>')``) so you get typed rows instead of raw text."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The attached file's name (see list_files).",
+                    },
+                },
+                "required": ["name"],
             },
         },
     },
@@ -465,6 +509,42 @@ def _run_duckdb(sql: str) -> dict[str, Any]:
     }
 
 
+def _safe_agent_file(name: str) -> Path:
+    """Resolve ``name`` inside :data:`AGENT_FILES_DIR`, rejecting traversal."""
+    base = AGENT_FILES_DIR.resolve()
+    target = (base / Path(name).name).resolve()
+    if base not in target.parents and target != base:
+        raise ToolError("Invalid file name.")
+    return target
+
+
+def _list_files() -> dict[str, Any]:
+    base = AGENT_FILES_DIR
+    files: list[dict[str, Any]] = []
+    if base.is_dir():
+        for p in sorted(base.iterdir()):
+            if p.is_file():
+                files.append(
+                    {"name": p.name, "size": p.stat().st_size, "path": str(p)}
+                )
+    return {"files": files, "count": len(files), "dir": str(base)}
+
+
+def _read_file(name: str) -> dict[str, Any]:
+    target = _safe_agent_file(name)
+    if not target.is_file():
+        raise ToolError(f"No attached file named {name!r}. Call list_files first.")
+    data = target.read_bytes()
+    truncated = len(data) > FILE_READ_CAP
+    text = data[:FILE_READ_CAP].decode("utf-8", errors="replace")
+    return {
+        "name": target.name,
+        "bytes": len(data),
+        "truncated": truncated,
+        "text": text,
+    }
+
+
 def run_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Dispatch to the named tool. Always returns a dict; raises ``ToolError``
     only for conditions the model should see (write-guard rejection,
@@ -491,4 +571,11 @@ def run_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if not sql.strip():
             raise ToolError("``sql`` argument is empty.")
         return _run_duckdb(sql)
+    if name == "list_files":
+        return _list_files()
+    if name == "read_file":
+        fname = (arguments or {}).get("name") or ""
+        if not fname.strip():
+            raise ToolError("``name`` argument is empty.")
+        return _read_file(fname)
     raise ToolError(f"Unknown tool: {name}")
