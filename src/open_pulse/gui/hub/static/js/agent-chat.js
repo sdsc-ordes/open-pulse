@@ -31,6 +31,23 @@
       defaultModel: '',
       toolsEnabled: true,
       _markedReady: false,
+      // agent + tool selection ("checkpoints")
+      tools: [
+        { id: 'run_duckdb', label: 'DuckDB', on: true },
+        { id: 'run_opensearch', label: 'OpenSearch', on: true },
+        { id: 'run_cypher', label: 'Cypher', on: true },
+        { id: 'run_sparql', label: 'SPARQL', on: true },
+      ],
+      models: [],
+      settingsOpen: false,
+      // attached files (server-side under /tmp) + freeform context note
+      files: [],
+      uploading: false,
+      contextNote: '',
+      // slash-command palette
+      slashOpen: false,
+      slashItems: [],
+      slashIdx: 0,
 
       // ── lifecycle ────────────────────────────────────────────────────
       init() {
@@ -40,6 +57,15 @@
           const raw = localStorage.getItem(STORAGE);
           if (raw) this.messages = JSON.parse(raw) || [];
         } catch (_) { this.messages = []; }
+        try {
+          const t = JSON.parse(localStorage.getItem(STORAGE + ':tools') || 'null');
+          if (Array.isArray(t)) {
+            this.tools.forEach((x) => { const f = t.find((y) => y.id === x.id); if (f) x.on = !!f.on; });
+          }
+        } catch (_) { /* keep defaults */ }
+        this.contextNote = localStorage.getItem(STORAGE + ':note') || '';
+        this.loadModels();
+        this.refreshFiles();
         // Enhance any restored messages once the DOM + CDN libs are ready.
         this.$nextTick(() => this._enhanceAll());
         this._scroll();
@@ -112,6 +138,8 @@
               model: this.model || undefined,
               temperature: 0.3,
               tools_enabled: this.toolsEnabled,
+              tool_names: this.enabledToolNames(),
+              context: this._buildContext(),
             }),
           });
           if (!resp.ok || !resp.body) {
@@ -375,7 +403,108 @@
 
       // ── small UI helpers ─────────────────────────────────────────────
       onKeydown(e) {
+        if (this.slashOpen && this.slashItems.length) {
+          if (e.key === 'ArrowDown') { e.preventDefault(); this.slashIdx = (this.slashIdx + 1) % this.slashItems.length; return; }
+          if (e.key === 'ArrowUp') { e.preventDefault(); this.slashIdx = (this.slashIdx - 1 + this.slashItems.length) % this.slashItems.length; return; }
+          if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); this.applySlash(this.slashItems[this.slashIdx]); return; }
+          if (e.key === 'Escape') { e.preventDefault(); this.slashOpen = false; return; }
+        }
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); }
+      },
+      onComposerInput() {
+        this._autosize();
+        const v = this.input;
+        if (v.startsWith('/') && !v.includes('\n') && !v.includes(' ')) this._openSlash(v);
+        else this.slashOpen = false;
+      },
+
+      // ── agent + tools ("checkpoints") ────────────────────────────────
+      enabledToolNames() {
+        // Selected data-plane tools + the file helpers (always available so
+        // the agent can use attachments regardless of the toggles).
+        return [...this.tools.filter((t) => t.on).map((t) => t.id), 'list_files', 'read_file'];
+      },
+      toggleTool(id) {
+        const t = this.tools.find((x) => x.id === id);
+        if (t) t.on = !t.on;
+        localStorage.setItem(STORAGE + ':tools', JSON.stringify(this.tools.map((x) => ({ id: x.id, on: x.on }))));
+      },
+      async loadModels() {
+        try {
+          const r = await fetch('/api/ai/models', { credentials: 'include' });
+          const j = await r.json();
+          this.models = (j.data || []).map((m) => m.id).filter(Boolean).sort();
+        } catch (_) { this.models = []; }
+      },
+
+      // ── context note ─────────────────────────────────────────────────
+      saveNote() { localStorage.setItem(STORAGE + ':note', this.contextNote || ''); },
+      _buildContext() {
+        const ctx = {};
+        if (this.contextNote && this.contextNote.trim()) ctx.note = this.contextNote.trim();
+        if (this.files.length) ctx.files = this.files.map((f) => ({ name: f.name, size: f.size, path: f.path }));
+        return Object.keys(ctx).length ? ctx : undefined;
+      },
+
+      // ── attached files (live under /tmp, server-side) ────────────────
+      pickFile() { if (this.$refs.file) this.$refs.file.click(); },
+      async onFilePicked(e) {
+        const list = e.target.files;
+        if (list && list.length) await this.uploadFiles(list);
+        e.target.value = '';
+      },
+      async uploadFiles(list) {
+        this.uploading = true;
+        try {
+          for (const f of list) {
+            const fd = new FormData(); fd.append('file', f);
+            const r = await fetch('/api/ai/files', { method: 'POST', body: fd, credentials: 'include' });
+            if (r.ok) {
+              const meta = await r.json();
+              if (!this.files.find((x) => x.name === meta.name)) this.files.push(meta);
+            }
+          }
+        } catch (_) { /* best effort */ } finally { this.uploading = false; }
+      },
+      async refreshFiles() {
+        try { const r = await fetch('/api/ai/files', { credentials: 'include' }); const j = await r.json(); this.files = j.files || []; } catch (_) { /* none */ }
+      },
+      async removeFile(name) {
+        try { await fetch('/api/ai/files/' + encodeURIComponent(name), { method: 'DELETE', credentials: 'include' }); } catch (_) { /* ignore */ }
+        this.files = this.files.filter((f) => f.name !== name);
+      },
+      fmtSize(n) {
+        n = Number(n) || 0;
+        for (const u of ['B', 'KB', 'MB']) { if (n < 1024) return Math.round(n) + u; n /= 1024; }
+        return n.toFixed(1) + 'GB';
+      },
+
+      // ── slash-command palette ────────────────────────────────────────
+      _slashRegistry() {
+        return [
+          { key: '/clear', hint: 'Clear the conversation', run: () => this.clearChat() },
+          { key: '/tools', hint: 'Agent & tool settings', run: () => { this.settingsOpen = true; } },
+          { key: '/attach', hint: 'Attach a file (stored in /tmp)', run: () => this.pickFile() },
+          { key: '/context', hint: 'Add a context note', run: () => { this.settingsOpen = true; this.$nextTick(() => this.$refs.note && this.$refs.note.focus()); } },
+          { key: '/duckdb', hint: 'Query the index stores', insert: 'Using run_duckdb, ' },
+          { key: '/opensearch', hint: 'Query GrimoireLab activity', insert: 'Using run_opensearch, ' },
+          { key: '/cypher', hint: 'Query the community graph', insert: 'Using run_cypher, ' },
+          { key: '/sparql', hint: 'Query repository properties', insert: 'Using run_sparql, ' },
+          { key: '/plot', hint: 'Ask for a Vega-Lite chart', insert: 'Plot as a Vega-Lite chart: ' },
+        ];
+      },
+      _openSlash(v) {
+        const q = v.slice(1).toLowerCase();
+        this.slashItems = this._slashRegistry().filter((c) => !q || c.key.slice(1).startsWith(q));
+        this.slashIdx = 0;
+        this.slashOpen = this.slashItems.length > 0;
+      },
+      applySlash(item) {
+        if (!item) return;
+        this.slashOpen = false;
+        if (item.insert !== undefined) { this.input = item.insert; this._autosize(); if (this.$refs.input) this.$refs.input.focus(); return; }
+        this.input = '';
+        if (item.run) item.run();
       },
       _autosize() {
         this.$nextTick(() => {
