@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -4363,6 +4364,149 @@ def _gh_repos_index_row(full: str) -> tuple[dict[str, Any] | None, str]:
         return None, sql
 
 
+# README card root — the GME writes each repo's README to
+# ``<index>/github/cards/<owner>/<name>/README.md`` and stores that relative
+# path in the ``github_repos`` index ``readme_path`` column. The hub mounts
+# the same ``/data`` tree, so it can read the card directly.
+_README_CARD_ROOT_REL = "index/github/cards"
+# Cap how much of a README we scan — coverage / doc badges live in the
+# header; this keeps a pathological multi-MB README from blowing the budget.
+_README_SCAN_BYTES = 200_000
+
+# Test-coverage regexes — ported verbatim from the GME develop's
+# ``src/v2/agents/rule_based/_repo_signals.py`` so the hub agrees with what
+# the extractor's ``_test_coverage`` field would report. (a) shields.io badge
+# with an embedded number; (b) plain-text "coverage: 87%".
+_COVERAGE_SHIELDS_RE = re.compile(r"coverage[-_](\d+)(?:%25|%)", re.IGNORECASE)
+_COVERAGE_TEXT_RE = re.compile(r"(?:test\s+)?coverage\s*:\s*(\d+)\s*%", re.IGNORECASE)
+
+
+def _read_readme_card(readme_path: str | None) -> str | None:
+    """README text for a repo from the GME card tree, or None.
+
+    ``readme_path`` is the index value (e.g. ``owner/name/README.md``),
+    resolved under ``<data>/index/github/cards``. Read read-only and
+    size-bounded; never escapes the card root.
+    """
+    if not readme_path:
+        return None
+    try:
+        from ..knowledge.duckdb_browser import _DATA_ROOT
+
+        root = (_DATA_ROOT / _README_CARD_ROOT_REL).resolve()
+        target = (root / readme_path).resolve()
+        # Path-traversal guard: the resolved file must stay under the root.
+        if root not in target.parents:
+            return None
+        if not target.is_file():
+            return None
+        return target.read_text(encoding="utf-8", errors="ignore")[:_README_SCAN_BYTES]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("README card read failed for %s: %s", readme_path, exc)
+        return None
+
+
+def _parse_test_coverage(readme: str | None) -> str | None:
+    """Static test-coverage percentage from a README, or None.
+
+    Mirror of the GME ``parse_test_coverage``: a shields.io badge with an
+    embedded number, else a plain-text ``coverage: NN%``. Dynamic
+    codecov/coveralls badges (no embedded number) deliberately return None.
+    """
+    if not readme:
+        return None
+    m = _COVERAGE_SHIELDS_RE.search(readme) or _COVERAGE_TEXT_RE.search(readme)
+    return f"{m.group(1)}%" if m else None
+
+
+def _metric_test_coverage(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Snapshot: does the README advertise a test-coverage number?
+
+    Reads the GME-extracted README card and applies the extractor's own
+    ``parse_test_coverage`` rule — a static shields.io badge or a
+    plain-text ``coverage: NN%``. CHAOSS "Test Coverage". Dynamic
+    codecov/coveralls badges carry no number in the markup, so they
+    read as "no static number" rather than a false zero.
+    """
+    row, _sql = _gh_repos_index_row(full)
+    # Prefer the index's stored path; fall back to the conventional card
+    # layout (``owner/name/README.md``) so a repo with a card but no index
+    # row still resolves.
+    readme_path = (row or {}).get("readme_path") or f"{full}/README.md"
+    sql = (
+        f"-- README card: <data>/{_README_CARD_ROOT_REL}/{readme_path or '<none>'}\n"
+        "-- parse_test_coverage(readme): shields.io 'coverage-NN%' badge "
+        "or text 'coverage: NN%'"
+    )
+    readme = _read_readme_card(readme_path)
+    trace = QueryTrace(
+        store="Index · README card",
+        engine="readme",
+        title=f"Test-coverage badge for {full}",
+        query=sql,
+        result_summary="card read" if readme is not None else "no README card",
+    )
+    if readme is None:
+        return MetricResult(
+            slug="test_coverage",
+            value="—",
+            label="no README card",
+            secondary=None,
+            queries=[trace],
+            notes="No README card available for this repository under the github cards.",
+        )
+    pct = _parse_test_coverage(readme)
+    if pct is None:
+        return MetricResult(
+            slug="test_coverage",
+            value="—",
+            label="no static coverage number",
+            secondary=None,
+            queries=[trace],
+            notes=(
+                "The README declares no static coverage percentage. Many "
+                "projects use dynamic codecov/coveralls badges that carry "
+                "no number in the markup — those read as no-number here "
+                "(matching the GME's deterministic parser), not 0%."
+            ),
+            unification=(
+                "Ported GME ``parse_test_coverage``: shields.io "
+                "``coverage-NN%`` badge or plain ``coverage: NN%`` text."
+            ),
+        )
+    try:
+        frac = int(pct.rstrip("%")) / 100.0
+    except ValueError:
+        frac = None
+    tone = "good" if frac is not None and frac >= 0.8 else (
+        "warn" if frac is not None and frac >= 0.5 else "danger"
+    )
+    return MetricResult(
+        slug="test_coverage",
+        value=pct,
+        label="declared test coverage",
+        secondary=None,
+        queries=[trace],
+        visual=(
+            {"kind": "donut", "fraction": min(frac, 1.0), "tone": tone}
+            if frac is not None
+            else None
+        ),
+        notes=(
+            "Static test-coverage percentage advertised in the README, "
+            "parsed with the GME's own deterministic rule. A repo with a "
+            "dynamic (numberless) badge reports no number rather than 0%."
+        ),
+        unification=(
+            "Ported GME ``parse_test_coverage``: shields.io "
+            "``coverage-NN%`` badge or plain ``coverage: NN%`` text."
+        ),
+        headline_tone=tone,
+    )
+
+
 def _metric_docs_discoverability(
     full: str, canonical_url: str, window_days: int
 ) -> MetricResult:
@@ -5212,6 +5356,22 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=False,
         compute=_metric_license_coverage,
+    ),
+    MetricSpec(
+        slug="test_coverage",
+        name="Test Coverage",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-test-coverage/",
+        question="Is the test suite measured?",
+        description=(
+            "Static test-coverage percentage advertised in the README, "
+            "parsed with the GME's deterministic rule (shields.io badge "
+            "or `coverage: NN%`). Dynamic codecov/coveralls badges carry "
+            "no number, so they read as no-number, not 0%."
+        ),
+        is_time_based=False,
+        compute=_metric_test_coverage,
     ),
     MetricSpec(
         slug="committers",
