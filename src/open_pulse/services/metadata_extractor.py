@@ -148,6 +148,7 @@ class MetadataExtractorService:
         agent_runtime: str = "rule_based",
         output_format: str = "jsonld",
         include_internal_fields: bool = False,
+        refresh: bool = False,
     ) -> str:
         """POST ``/v2/extract`` and return the ``job_id``.
 
@@ -157,6 +158,10 @@ class MetadataExtractorService:
         ``include_internal_fields`` keeps GME-internal data (now exposed
         under the ``gme-internal:`` namespace) in the response — bios,
         locations, GitHub flags, etc.
+
+        ``refresh`` bypasses the GME pipeline cache (and re-fetches the
+        providers) so a re-extract picks up current pipeline logic / new
+        fields instead of returning a stale cached graph.
         """
         url = self.endpoint + _V2_EXTRACT_PATH
         body: dict[str, Any] = {
@@ -164,6 +169,7 @@ class MetadataExtractorService:
             "output_format": output_format,
             "agent_runtime": agent_runtime,
             "include_internal_fields": include_internal_fields,
+            "refresh": refresh,
         }
         try:
             resp = self._client.post(url, json=body, headers=self._auth_headers())
@@ -279,6 +285,7 @@ class MetadataExtractorService:
         *,
         agent_runtime: str = "rule_based",
         include_internal_fields: bool = False,
+        refresh: bool = False,
         poll_interval: float = _DEFAULT_V2_POLL_INTERVAL,
         timeout: float = _DEFAULT_V2_TIMEOUT,
     ) -> dict[str, Any]:
@@ -292,6 +299,7 @@ class MetadataExtractorService:
             agent_runtime=agent_runtime,
             output_format="jsonld",
             include_internal_fields=include_internal_fields,
+            refresh=refresh,
         )
         logger.info(
             "metadata_extractor v2: submitted job %s for %s (runtime=%s)",
