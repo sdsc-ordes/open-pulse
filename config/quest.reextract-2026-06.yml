@@ -53,19 +53,22 @@ quest:
                                      # release_count, has_ci, …) — the whole
                                      # point of this re-extract
       force_refresh: true            # NO cache — re-fetch + re-extract fresh
-      max_workers: 1                 # GME is EXTRACTOR_WORKERS=1
+      max_workers: 6                 # match GME V2_MAX_CONCURRENT_AGENTS=6
+                                     # (async v2 path; EXTRACTOR_WORKERS=1 is
+                                     # the separate index-ingest lock)
       v2_poll_interval_seconds: 3.0
       v2_timeout_seconds: 900.0      # hybrid is slower than rule_based
       # Stream each repo's JSON-LD straight into Oxigraph as it finishes,
       # so the named graph fills progressively over a long run.
       stream_to_sparql: true
       auto_named_graph: true         # → https://…/graph/2026-06/hybrid
-      # publish_to_default left unset → auto: hybrid publishes to default too.
+      publish_to_default: false      # ISOLATED snapshot — don't touch the live
+                                     # default graph (still serving 2026-05)
       input_dir: .quest-artifacts/reextract-2026-06
       input_filename: crawler-graph.json
       output_dir: .quest-artifacts/reextract-2026-06/metadata-json
-      skip_existing: false           # force a fresh write even if a file exists
-      max_repos: 50                  # VALIDATION BATCH — set 0 for the full run
+      skip_existing: true            # resumable: --resume skips done repos
+      max_repos: 0                   # FULL RUN — all 10,189 repos
 
     sparql_upload:
       enabled: false                 # streaming handles the load for the batch
