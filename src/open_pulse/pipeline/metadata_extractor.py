@@ -177,6 +177,7 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
                     full_name,
                     agent_runtime=v2_agent_runtime,
                     include_internal_fields=include_internal_fields,
+                    refresh=force_refresh,
                     poll_interval=v2_poll,
                     timeout=v2_timeout,
                 )
