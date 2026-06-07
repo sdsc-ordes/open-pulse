@@ -169,14 +169,14 @@
                      x-data='{ slug: "{{ m.slug }}" }'
                      x-init="chaossLoadCard($el, slug)"
                      data-metric-slug="{{ m.slug }}"
-                     data-metric-category="{{ m.category }}"
+                     data-metric-category="{{ g.name }}"
                      style="display: flex; flex-direction: column; gap: 10px; min-height: 200px;">
               <div style="display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;">
                 {% if m.is_time_based %}
                   <span class="pill" style="font-size: 10px;">⏱ time-based</span>
                 {% endif %}
                 <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener" class="card-meta"
-                   style="font-size: 11px; margin-left: auto;">{{ m.chaoss_level }} ↗</a>
+                   style="font-size: 11px; margin-left: auto;">CHAOSS · {{ m.category }} ↗</a>
               </div>
               <div class="card-title" style="margin: 0;">{{ m.name }}</div>
               <div class="card-meta" style="font-size: 12px;">{{ m.question }}</div>
