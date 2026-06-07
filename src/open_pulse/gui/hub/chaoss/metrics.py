@@ -4555,6 +4555,149 @@ def _metric_test_coverage(
     )
 
 
+def _metric_release_frequency(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """How often does the project cut releases?
+
+    Reads the GME ``gme-internal:release_count`` / ``first_release_date`` /
+    ``latest_release_date`` triples (flat scalars the extractor derives from
+    the GitHub releases list). The headline is the lifetime cadence —
+    releases per year across the span from first to latest release. CHAOSS
+    "Release Frequency".
+    """
+    sparql = (
+        "# Flat release scalars the GME derives from the GitHub releases\n"
+        "# list (the raw list-of-objects can't be queried as triples).\n"
+        "PREFIX pulse: <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX gme:   <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?count ?first ?latest WHERE {\n"
+        f'  ?repo pulse:githubRepositoryHandle "{full}" .\n'
+        "  OPTIONAL { ?repo gme:release_count ?count }\n"
+        "  OPTIONAL { ?repo gme:first_release_date ?first }\n"
+        "  OPTIONAL { ?repo gme:latest_release_date ?latest }\n"
+        "} LIMIT 1"
+    )
+    count: int | None = None
+    first = latest = None
+    traces: list[QueryTrace] = []
+    try:
+        rows = stores.sparql_select(sparql)
+        if rows:
+            r = rows[0]
+            if r.get("count", {}).get("value") not in (None, ""):
+                count = int(float(r["count"]["value"]))
+            first = (r.get("first") or {}).get("value") or None
+            latest = (r.get("latest") or {}).get("value") or None
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"GME release scalars for {full}",
+                query=sparql,
+                result_summary=(
+                    f"{count} releases" if count is not None
+                    else "no release triple yet (repo not re-extracted with develop GME)"
+                ),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"GME release scalars for {full}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
+        return MetricResult(
+            slug="release_frequency",
+            value="—",
+            label="query error",
+            secondary=None,
+            queries=traces,
+            notes="SPARQL error reading release scalars.",
+        )
+
+    if count is None:
+        return MetricResult(
+            slug="release_frequency",
+            value="—",
+            label="no release data",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "No ``gme-internal:release_count`` triple for this repo yet. "
+                "It populates once the repo is extracted with the develop "
+                "GME (which derives flat release scalars from the GitHub "
+                "releases list)."
+            ),
+            unification=(
+                "``gme-internal:release_count`` / ``first_release_date`` / "
+                "``latest_release_date`` → releases per year over the span."
+            ),
+        )
+
+    date_range = None
+    if first and latest:
+        date_range = f"{first[:10]} → {latest[:10]}"
+    # Lifetime cadence: releases per year over [first, latest].
+    per_year = None
+    if count >= 1 and first and latest:
+        try:
+            d0 = datetime.fromisoformat(first[:10])
+            d1 = datetime.fromisoformat(latest[:10])
+            span_years = (d1 - d0).days / 365.25
+            if span_years >= 0.08:  # ~1 month — avoid dividing by ~0
+                per_year = count / span_years
+        except ValueError:
+            per_year = None
+
+    secondary_bits = [f"{count} release{'s' if count != 1 else ''} total"]
+    if date_range:
+        secondary_bits.append(date_range)
+
+    if per_year is not None:
+        return MetricResult(
+            slug="release_frequency",
+            value=f"{per_year:.1f}",
+            label="releases / year",
+            secondary=" · ".join(secondary_bits),
+            queries=traces,
+            notes=(
+                "Lifetime release cadence: total releases divided by the "
+                "years between the first and latest release "
+                "(``gme-internal`` release scalars). A windowed "
+                "releases-in-last-12-months view needs per-release dates, "
+                "which the flat scalars don't carry."
+            ),
+            unification=(
+                "``release_count`` ÷ years(``first_release_date`` → "
+                "``latest_release_date``)."
+            ),
+            headline_tone="good" if per_year >= 4 else "info",
+        )
+    # Have a count but no usable span (0/1 release, or same-day).
+    return MetricResult(
+        slug="release_frequency",
+        value=str(count),
+        label="releases (no cadence yet)" if count else "no releases",
+        secondary=date_range,
+        queries=traces,
+        notes=(
+            "Fewer than two dated releases (or all on one day), so a "
+            "per-year cadence isn't defined yet — the total count is shown."
+        ),
+        unification=(
+            "``release_count`` ÷ years(``first_release_date`` → "
+            "``latest_release_date``); count shown when the span is ~0."
+        ),
+        headline_tone="info",
+    )
+
+
 def _metric_docs_discoverability(
     full: str, canonical_url: str, window_days: int
 ) -> MetricResult:
@@ -5404,6 +5547,22 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=False,
         compute=_metric_license_coverage,
+    ),
+    MetricSpec(
+        slug="release_frequency",
+        name="Release Frequency",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-release-frequency/",
+        question="How often does it ship releases?",
+        description=(
+            "Lifetime release cadence — releases per year across the span "
+            "from first to latest release, from the GME "
+            "`gme-internal:release_count` / `first_release_date` / "
+            "`latest_release_date` scalars."
+        ),
+        is_time_based=False,
+        compute=_metric_release_frequency,
     ),
     MetricSpec(
         slug="test_coverage",

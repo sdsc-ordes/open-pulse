@@ -45,22 +45,27 @@ missing.
 | `gme-internal:releases` | list (shape TBD) | **Release Frequency** — see note |
 | `gme-internal:latest_version` | literal | release header chip |
 
-### One thing to confirm: the `releases` shape
+### RESOLVED — the develop image (2026-06-07 13:13) shipped the flat scalars
 
-List-of-string fields (`keywords`) come through as **repeated triples**,
-one per value. `_releases` is a list of **objects**
-(`{tag_name, published_at}`). Two questions for you:
+The devs took option 2: the raw `_releases` list-of-objects collapses to
+empty blank nodes on JSON-LD expansion, so `summarize_releases()` now
+emits flat, queryable scalars (`_repo_signals.py`):
 
-1. How does `jsonld_build` emit a list-of-dicts — repeated triples to
-   blank nodes, or a single JSON-literal blob (like the `publiccode`
-   nested sub-trees)? We need the dates to compute releases-per-year.
-2. If a blob is easier on your side, a flat
-   `gme-internal:release_count` + `gme-internal:first_release_at` +
-   `gme-internal:latest_release_at` triple would let us compute
-   frequency without parsing JSON in SPARQL. Either works — your call.
+- `gme-internal:release_count` (int)
+- `gme-internal:first_release_date` (ISO 8601)
+- `gme-internal:latest_release_date` (ISO 8601)
 
-We'll wire **Release Frequency** the moment we can see real `releases`
-triples for a re-extracted repo.
+Plus a wave of related flat scalars: `package_*` (GHCR containers),
+`npm_*` / `pypi_*` / `conda_*` / `crates_*` / `rubygems_*` (registry
+packages: package / latest_version / versions / latest_release_date /
+registry_url / link), and `badge_count`.
+
+**Release Frequency is now wired** (releases/year over
+first→latest span) and will light up as soon as repos are re-extracted
+with this image. The hub container running today is still the previous
+digest and the graph carries 0 of these triples — so the remaining step
+is purely operational: bump the GME image + re-extract (your call /
+domain, since that writes Oxigraph).
 
 ## Already wired on our side (PR #103), no GME change needed
 
