@@ -1,0 +1,75 @@
+# open-pulse quest — SDSC v2 downstream (neo4j → GME → SPARQL)
+#
+# The crawl was run directly against the crawler /api/v2 surface (the new
+# multi-platform crawler) seeding SwissDataScienceCenter + sdsc-ordes, 2 rounds,
+# producing .quest-artifacts/crawler-json-sdsc-v2/crawler-graph.json
+# (221 repos, 82 users, 2 orgs, 24 teams). This quest runs ONLY the downstream
+# steps over that graph — the crawler step is disabled (the pipeline's crawler
+# client is v1-only until PR #104 lands; v2 was driven out-of-band).
+#
+#     open-pulse quest start --config config/quest.sdsc-v2.yml
+
+quest:
+  name: sdsc-v2
+  description: |
+    SDSC (SwissDataScienceCenter + sdsc-ordes) ecosystem — neo4j upload, GME
+    metadata extraction, SPARQL upload over the v2 crawl graph. Crawler step
+    disabled (crawl already produced out-of-band via /api/v2/crawl).
+
+  retry:
+    max_attempts: 2
+    backoff_seconds: 30
+
+  logging:
+    level: INFO
+    file: logs/quest-sdsc-v2.log
+
+  services:
+    crawler:
+      endpoint: "http://crawler-loop:8000"
+      api_token_env: "CRAWLER_API_TOKEN"
+    neo4j:
+      endpoint: "bolt://neo4j-open-pulse:7687"
+      auth_env: "NEO4J_AUTH"
+    metadata_extractor:
+      endpoint: "http://git-metadata-extractor:1234"
+    sparql_store:
+      endpoint: "http://oxigraph-open-pulse:7878"
+      auth_env: "SPARQL_AUTH"
+
+  steps:
+    crawler:
+      enabled: false                # crawl already produced via /api/v2/crawl
+      seeds:
+        - https://github.com/SwissDataScienceCenter
+        - https://github.com/sdsc-ordes
+      max_rounds: 2
+      output_dir: .quest-artifacts/crawler-json-sdsc-v2
+      output_filename: crawler-graph.json
+
+    frontier_extend:
+      enabled: false
+
+    neo4j_upload:
+      enabled: true
+      input_dir: .quest-artifacts/crawler-json-sdsc-v2
+      input_filename: crawler-graph.json
+
+    metadata_extractor:
+      enabled: true
+      mode: v2
+      v2_agent_runtime: rule_based
+      max_workers: 1
+      v2_poll_interval_seconds: 2.0
+      v2_timeout_seconds: 600.0
+      input_dir: .quest-artifacts/crawler-json-sdsc-v2
+      input_filename: crawler-graph.json
+      output_dir: .quest-artifacts/metadata-json-sdsc-v2
+      skip_existing: true
+      force_refresh: false
+      max_repos: 0
+
+    sparql_upload:
+      enabled: true
+      input_dir: .quest-artifacts/metadata-json-sdsc-v2
+      named_graph: "https://open-pulse.epfl.ch/graph/sdsc-v2"

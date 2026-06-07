@@ -1,0 +1,114 @@
+# open-pulse quest — Pharma / biotech open-source tools landscape
+#
+# Crawls the public GitHub organisations of major pharma + drug-discovery
+# biotech companies (Roche, AstraZeneca, Genentech, Novartis, Bayer, Merck,
+# Sanofi, BMS, Boehringer Ingelheim, + AI-biotech: Recursion, insitro,
+# BenevolentAI, Moderna, …) to map the *software tools* they open-source,
+# their maintainers/contributors, the orgs behind them, and the dependencies
+# those tools reuse. Then GME metadata extraction → SPARQL upload.
+#
+# Orgs verified to exist with public repos on 2026-06-05 (empty orgs —
+# pfizer/AbbVie/Sanofi/MSDLLC/daiichi-sankyo/relaytx — dropped). github org
+# seeds run through the crawler v1 (github-only) surface, so no v2 needed.
+#
+# Pass with::
+#
+#     open-pulse quest start --config config/quest.pharma-tools.yml
+#
+# SCALE NOTE: ~900 repos across these orgs. max_rounds:2 expands org → repos
+# (the tools) → their contributors + dependencies. Bounded by max_contributors;
+# issues/PRs left OFF to keep it focused on tools+deps. Drop to max_rounds:1
+# for an orgs→repos-only "tools inventory" first.
+
+quest:
+  name: pharma-tools
+  description: |
+    Open-source tools landscape of 18 pharma/biotech GitHub orgs — repos
+    (tools), contributors, owning orgs and software dependencies — crawled
+    2 rounds, then GME (v2, rule_based) metadata extraction → SPARQL.
+    crawler → neo4j_upload → metadata_extractor → sparql_upload.
+
+  retry:
+    max_attempts: 2
+    backoff_seconds: 30
+
+  logging:
+    level: INFO
+    file: logs/quest-pharma-tools.log
+
+  services:
+    crawler:
+      endpoint: "http://crawler-loop:8000"
+      api_token_env: "CRAWLER_API_TOKEN"
+    neo4j:
+      endpoint: "bolt://neo4j-open-pulse:7687"
+      auth_env: "NEO4J_AUTH"
+    metadata_extractor:
+      endpoint: "http://git-metadata-extractor:1234"
+    sparql_store:
+      endpoint: "http://oxigraph-open-pulse:7878"
+      auth_env: "SPARQL_AUTH"
+
+  steps:
+    crawler:
+      enabled: true
+      use_graphql: true
+      # Pharma / biotech org seeds (github-only → v1). Verified public + non-empty.
+      seeds:
+        - https://github.com/genentech                        # Genentech (Roche)
+        - https://github.com/Bayer-Group                      # Bayer Open Source
+        - https://github.com/bayer-science-for-a-better-life  # Bayer AG
+        - https://github.com/AstraZeneca
+        - https://github.com/Novartis
+        - https://github.com/Merck                            # MSD
+        - https://github.com/Boehringer-Ingelheim
+        - https://github.com/sanofi-public
+        - https://github.com/BristolMyersSquibb
+        - https://github.com/Roche                            # F. Hoffmann-La Roche
+        - https://github.com/recursionpharma                  # Recursion (AI biotech)
+        - https://github.com/insitro                          # insitro (AI biotech)
+        - https://github.com/BenevolentAI                     # BenevolentAI
+        - https://github.com/modernatx                        # Moderna
+        - https://github.com/amgen
+        - https://github.com/Genmab
+        - https://github.com/GSK
+        - https://github.com/UCB-Biopharma
+      max_rounds: 2                  # org → repos (tools) → contributors + deps
+      crawl_dependencies: true       # what tools these pharma repos reuse
+      crawl_dependents: false
+      crawl_issues: false            # keep focused on tools + deps (issues = heavy)
+      crawl_prs: false
+      min_stars: 0
+      max_dependents: null
+      max_contributors: 20           # cap per-repo contributor fan-out
+      output_dir: .quest-artifacts/crawler-json-pharma-tools
+      output_filename: crawler-graph.json
+      poll_interval_seconds: 5.0
+      timeout_seconds: 0             # no client-side cap — large multi-org crawl
+
+    frontier_extend:
+      enabled: false
+
+    neo4j_upload:
+      enabled: true
+      input_dir: .quest-artifacts/crawler-json-pharma-tools
+      input_filename: crawler-graph.json
+
+    metadata_extractor:
+      enabled: true
+      mode: v2
+      v2_agent_runtime: rule_based   # fast + deterministic over many repos; hybrid for LLM enrichment
+      max_workers: 1
+      v2_poll_interval_seconds: 2.0
+      v2_timeout_seconds: 600.0
+      input_dir: .quest-artifacts/crawler-json-pharma-tools
+      input_filename: crawler-graph.json
+      output_dir: .quest-artifacts/metadata-json-pharma-tools
+      skip_existing: true
+      force_refresh: false
+      max_repos: 0
+
+    sparql_upload:
+      enabled: true
+      input_dir: .quest-artifacts/metadata-json-pharma-tools
+      named_graph: "https://open-pulse.epfl.ch/graph/pharma-tools"

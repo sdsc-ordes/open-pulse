@@ -1,0 +1,96 @@
+# open-pulse quest — Collaboration-layer enhancement (Neo4j only)
+#
+# Re-crawls the pharma (18 orgs) + SDSC (2) + EPFL-ENAC seeds with issues + PRs
+# ENABLED, 1 hop, and runs ONLY crawler → neo4j_upload. Those clusters were
+# originally crawled with issues/PRs OFF, so Neo4j has their dependency +
+# contribution edges but no collaboration edges. neo4j_upload MERGEs, so this
+# adds OPENED_ISSUE / OPENED_PR / COMMENTED_ON / REVIEWED_PR edges onto the
+# existing Repo/User nodes without duplicating. GME + SPARQL steps disabled
+# (this enhances the Neo4j graph, not the SPARQL store).
+#
+#     open-pulse quest start --config config/quest.collab-layer.yml
+
+quest:
+  name: collab-layer
+  description: |
+    Collaboration-layer enrichment for the pharma + SDSC + EPFL-ENAC clusters:
+    1-hop crawl with issues + PRs to add issue/PR/comment/review edges to Neo4j.
+    crawler → neo4j_upload (GME + SPARQL disabled).
+
+  retry:
+    max_attempts: 2
+    backoff_seconds: 30
+
+  logging:
+    level: INFO
+    file: logs/quest-collab-layer.log
+
+  services:
+    crawler:
+      endpoint: "http://crawler-loop:8000"
+      api_token_env: "CRAWLER_API_TOKEN"
+    neo4j:
+      endpoint: "bolt://neo4j-open-pulse:7687"
+      auth_env: "NEO4J_AUTH"
+    metadata_extractor:
+      endpoint: "http://git-metadata-extractor:1234"
+    sparql_store:
+      endpoint: "http://oxigraph-open-pulse:7878"
+      auth_env: "SPARQL_AUTH"
+
+  steps:
+    crawler:
+      enabled: true
+      use_graphql: true
+      seeds:
+        # pharma / biotech (18)
+        - https://github.com/genentech
+        - https://github.com/Bayer-Group
+        - https://github.com/bayer-science-for-a-better-life
+        - https://github.com/AstraZeneca
+        - https://github.com/Novartis
+        - https://github.com/Merck
+        - https://github.com/Boehringer-Ingelheim
+        - https://github.com/sanofi-public
+        - https://github.com/BristolMyersSquibb
+        - https://github.com/Roche
+        - https://github.com/recursionpharma
+        - https://github.com/insitro
+        - https://github.com/BenevolentAI
+        - https://github.com/modernatx
+        - https://github.com/amgen
+        - https://github.com/Genmab
+        - https://github.com/GSK
+        - https://github.com/UCB-Biopharma
+        # SDSC (2) + EPFL-ENAC
+        - https://github.com/SwissDataScienceCenter
+        - https://github.com/sdsc-ordes
+        - https://github.com/EPFL-ENAC
+      max_rounds: 2                  # round1: org→repos; round2: repos→issues/PRs/contributors
+                                     # (max_rounds:1 only resolves the org seeds, no repo expansion)
+      crawl_dependencies: false      # deps already present in Neo4j — focus on collaboration
+      crawl_dependents: false
+      crawl_issues: true             # OPENED_ISSUE + COMMENTED_ON
+      crawl_prs: true                # OPENED_PR + REVIEWED_PR + COMMENTED_ON
+      issue_max: 100
+      pr_max: 100
+      min_stars: 0
+      max_contributors: 40
+      output_dir: .quest-artifacts/crawler-json-collab-layer
+      output_filename: crawler-graph.json
+      poll_interval_seconds: 5.0
+      timeout_seconds: 0
+
+    frontier_extend:
+      enabled: false
+
+    neo4j_upload:
+      enabled: true
+      input_dir: .quest-artifacts/crawler-json-collab-layer
+      input_filename: crawler-graph.json
+
+    metadata_extractor:
+      enabled: false
+
+    sparql_upload:
+      enabled: false

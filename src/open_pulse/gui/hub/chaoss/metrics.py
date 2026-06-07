@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -4214,6 +4215,859 @@ def _metric_pr_time_to_close(
     )
 
 
+# ── Metric · Upstream Code Dependencies ───────────────────────────────────
+
+
+def _metric_upstream_dependencies(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Snapshot: how many other repositories does this one depend on?
+
+    Counts outbound ``DEPENDS_ON`` edges in Neo4j — the dependency graph
+    the crawler resolved from manifests (``requirements.txt``,
+    ``pyproject.toml``, ``package.json``, …) onto concrete upstream
+    repositories. CHAOSS "Upstream Code Dependencies".
+    """
+    traces: list[QueryTrace] = []
+    repo_url = _to_gh_url(full)
+    cypher = (
+        "// Outbound DEPENDS_ON edges — the upstream repositories this\n"
+        "// project resolves to from its dependency manifests. DISTINCT\n"
+        "// so a package pinned twice isn't double-counted.\n"
+        f"MATCH (r:Repo {{full_name: '{repo_url}'}})-[:DEPENDS_ON]->(dep:Repo)\n"
+        "RETURN count(DISTINCT dep) AS direct_dependencies"
+    )
+    top_cypher = (
+        f"MATCH (r:Repo {{full_name: '{repo_url}'}})-[:DEPENDS_ON]->(dep:Repo)\n"
+        "RETURN DISTINCT dep.full_name AS dep ORDER BY dep LIMIT 12"
+    )
+    n = 0
+    tops: list[str] = []
+    try:
+        rows = stores.neo4j_run(cypher)
+        n = int(rows[0].get("direct_dependencies") or 0) if rows else 0
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title=f"Direct upstream dependencies of {full}",
+                query=cypher,
+                result_summary=f"{n} direct dependencies",
+            )
+        )
+        if n:
+            rows2 = stores.neo4j_run(top_cypher)
+            tops = [_from_gh_url(r.get("dep")) for r in rows2 if r.get("dep")]
+            traces.append(
+                QueryTrace(
+                    store="Neo4j",
+                    engine="cypher",
+                    title=f"Sample upstream dependencies of {full}",
+                    query=top_cypher,
+                    result_summary=f"{len(tops)} shown",
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        traces.append(
+            QueryTrace(
+                store="Neo4j",
+                engine="cypher",
+                title=f"Direct upstream dependencies of {full}",
+                query=cypher,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
+        return MetricResult(
+            slug="upstream_dependencies",
+            value="—",
+            label="no dependency data",
+            secondary=None,
+            queries=traces,
+            notes="No resolved upstream dependencies in the graph for this repo.",
+        )
+
+    return MetricResult(
+        slug="upstream_dependencies",
+        value=f"{n:,}",
+        label="direct upstream dependencies",
+        secondary=(", ".join(tops[:5]) + ("…" if len(tops) > 5 else "")) or None,
+        queries=traces,
+        examples=[{"dependency": d} for d in tops],
+        notes=(
+            "Counts distinct outbound ``DEPENDS_ON`` edges resolved to "
+            "concrete upstream repositories. Reflects what the crawler "
+            "resolved from dependency manifests — unresolved / private "
+            "packages aren't edges, so this is a floor, not the full "
+            "lock-file count. Edge data carries no version, so an "
+            "'outdated' breakdown isn't available."
+        ),
+        unification=(
+            "Single Cypher ``count(DISTINCT dep)`` over outbound "
+            "``DEPENDS_ON`` edges from the repo node."
+        ),
+        headline_tone="info",
+    )
+
+
+# ── Metric · Documentation Discoverability ────────────────────────────────
+
+
+def _gh_repos_index_row(full: str) -> tuple[dict[str, Any] | None, str]:
+    """One repo's metadata row from the ``github_repos`` DuckDB index.
+
+    Returns ``(row_or_None, sql)`` — the SQL is echoed in the metric's
+    QueryTrace for transparency. Reads the GME-published ``.ro.duckdb``
+    snapshot read-only; never touches the graph stores.
+    """
+    owner, _, name = full.partition("/")
+    sql = (
+        "SELECT homepage, license_spdx, readme_path, primary_language, raw\n"
+        "FROM repos\n"
+        f"WHERE lower(owner) = lower('{owner}') "
+        f"AND lower(name) = lower('{name}')\nLIMIT 1"
+    )
+    try:
+        # Local import: keeps the heavy duckdb dependency out of module
+        # import time and avoids a cycle with the knowledge package.
+        from ..knowledge.duckdb_browser import _DATA_ROOT, _connect
+
+        db_path = _DATA_ROOT / "index/github_repos/duckdb/github_repos.duckdb"
+        with _connect(db_path) as con:
+            r = con.execute(
+                "SELECT homepage, license_spdx, readme_path, primary_language, raw "
+                "FROM repos WHERE lower(owner)=lower(?) AND lower(name)=lower(?) LIMIT 1",
+                [owner, name],
+            ).fetchone()
+        if not r:
+            return None, sql
+        raw = {}
+        if r[4]:
+            try:
+                raw = json.loads(r[4])
+            except (TypeError, ValueError):
+                raw = {}
+        return (
+            {
+                "homepage": r[0],
+                "license_spdx": r[1],
+                "readme_path": r[2],
+                "primary_language": r[3],
+                "has_wiki": bool(raw.get("has_wiki")),
+                "has_pages": bool(raw.get("has_pages")),
+                "has_discussions": bool(raw.get("has_discussions")),
+            },
+            sql,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("github_repos index read failed for %s: %s", full, exc)
+        return None, sql
+
+
+# README card root — the GME writes each repo's README to
+# ``<index>/github/cards/<owner>/<name>/README.md`` and stores that relative
+# path in the ``github_repos`` index ``readme_path`` column. The hub mounts
+# the same ``/data`` tree, so it can read the card directly.
+_README_CARD_ROOT_REL = "index/github/cards"
+# Cap how much of a README we scan — coverage / doc badges live in the
+# header; this keeps a pathological multi-MB README from blowing the budget.
+_README_SCAN_BYTES = 200_000
+
+# Test-coverage regexes — ported verbatim from the GME develop's
+# ``src/v2/agents/rule_based/_repo_signals.py`` so the hub agrees with what
+# the extractor's ``_test_coverage`` field would report. (a) shields.io badge
+# with an embedded number; (b) plain-text "coverage: 87%".
+_COVERAGE_SHIELDS_RE = re.compile(r"coverage[-_](\d+)(?:%25|%)", re.IGNORECASE)
+_COVERAGE_TEXT_RE = re.compile(r"(?:test\s+)?coverage\s*:\s*(\d+)\s*%", re.IGNORECASE)
+
+
+def _read_readme_card(readme_path: str | None) -> str | None:
+    """README text for a repo from the GME card tree, or None.
+
+    ``readme_path`` is the index value (e.g. ``owner/name/README.md``),
+    resolved under ``<data>/index/github/cards``. Read read-only and
+    size-bounded; never escapes the card root.
+    """
+    if not readme_path:
+        return None
+    try:
+        from ..knowledge.duckdb_browser import _DATA_ROOT
+
+        root = (_DATA_ROOT / _README_CARD_ROOT_REL).resolve()
+        target = (root / readme_path).resolve()
+        # Path-traversal guard: the resolved file must stay under the root.
+        if root not in target.parents:
+            return None
+        if not target.is_file():
+            return None
+        return target.read_text(encoding="utf-8", errors="ignore")[:_README_SCAN_BYTES]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("README card read failed for %s: %s", readme_path, exc)
+        return None
+
+
+def _parse_test_coverage(readme: str | None) -> str | None:
+    """Static test-coverage percentage from a README, or None.
+
+    Mirror of the GME ``parse_test_coverage``: a shields.io badge with an
+    embedded number, else a plain-text ``coverage: NN%``. Dynamic
+    codecov/coveralls badges (no embedded number) deliberately return None.
+    """
+    if not readme:
+        return None
+    m = _COVERAGE_SHIELDS_RE.search(readme) or _COVERAGE_TEXT_RE.search(readme)
+    return f"{m.group(1)}%" if m else None
+
+
+def _metric_test_coverage(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Snapshot: does the project advertise a test-coverage number?
+
+    Preferred source is the GME-extracted ``gme-internal:test_coverage``
+    triple in Oxigraph (auto-published when a repo is extracted with the
+    develop GME). Until a repo is re-extracted, the hub re-parses the
+    GME README card with the extractor's own ``parse_test_coverage``
+    rule, so the metric works today and upgrades transparently. CHAOSS
+    "Test Coverage". Dynamic codecov/coveralls badges carry no number,
+    so they read as "no number" rather than a false zero.
+    """
+    traces: list[QueryTrace] = []
+    pct: str | None = None
+    source: str | None = None
+
+    # 1) Authoritative — the GME-extracted gme-internal:test_coverage triple.
+    sparql = (
+        "# Coverage % the GME parsed from the README, promoted to the graph\n"
+        "# as a gme-internal triple (auto-published with include_internal_fields).\n"
+        "PREFIX pulse: <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX gme:   <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?coverage WHERE {\n"
+        f'  ?repo pulse:githubRepositoryHandle "{full}" ;\n'
+        "        gme:test_coverage ?coverage .\n"
+        "} LIMIT 1"
+    )
+    try:
+        rows = stores.sparql_select(sparql)
+        if rows:
+            pct = str(rows[0]["coverage"]["value"]).strip()
+            source = "graph"
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"GME test-coverage triple for {full}",
+                query=sparql,
+                result_summary=(
+                    pct
+                    if pct
+                    else "no triple yet (repo not re-extracted with develop GME)"
+                ),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"GME test-coverage triple for {full}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
+
+    # 2) Fallback — re-parse the README card with the GME's own rule.
+    if pct is None:
+        row, _ = _gh_repos_index_row(full)
+        readme_path = (row or {}).get("readme_path") or f"{full}/README.md"
+        readme = _read_readme_card(readme_path)
+        card_sql = (
+            f"-- README card: <data>/{_README_CARD_ROOT_REL}/{readme_path}\n"
+            "-- parse_test_coverage(readme): shields.io 'coverage-NN%' badge "
+            "or text 'coverage: NN%'"
+        )
+        traces.append(
+            QueryTrace(
+                store="Index · README card",
+                engine="readme",
+                title=f"README-card coverage parse for {full}",
+                query=card_sql,
+                result_summary="card read" if readme is not None else "no README card",
+            )
+        )
+        if readme is not None:
+            pct = _parse_test_coverage(readme)
+            if pct:
+                source = "readme"
+
+    if pct is None:
+        return MetricResult(
+            slug="test_coverage",
+            value="—",
+            label="no coverage number",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "No static coverage percentage in the GME graph or the "
+                "README. Dynamic codecov/coveralls badges carry no number "
+                "in the markup — those read as no-number (matching the "
+                "GME's deterministic parser), not 0%."
+            ),
+            unification=(
+                "Prefer ``gme-internal:test_coverage`` from the graph; fall "
+                "back to the GME ``parse_test_coverage`` rule over the "
+                "README card."
+            ),
+        )
+
+    try:
+        frac: float | None = int(pct.rstrip("%")) / 100.0
+    except ValueError:
+        frac = None
+    tone = "good" if frac is not None and frac >= 0.8 else (
+        "warn" if frac is not None and frac >= 0.5 else "danger"
+    )
+    src_label = "GME graph" if source == "graph" else "README parse (pre-re-extract)"
+    return MetricResult(
+        slug="test_coverage",
+        value=pct,
+        label="declared test coverage",
+        secondary=f"source: {src_label}",
+        queries=traces,
+        visual=(
+            {"kind": "donut", "fraction": min(frac, 1.0), "tone": tone}
+            if frac is not None
+            else None
+        ),
+        notes=(
+            "Static test-coverage percentage. Preferred source is the "
+            "GME-extracted ``gme-internal:test_coverage`` triple; until a "
+            "repo is re-extracted with the develop GME, the hub re-parses "
+            "the README card with the GME's own rule. Dynamic badges with "
+            "no embedded number read as no-number, not 0%."
+        ),
+        unification=(
+            "Prefer ``gme-internal:test_coverage`` (SPARQL); fall back to "
+            "the GME ``parse_test_coverage`` rule over the README card."
+        ),
+        headline_tone=tone,
+    )
+
+
+def _metric_release_frequency(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """How often does the project cut releases?
+
+    Reads the GME ``gme-internal:release_count`` / ``first_release_date`` /
+    ``latest_release_date`` triples (flat scalars the extractor derives from
+    the GitHub releases list). The headline is the lifetime cadence —
+    releases per year across the span from first to latest release. CHAOSS
+    "Release Frequency".
+    """
+    sparql = (
+        "# Flat release scalars the GME derives from the GitHub releases\n"
+        "# list (the raw list-of-objects can't be queried as triples).\n"
+        "PREFIX pulse: <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX gme:   <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?count ?first ?latest WHERE {\n"
+        f'  ?repo pulse:githubRepositoryHandle "{full}" .\n'
+        "  OPTIONAL { ?repo gme:release_count ?count }\n"
+        "  OPTIONAL { ?repo gme:first_release_date ?first }\n"
+        "  OPTIONAL { ?repo gme:latest_release_date ?latest }\n"
+        "} LIMIT 1"
+    )
+    count: int | None = None
+    first = latest = None
+    traces: list[QueryTrace] = []
+    try:
+        rows = stores.sparql_select(sparql)
+        if rows:
+            r = rows[0]
+            if r.get("count", {}).get("value") not in (None, ""):
+                count = int(float(r["count"]["value"]))
+            first = (r.get("first") or {}).get("value") or None
+            latest = (r.get("latest") or {}).get("value") or None
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"GME release scalars for {full}",
+                query=sparql,
+                result_summary=(
+                    f"{count} releases" if count is not None
+                    else "no release triple yet (repo not re-extracted with develop GME)"
+                ),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"GME release scalars for {full}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
+        return MetricResult(
+            slug="release_frequency",
+            value="—",
+            label="query error",
+            secondary=None,
+            queries=traces,
+            notes="SPARQL error reading release scalars.",
+        )
+
+    if count is None:
+        return MetricResult(
+            slug="release_frequency",
+            value="—",
+            label="no release data",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "No ``gme-internal:release_count`` triple for this repo yet. "
+                "It populates once the repo is extracted with the develop "
+                "GME (which derives flat release scalars from the GitHub "
+                "releases list)."
+            ),
+            unification=(
+                "``gme-internal:release_count`` / ``first_release_date`` / "
+                "``latest_release_date`` → releases per year over the span."
+            ),
+        )
+
+    date_range = None
+    if first and latest:
+        date_range = f"{first[:10]} → {latest[:10]}"
+    # Lifetime cadence: releases per year over [first, latest].
+    per_year = None
+    if count >= 1 and first and latest:
+        try:
+            d0 = datetime.fromisoformat(first[:10])
+            d1 = datetime.fromisoformat(latest[:10])
+            span_years = (d1 - d0).days / 365.25
+            if span_years >= 0.08:  # ~1 month — avoid dividing by ~0
+                per_year = count / span_years
+        except ValueError:
+            per_year = None
+
+    secondary_bits = [f"{count} release{'s' if count != 1 else ''} total"]
+    if date_range:
+        secondary_bits.append(date_range)
+
+    if per_year is not None:
+        return MetricResult(
+            slug="release_frequency",
+            value=f"{per_year:.1f}",
+            label="releases / year",
+            secondary=" · ".join(secondary_bits),
+            queries=traces,
+            notes=(
+                "Lifetime release cadence: total releases divided by the "
+                "years between the first and latest release "
+                "(``gme-internal`` release scalars). A windowed "
+                "releases-in-last-12-months view needs per-release dates, "
+                "which the flat scalars don't carry."
+            ),
+            unification=(
+                "``release_count`` ÷ years(``first_release_date`` → "
+                "``latest_release_date``)."
+            ),
+            headline_tone="good" if per_year >= 4 else "info",
+        )
+    # Have a count but no usable span (0/1 release, or same-day).
+    return MetricResult(
+        slug="release_frequency",
+        value=str(count),
+        label="releases (no cadence yet)" if count else "no releases",
+        secondary=date_range,
+        queries=traces,
+        notes=(
+            "Fewer than two dated releases (or all on one day), so a "
+            "per-year cadence isn't defined yet — the total count is shown."
+        ),
+        unification=(
+            "``release_count`` ÷ years(``first_release_date`` → "
+            "``latest_release_date``); count shown when the span is ~0."
+        ),
+        headline_tone="info",
+    )
+
+
+def _metric_docs_discoverability(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Snapshot: can a newcomer actually find the docs?
+
+    Scores four discoverability signals extracted by the GME into the
+    ``github_repos`` index — a README, a homepage / docs link, a wiki,
+    and a GitHub Pages site. CHAOSS "Documentation Discoverability".
+    """
+    row, sql = _gh_repos_index_row(full)
+    trace = QueryTrace(
+        store="Index · github_repos",
+        engine="duckdb",
+        title=f"Documentation signals for {full}",
+        query=sql,
+        result_summary="1 row" if row else "no row",
+    )
+    if row is None:
+        return MetricResult(
+            slug="docs_discoverability",
+            value="—",
+            label="repo not in index",
+            secondary=None,
+            queries=[trace],
+            notes="No row in the github_repos index for this repository.",
+        )
+
+    homepage = (row.get("homepage") or "").strip()
+    signals = [
+        ("README", bool(row.get("readme_path"))),
+        ("Homepage / docs link", bool(homepage)),
+        ("Wiki", row.get("has_wiki", False)),
+        ("Pages site", row.get("has_pages", False)),
+    ]
+    present = [name for name, ok in signals if ok]
+    total = len(signals)
+    n = len(present)
+    fraction = n / total
+    tone = "good" if n >= 3 else "warn" if n >= 1 else "danger"
+    return MetricResult(
+        slug="docs_discoverability",
+        value=f"{n}/{total}",
+        label="documentation signals present",
+        secondary=(", ".join(present) or "none"),
+        queries=[trace],
+        examples=[
+            {"signal": name, "present": "yes" if ok else "no"} for name, ok in signals
+        ],
+        visual={"kind": "donut", "fraction": fraction, "tone": tone},
+        notes=(
+            "Four discoverability signals from the GME-extracted "
+            "metadata: a README file, a homepage / documentation link, "
+            "a project wiki, and a GitHub Pages site. A high score means "
+            "a newcomer can find the docs without reading the source."
+        ),
+        unification=(
+            "Fraction of four boolean signals present "
+            "(README · homepage · wiki · pages)."
+        ),
+        headline_tone=tone,
+    )
+
+
+# ── Metric · License Coverage ─────────────────────────────────────────────
+
+
+def _metric_license_coverage(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Snapshot: does the repo carry a declared license?
+
+    Repo-level this is a 0/1 — a declared SPDX license or none. The
+    value comes into its own at *project* scope, where the mean across
+    member repos reads as "share of repositories with a declared
+    license". CHAOSS "License Coverage".
+    """
+    row, sql = _gh_repos_index_row(full)
+    trace = QueryTrace(
+        store="Index · github_repos",
+        engine="duckdb",
+        title=f"Declared license for {full}",
+        query=sql,
+        result_summary="1 row" if row else "no row",
+    )
+    if row is None:
+        return MetricResult(
+            slug="license_coverage",
+            value="—",
+            label="repo not in index",
+            secondary=None,
+            queries=[trace],
+            notes="No row in the github_repos index for this repository.",
+        )
+
+    spdx = (row.get("license_spdx") or "").strip()
+    has = bool(spdx)
+    return MetricResult(
+        slug="license_coverage",
+        value=spdx if has else "✗",
+        label="declared license" if has else "no declared license",
+        secondary=None,
+        queries=[trace],
+        visual={
+            "kind": "donut",
+            "fraction": 1.0 if has else 0.0,
+            "tone": "good" if has else "danger",
+        },
+        notes=(
+            "Whether the repository declares a license (SPDX id from the "
+            "GME ``license_spdx`` field). Per-repo it's yes/no; across a "
+            "project the mean is the share of repositories that declare "
+            "a license. Per-*file* coverage needs file-level scanning, "
+            "which isn't collected — this is the repo-level signal."
+        ),
+        unification="1 if ``license_spdx`` is set, else 0; project mean = coverage.",
+        headline_tone="good" if has else "warn",
+    )
+
+
+# ── Metric · Committers ───────────────────────────────────────────────────
+
+
+def _metric_committers(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """How many distinct people *committed* code in the window?
+
+    CHAOSS "Committers" — distinct ``committer_name`` on commits
+    GrimoireLab indexed. This is the commit-landing view, deliberately
+    narrower than ``contributors`` (which counts ``author_name`` and so
+    includes people whose patches someone else committed).
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+    origin = f"https://github.com/{full}"
+    # The git backend indexes the clone URL, which usually carries a
+    # ``.git`` suffix (``…/dataverse.git``) — match both forms so we
+    # don't silently miss a repo on the suffix alone.
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"terms": {"origin": [origin, origin + ".git"]}},
+                    {"range": {"grimoire_creation_date": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "by_committer": {"cardinality": {"field": "committer_name"}},
+            "by_month": {
+                "date_histogram": {
+                    "field": "grimoire_creation_date",
+                    "calendar_interval": "month",
+                    "min_doc_count": 0,
+                },
+                "aggs": {"unique_committers": {"cardinality": {"field": "committer_name"}}},
+            },
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/git_*_enriched/_search", body)
+    series: list[dict[str, Any]] = []
+    if raw is None:
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"Distinct committers on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or git index empty",
+            )
+        )
+        return MetricResult(
+            slug="committers",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
+            notes="No git commits indexed for this repo in the window.",
+            unification=(
+                "Distinct ``committer_name`` on windowed commits via an "
+                "**OpenSearch** cardinality agg."
+            ),
+        )
+
+    aggs = raw.get("aggregations") or {}
+    n = int((aggs.get("by_committer") or {}).get("value") or 0)
+    for b in (aggs.get("by_month") or {}).get("buckets", []):
+        ts_ms = int(b.get("key") or 0)
+        c = int((b.get("unique_committers") or {}).get("value") or 0)
+        series.append(
+            {
+                "date": datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                .date()
+                .isoformat()[:7],
+                "value": c,
+            }
+        )
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"Distinct committers on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=f"{n} committers · {len(series)} months",
+        )
+    )
+    return MetricResult(
+        slug="committers",
+        value=str(n),
+        label=f"committers · last {window_days} days",
+        secondary=None,
+        queries=traces,
+        series=series,
+        series_unit="committers",
+        notes=(
+            "Distinct ``committer_name`` values on commits GrimoireLab "
+            "indexed in the window. Committers are whoever landed the "
+            "commit — narrower than *contributors* (``author_name``), "
+            "which also counts authors whose patch someone else committed."
+        ),
+        unification=(
+            "Distinct ``committer_name`` on windowed commits via an "
+            "**OpenSearch** cardinality agg."
+        ),
+        headline_tone="info",
+    )
+
+
+# ── Metric · Issue Response Time ──────────────────────────────────────────
+
+
+def _metric_issue_response_time(
+    full: str, canonical_url: str, window_days: int
+) -> MetricResult:
+    """Median hours to the first response on *issues* (PRs excluded).
+
+    The issue-scoped sibling of ``first_response`` — same
+    ``time_to_first_attention_without_bot`` enrichment, filtered to
+    ``pull_request:false``. CHAOSS "Issue Response Time".
+    """
+    cutoff = _now_minus_days(window_days)
+    cutoff_iso = _iso(cutoff)
+    traces: list[QueryTrace] = []
+    origin = f"https://github.com/{full}"
+    body = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {"term": {"origin": origin}},
+                    {"term": {"pull_request": False}},
+                    {"range": {"created_at": {"gte": cutoff_iso}}},
+                ]
+            }
+        },
+        "aggs": {
+            "median": {
+                "percentiles": {
+                    "field": "time_to_first_attention_without_bot",
+                    "percents": [50],
+                }
+            },
+            "p90": {
+                "percentiles": {
+                    "field": "time_to_first_attention_without_bot",
+                    "percents": [90],
+                }
+            },
+            "count_with_response": {
+                "filter": {"exists": {"field": "time_to_first_attention_without_bot"}}
+            },
+        },
+    }
+    body_text = json.dumps(body, indent=2)
+    raw = os_mod._post("/github_*_enriched/_search", body)
+    if raw is None:
+        traces.append(
+            QueryTrace(
+                store="OpenSearch",
+                engine="opensearch",
+                mode="dsl",
+                title=f"P50/P90 issue response time on {origin}",
+                query=body_text,
+                result_summary="no response",
+                error="OpenSearch unreachable or github index empty",
+            )
+        )
+        return MetricResult(
+            slug="issue_response_time",
+            value="—",
+            label="no data",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "GrimoireLab hasn't indexed issue traffic for this repo. "
+                "The query above is what we'd run once github_*_enriched "
+                "starts receiving documents."
+            ),
+            unification=(
+                "P50 of GrimoireLab's `time_to_first_attention_without_bot` "
+                "on issues (`pull_request:false`) via an **OpenSearch** "
+                "percentiles agg."
+            ),
+        )
+
+    aggs = raw.get("aggregations") or {}
+    n = int(((aggs.get("count_with_response") or {}).get("doc_count") or 0))
+    p50_raw = ((aggs.get("median") or {}).get("values") or {}).get("50.0")
+    p90_raw = ((aggs.get("p90") or {}).get("values") or {}).get("90.0")
+    p50 = float(p50_raw) if p50_raw is not None else None
+    p90 = float(p90_raw) if p90_raw is not None else None
+    traces.append(
+        QueryTrace(
+            store="OpenSearch",
+            engine="opensearch",
+            mode="dsl",
+            title=f"P50/P90 issue response time on {origin} since {cutoff_iso[:10]}",
+            query=body_text,
+            result_summary=(
+                f"{n} answered issues · P50 {p50:.1f} h · P90 {p90:.1f} h"
+                if p50 is not None and p90 is not None
+                else f"{n} answered issues, no percentile available"
+            ),
+        )
+    )
+    if not n or p50 is None:
+        return MetricResult(
+            slug="issue_response_time",
+            value="—",
+            label="no answered issues in window",
+            secondary=None,
+            queries=traces,
+            notes=(
+                "No issues in the window carried a "
+                "time_to_first_attention_without_bot value — either no "
+                "issues opened, or none answered yet."
+            ),
+            unification=(
+                "P50 of GrimoireLab's `time_to_first_attention_without_bot` "
+                "on issues (`pull_request:false`) via an **OpenSearch** "
+                "percentiles agg."
+            ),
+        )
+    return MetricResult(
+        slug="issue_response_time",
+        value=f"{p50:.1f} h",
+        label="median first response · issues",
+        secondary=f"P90 {p90:.1f} h · {n} answered issues" if p90 is not None else None,
+        queries=traces,
+        notes=(
+            "Median hours from issue creation to the first non-author, "
+            "non-bot response. Pull requests are excluded "
+            "(``pull_request:false``) — the PR-and-issue blend is the "
+            "separate ``first_response`` metric."
+        ),
+        unification=(
+            "P50 of GrimoireLab's `time_to_first_attention_without_bot` "
+            "on issues (`pull_request:false`) via an **OpenSearch** "
+            "percentiles agg."
+        ),
+        headline_tone="info",
+    )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────
 
 REGISTRY: list[MetricSpec] = [
@@ -4648,6 +5502,113 @@ REGISTRY: list[MetricSpec] = [
         ),
         is_time_based=True,
         compute=_metric_pr_time_to_close,
+    ),
+    MetricSpec(
+        slug="upstream_dependencies",
+        name="Upstream Code Dependencies",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-upstream-code-dependencies/",
+        question="What does this project build on?",
+        description=(
+            "Count of distinct upstream repositories this project "
+            "depends on, resolved from its dependency manifests into the "
+            "Neo4j `DEPENDS_ON` graph."
+        ),
+        is_time_based=False,
+        compute=_metric_upstream_dependencies,
+    ),
+    MetricSpec(
+        slug="docs_discoverability",
+        name="Documentation Discoverability",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-documentation-discoverability/",
+        question="Can a newcomer find the docs?",
+        description=(
+            "Scores four discoverability signals from the GME-extracted "
+            "metadata — a README, a homepage / docs link, a wiki, and a "
+            "GitHub Pages site."
+        ),
+        is_time_based=False,
+        compute=_metric_docs_discoverability,
+    ),
+    MetricSpec(
+        slug="license_coverage",
+        name="License Coverage",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-license-coverage/",
+        question="Does the project declare a license?",
+        description=(
+            "Whether the repo declares an SPDX license. Per-repo it's "
+            "yes/no; the project mean reads as the share of repositories "
+            "with a declared license."
+        ),
+        is_time_based=False,
+        compute=_metric_license_coverage,
+    ),
+    MetricSpec(
+        slug="release_frequency",
+        name="Release Frequency",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-release-frequency/",
+        question="How often does it ship releases?",
+        description=(
+            "Lifetime release cadence — releases per year across the span "
+            "from first to latest release, from the GME "
+            "`gme-internal:release_count` / `first_release_date` / "
+            "`latest_release_date` scalars."
+        ),
+        is_time_based=False,
+        compute=_metric_release_frequency,
+    ),
+    MetricSpec(
+        slug="test_coverage",
+        name="Test Coverage",
+        category="Software",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-test-coverage/",
+        question="Is the test suite measured?",
+        description=(
+            "Static test-coverage percentage advertised in the README, "
+            "parsed with the GME's deterministic rule (shields.io badge "
+            "or `coverage: NN%`). Dynamic codecov/coveralls badges carry "
+            "no number, so they read as no-number, not 0%."
+        ),
+        is_time_based=False,
+        compute=_metric_test_coverage,
+    ),
+    MetricSpec(
+        slug="committers",
+        name="Committers",
+        category="Contributor",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-committers/",
+        question="Who landed code recently?",
+        description=(
+            "Distinct people who committed code in the window "
+            "(`committer_name`). Narrower than Contributors — counts who "
+            "landed the commit, not every patch author."
+        ),
+        is_time_based=True,
+        compute=_metric_committers,
+    ),
+    MetricSpec(
+        slug="issue_response_time",
+        name="Issue Response Time",
+        category="Lifecycle",
+        chaoss_level="Level 0 · Implemented",
+        chaoss_url="https://chaoss.community/kb/metric-issue-response-time/",
+        question="How fast do issues get a first reply?",
+        description=(
+            "Median hours from issue creation to the first non-author, "
+            "non-bot response. Issues only (`pull_request:false`) — the "
+            "issue-scoped sibling of Time to First Response."
+        ),
+        is_time_based=True,
+        compute=_metric_issue_response_time,
     ),
 ]
 
