@@ -1,79 +1,71 @@
-# GME → hub: persist the repo signals so CHAOSS can read them
+# GME → hub: the repo signals just need a re-extract (no schema change)
 
-**Date:** 2026-06-07
+**Date:** 2026-06-07 (revised)
 **From:** Open Pulse hub (CHAOSS metrics)
 **To:** GME devs
-**TL;DR:** The develop GME already *computes* the signals we need
-(`_test_coverage`, `_releases`, `_has_ci`, `_docker_hub_url`, …) but they
-live only as internal `_`-prefixed fields in the `/v2/extract` response.
-The hub can't read those. Please **persist them as columns on the
-`github_repos.repos` index table** (the table we already read for
-`license_spdx`, `homepage`, …). Each one then unblocks one CHAOSS metric.
+**TL;DR:** Scratch the earlier "add index columns" ask — it's unnecessary.
+The develop GME's internal `_`-prefixed signals **already auto-promote
+to Oxigraph** as `gme-internal:<field>` triples (`jsonld_build.py`, with
+`include_internal_fields=True` on our load). The hub reads those via
+SPARQL exactly like `pulse:githubRepoForks`. So the only thing needed to
+light up the remaining CHAOSS metrics is a **re-extract of the repos
+with the develop GME** — the new signals land in the graph for free.
 
-## Why the API flag isn't enough
+## What we found
 
-The hub computes metrics live against the stores it already reads:
-Neo4j, SPARQL/Oxigraph, OpenSearch (`git_*_enriched`), and the GME
-`github_repos` DuckDB index. It does **not** call `/v2/extract`
-per-repo — that path is async + LLM and far too slow for a dashboard
-that fans out across every repo in a project.
+The current Oxigraph already carries a rich `gme-internal:` vocabulary
+(namespace `https://openpulse.science/git-metadata-extractor#`), attached
+to the same repo subject as `pulse:githubRepositoryHandle`, as typed
+literals:
 
-So `include_internal_fields=true` doesn't help us: it only changes the
-**extract response**, not what's **persisted**. The fields have to land
-in a store we query. The lowest-friction option is the
-`github_repos.repos` table — we already read it for `license_spdx`,
-`homepage`, `readme_path`, `topics`, etc.
+```
+?repo pulse:githubRepositoryHandle "sdsc-ordes/gimie" ;
+      gme-internal:has_wiki        true ;
+      gme-internal:has_pages       true ;
+      gme-internal:homepage        "https://sdsc-ordes.github.io/gimie/" ;
+      gme-internal:license_name    "Apache License 2.0" ;
+      gme-internal:primary_language "Python" ;
+      gme-internal:keywords        "fair-data" , "git" , … ;     # list → repeated triples
+      gme-internal:size_kb         3562 .
+```
 
-Good news: the signal parsers
-(`src/v2/agents/rule_based/_repo_signals.py`) are pure functions over
-README text + the repo root listing, and the index ingest path
-(`src/index/github_repos/ingest/repos.py → build_record`) already has
-`readme_text` in hand. So most of these can be computed at ingest with
-no extra GitHub call.
+But the signals the develop GME added (`_repo_signals.py`:
+`parse_test_coverage`, `detect_has_ci`, `parse_docker_hub_url`, plus
+`_releases` / `_latest_version`) are **0 triples** today — because the
+graph was extracted with the *previous* GME. Re-extraction is all that's
+missing.
 
-## The ask — columns on `github_repos.repos`
+## What the hub will read (once re-extracted)
 
-| Internal field | Proposed column | Type | Unblocks (CHAOSS metric) | Ingest cost |
-|---|---|---|---|---|
-| `_test_coverage` | `test_coverage` | `TEXT` (`"87%"` / NULL) | **Test Coverage** | free — README already fetched |
-| `_has_ci` | `has_ci` | `BOOLEAN` | **CI presence / Quality** | needs root listing (1 extra call or from tree) |
-| `_docker_hub_url` | `docker_hub_url` | `TEXT` | **Packaging / distribution** | free — README + aux files |
-| `_container_images` | `container_images` | `JSON` | (same, richer) | free |
-| `_releases` | `releases` | `JSON` (`[{tag_name, published_at}]`) | **Release Frequency** | 1 extra call (`GET /repos/{o}/{n}/releases`) |
-| `_latest_version` | `latest_version` | `TEXT` | (header chip) | derived from `releases` |
+| Internal field → graph predicate | Type | CHAOSS metric |
+|---|---|---|
+| `gme-internal:test_coverage` | `"87%"` literal | **Test Coverage** (already wired to prefer this, README-card fallback) |
+| `gme-internal:has_ci` | boolean | **CI presence** (Quality) — wire on request |
+| `gme-internal:docker_hub_url` | literal | **Container distribution** — wire on request |
+| `gme-internal:releases` | list (shape TBD) | **Release Frequency** — see note |
+| `gme-internal:latest_version` | literal | release header chip |
 
-All nullable; NULL = "not extracted / not applicable" (the hub already
-treats NULL as "no data", never as zero).
+### One thing to confirm: the `releases` shape
 
-For **Release Frequency** specifically, a JSON list of
-`{tag_name, published_at}` is ideal — the hub derives releases-per-year
-over any window from the dates. A flat `release_count` +
-`first_release_at` + `latest_release_at` triple would also work if the
-full list is too heavy.
+List-of-string fields (`keywords`) come through as **repeated triples**,
+one per value. `_releases` is a list of **objects**
+(`{tag_name, published_at}`). Two questions for you:
 
-## Notes
+1. How does `jsonld_build` emit a list-of-dicts — repeated triples to
+   blank nodes, or a single JSON-literal blob (like the `publiccode`
+   nested sub-trees)? We need the dates to compute releases-per-year.
+2. If a blob is easier on your side, a flat
+   `gme-internal:release_count` + `gme-internal:first_release_at` +
+   `gme-internal:latest_release_at` triple would let us compute
+   frequency without parsing JSON in SPARQL. Either works — your call.
 
-- **Test Coverage**: the hub already re-parses the README cards
-  (`<data>/index/github/cards/<owner>/<name>/README.md`) with a verbatim
-  port of your `parse_test_coverage` regex, as a stopgap. A persisted
-  `test_coverage` column lets us drop the re-parse and stay in lockstep
-  with whatever the extractor decides (incl. a future LLM fallback).
-- **Alternative path**: promoting these to canonical `pulse:`/`schema:`
-  predicates in the JSON-LD graph (→ Oxigraph) also works — we'd read
-  them via SPARQL like `schema:license`. The `repository_agent.py`
-  comment already hints at this ("enrichment stage promotes them to
-  canonical terms"). Index columns are just lower-friction for us; your
-  call which surface.
-- We don't need all six at once — even `releases` alone lands Release
-  Frequency. Ship in whatever order is cheapest for the ingest path.
+We'll wire **Release Frequency** the moment we can see real `releases`
+triples for a re-extracted repo.
 
-## What's already wired on our side
+## Already wired on our side (PR #103), no GME change needed
 
-Shipped on `feat/chaoss-project-metrics` (PR #103), reading only stores
-we already have — no GME change required:
 Upstream Code Dependencies (Neo4j `DEPENDS_ON`), Documentation
-Discoverability (index `homepage`/`readme_path`/`has_wiki`/`has_pages`),
+Discoverability (`has_wiki`/`has_pages`/`homepage`/`readme_path`),
 License Coverage (`license_spdx`), Committers (`git_*_enriched`),
-Issue Response Time (`github_*_enriched`), and Test Coverage (README
-card re-parse). The six fields above are the remaining menu items that
-need data only the extractor produces.
+Issue Response Time (`github_*_enriched`), Test Coverage (README-card
+parse today → `gme-internal:test_coverage` once re-extracted).

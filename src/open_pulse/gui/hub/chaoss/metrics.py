@@ -4422,86 +4422,134 @@ def _parse_test_coverage(readme: str | None) -> str | None:
 def _metric_test_coverage(
     full: str, canonical_url: str, window_days: int
 ) -> MetricResult:
-    """Snapshot: does the README advertise a test-coverage number?
+    """Snapshot: does the project advertise a test-coverage number?
 
-    Reads the GME-extracted README card and applies the extractor's own
-    ``parse_test_coverage`` rule — a static shields.io badge or a
-    plain-text ``coverage: NN%``. CHAOSS "Test Coverage". Dynamic
-    codecov/coveralls badges carry no number in the markup, so they
-    read as "no static number" rather than a false zero.
+    Preferred source is the GME-extracted ``gme-internal:test_coverage``
+    triple in Oxigraph (auto-published when a repo is extracted with the
+    develop GME). Until a repo is re-extracted, the hub re-parses the
+    GME README card with the extractor's own ``parse_test_coverage``
+    rule, so the metric works today and upgrades transparently. CHAOSS
+    "Test Coverage". Dynamic codecov/coveralls badges carry no number,
+    so they read as "no number" rather than a false zero.
     """
-    row, _sql = _gh_repos_index_row(full)
-    # Prefer the index's stored path; fall back to the conventional card
-    # layout (``owner/name/README.md``) so a repo with a card but no index
-    # row still resolves.
-    readme_path = (row or {}).get("readme_path") or f"{full}/README.md"
-    sql = (
-        f"-- README card: <data>/{_README_CARD_ROOT_REL}/{readme_path or '<none>'}\n"
-        "-- parse_test_coverage(readme): shields.io 'coverage-NN%' badge "
-        "or text 'coverage: NN%'"
+    traces: list[QueryTrace] = []
+    pct: str | None = None
+    source: str | None = None
+
+    # 1) Authoritative — the GME-extracted gme-internal:test_coverage triple.
+    sparql = (
+        "# Coverage % the GME parsed from the README, promoted to the graph\n"
+        "# as a gme-internal triple (auto-published with include_internal_fields).\n"
+        "PREFIX pulse: <https://open-pulse.epfl.ch/ontology#>\n"
+        "PREFIX gme:   <https://openpulse.science/git-metadata-extractor#>\n"
+        "SELECT ?coverage WHERE {\n"
+        f'  ?repo pulse:githubRepositoryHandle "{full}" ;\n'
+        "        gme:test_coverage ?coverage .\n"
+        "} LIMIT 1"
     )
-    readme = _read_readme_card(readme_path)
-    trace = QueryTrace(
-        store="Index · README card",
-        engine="readme",
-        title=f"Test-coverage badge for {full}",
-        query=sql,
-        result_summary="card read" if readme is not None else "no README card",
-    )
-    if readme is None:
-        return MetricResult(
-            slug="test_coverage",
-            value="—",
-            label="no README card",
-            secondary=None,
-            queries=[trace],
-            notes="No README card available for this repository under the github cards.",
+    try:
+        rows = stores.sparql_select(sparql)
+        if rows:
+            pct = str(rows[0]["coverage"]["value"]).strip()
+            source = "graph"
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"GME test-coverage triple for {full}",
+                query=sparql,
+                result_summary=(
+                    pct
+                    if pct
+                    else "no triple yet (repo not re-extracted with develop GME)"
+                ),
+            )
         )
-    pct = _parse_test_coverage(readme)
+    except Exception as exc:  # noqa: BLE001
+        traces.append(
+            QueryTrace(
+                store="SPARQL",
+                engine="sparql",
+                title=f"GME test-coverage triple for {full}",
+                query=sparql,
+                result_summary="error",
+                error=str(exc),
+            )
+        )
+
+    # 2) Fallback — re-parse the README card with the GME's own rule.
+    if pct is None:
+        row, _ = _gh_repos_index_row(full)
+        readme_path = (row or {}).get("readme_path") or f"{full}/README.md"
+        readme = _read_readme_card(readme_path)
+        card_sql = (
+            f"-- README card: <data>/{_README_CARD_ROOT_REL}/{readme_path}\n"
+            "-- parse_test_coverage(readme): shields.io 'coverage-NN%' badge "
+            "or text 'coverage: NN%'"
+        )
+        traces.append(
+            QueryTrace(
+                store="Index · README card",
+                engine="readme",
+                title=f"README-card coverage parse for {full}",
+                query=card_sql,
+                result_summary="card read" if readme is not None else "no README card",
+            )
+        )
+        if readme is not None:
+            pct = _parse_test_coverage(readme)
+            if pct:
+                source = "readme"
+
     if pct is None:
         return MetricResult(
             slug="test_coverage",
             value="—",
-            label="no static coverage number",
+            label="no coverage number",
             secondary=None,
-            queries=[trace],
+            queries=traces,
             notes=(
-                "The README declares no static coverage percentage. Many "
-                "projects use dynamic codecov/coveralls badges that carry "
-                "no number in the markup — those read as no-number here "
-                "(matching the GME's deterministic parser), not 0%."
+                "No static coverage percentage in the GME graph or the "
+                "README. Dynamic codecov/coveralls badges carry no number "
+                "in the markup — those read as no-number (matching the "
+                "GME's deterministic parser), not 0%."
             ),
             unification=(
-                "Ported GME ``parse_test_coverage``: shields.io "
-                "``coverage-NN%`` badge or plain ``coverage: NN%`` text."
+                "Prefer ``gme-internal:test_coverage`` from the graph; fall "
+                "back to the GME ``parse_test_coverage`` rule over the "
+                "README card."
             ),
         )
+
     try:
-        frac = int(pct.rstrip("%")) / 100.0
+        frac: float | None = int(pct.rstrip("%")) / 100.0
     except ValueError:
         frac = None
     tone = "good" if frac is not None and frac >= 0.8 else (
         "warn" if frac is not None and frac >= 0.5 else "danger"
     )
+    src_label = "GME graph" if source == "graph" else "README parse (pre-re-extract)"
     return MetricResult(
         slug="test_coverage",
         value=pct,
         label="declared test coverage",
-        secondary=None,
-        queries=[trace],
+        secondary=f"source: {src_label}",
+        queries=traces,
         visual=(
             {"kind": "donut", "fraction": min(frac, 1.0), "tone": tone}
             if frac is not None
             else None
         ),
         notes=(
-            "Static test-coverage percentage advertised in the README, "
-            "parsed with the GME's own deterministic rule. A repo with a "
-            "dynamic (numberless) badge reports no number rather than 0%."
+            "Static test-coverage percentage. Preferred source is the "
+            "GME-extracted ``gme-internal:test_coverage`` triple; until a "
+            "repo is re-extracted with the develop GME, the hub re-parses "
+            "the README card with the GME's own rule. Dynamic badges with "
+            "no embedded number read as no-number, not 0%."
         ),
         unification=(
-            "Ported GME ``parse_test_coverage``: shields.io "
-            "``coverage-NN%`` badge or plain ``coverage: NN%`` text."
+            "Prefer ``gme-internal:test_coverage`` (SPARQL); fall back to "
+            "the GME ``parse_test_coverage`` rule over the README card."
         ),
         headline_tone=tone,
     )
