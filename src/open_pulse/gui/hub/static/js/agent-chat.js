@@ -38,6 +38,7 @@
         { id: 'run_cypher', label: 'Cypher', on: true },
         { id: 'run_sparql', label: 'SPARQL', on: true },
         { id: 'gme_search', label: 'GME search', on: true },
+        { id: 'chaoss_metrics', label: 'CHAOSS', on: true },
         // Job-spawning actions — off by default; opt in to let the agent
         // kick off an extraction / crawl.
         { id: 'extract_metadata', label: 'Extract · gimie', on: false, action: true },
@@ -496,6 +497,7 @@
           { key: '/cypher', hint: 'Query the community graph', insert: 'Using run_cypher, ' },
           { key: '/sparql', hint: 'Query repository properties', insert: 'Using run_sparql, ' },
           { key: '/search', hint: 'Semantic search a GME index', insert: 'Using gme_search, find ' },
+          { key: '/chaoss', hint: 'CHAOSS metric for a repo', insert: 'Using chaoss_metrics, report ' },
           { key: '/extract', hint: 'Extract a repo (gimie) — needs the tool on', insert: 'Extract metadata for ' },
           { key: '/crawl', hint: 'Start a crawl — needs the tool on', insert: 'Crawl these GitHub seeds: ' },
           { key: '/plot', hint: 'Ask for a Vega-Lite chart', insert: 'Plot as a Vega-Lite chart: ' },

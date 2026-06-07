@@ -294,6 +294,31 @@ TOOLS_SPEC: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "chaoss_metrics",
+            "description": (
+                "CHAOSS community-health metrics for a GitHub repository. Call "
+                "with NO arguments to list the metric catalogue (slug, name, "
+                "category, question). Call with ``metric`` (a slug) + ``owner`` "
+                "+ ``repo`` to compute one metric for that repo — e.g. "
+                "metric='contributors', owner='sdsc-ordes', repo='gimie'. "
+                "``window`` is the lookback in days (default 365) for "
+                "time-based metrics. Returns the headline value, label, an "
+                "optional time series, and methodology notes. Read-only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "metric": {"type": "string", "description": "Metric slug (omit to list the catalogue)."},
+                    "owner": {"type": "string", "description": "GitHub owner / org."},
+                    "repo": {"type": "string", "description": "GitHub repository name."},
+                    "window": {"type": "integer", "description": "Lookback window in days (default 365)."},
+                },
+            },
+        },
+    },
 ]
 
 
@@ -783,6 +808,62 @@ def _run_crawler(
     }
 
 
+def _run_chaoss(
+    metric: str | None = None,
+    owner: str | None = None,
+    repo: str | None = None,
+    window: int = 365,
+) -> dict[str, Any]:
+    from ..chaoss import metrics as M  # heavy module — import lazily
+
+    if not metric:
+        cat = [
+            {
+                "slug": s.slug,
+                "name": s.name,
+                "category": s.category,
+                "question": s.question,
+                "time_based": s.is_time_based,
+            }
+            for s in M.REGISTRY
+        ]
+        return {
+            "engine": "chaoss",
+            "catalogue": cat,
+            "count": len(cat),
+            "note": "Pass metric=<slug> + owner + repo to compute one for a repo.",
+        }
+
+    spec = M.spec_for(metric)
+    if spec is None:
+        avail = ", ".join(s.slug for s in M.REGISTRY)
+        raise ToolError(f"Unknown metric {metric!r}. Available slugs: {avail}")
+    if not (owner and repo):
+        raise ToolError("``owner`` and ``repo`` are required to compute a metric.")
+
+    full = f"{owner}/{repo}"
+    try:
+        res = spec.compute(full, f"https://github.com/{full}", int(window or 365))
+    except Exception as exc:  # noqa: BLE001 — surface to the model
+        raise ToolError(f"chaoss metric {metric!r} failed for {full}: {exc}") from exc
+
+    series = (res.series or [])[:60]
+    return {
+        "engine": "chaoss",
+        "metric": res.slug,
+        "name": spec.name,
+        "category": spec.category,
+        "repo": full,
+        "window_days": int(window or 365),
+        "value": res.value,
+        "label": res.label,
+        "secondary": res.secondary,
+        "series_unit": res.series_unit,
+        "series": series,
+        "notes": res.notes,
+    }
+
+
 def run_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Dispatch to the named tool. Always returns a dict; raises ``ToolError``
     only for conditions the model should see (write-guard rejection,
@@ -836,5 +917,10 @@ def run_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             a.get("max_rounds", 2),
             a.get("crawl_dependencies", False),
             a.get("crawl_dependents", False),
+        )
+    if name == "chaoss_metrics":
+        a = arguments or {}
+        return _run_chaoss(
+            a.get("metric"), a.get("owner"), a.get("repo"), a.get("window", 365)
         )
     raise ToolError(f"Unknown tool: {name}")
