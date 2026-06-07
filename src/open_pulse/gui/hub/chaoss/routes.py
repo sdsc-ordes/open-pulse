@@ -155,6 +155,7 @@ _SLUG_CATEGORY: dict[str, str] = {
     "upstream_dependencies": "Quality",
     "docs_discoverability": "Quality",
     "license_coverage": "Quality",
+    "test_coverage": "Quality",
     # Everything else (contributors, activity, responsiveness, issues,
     # bus-factor, review duration) is Community — handled by the default.
 }
@@ -672,6 +673,7 @@ _AGG_RULE: dict[str, str] = {
     "upstream_dependencies": "mean",
     "docs_discoverability": "mean",
     "license_coverage": "mean",
+    "test_coverage": "mean",
     # Median response time averages across repos; committers is a distinct
     # head-count (summed, flagged approx below).
     "issue_response_time": "mean",
