@@ -260,7 +260,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    mem_limit: ${EXTRACTOR_MEM_LIMIT:-1536m}
+    # The develop ≥ 2026-06 image is much heavier per extraction (8 package
+    # registries + releases/tags + selenium + gimie sidecar): a single worker
+    # uses 2–5 GB, so the old 1536m cap cgroup-OOM-killed the worker
+    # mid-extraction (container OOMKilled stays false — it's a child kill).
+    # Default raised to 4g; set EXTRACTOR_MEM_LIMIT=6g for large repos.
+    mem_limit: ${EXTRACTOR_MEM_LIMIT:-4g}
     cpus: ${EXTRACTOR_CPUS:-2.0}
 
   # gimie-api sidecar. The GME develop image (≥ 2026-06) removed in-process
