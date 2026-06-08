@@ -631,6 +631,55 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "index/zenodo/duckdb/zenodo.duckdb",
         "record_communities",
     ),
+    # DockerHub — container images.
+    "dockerhub": (
+        _DATA_ROOT / "index/dockerhub/duckdb/dockerhub.duckdb",
+        "images",
+    ),
+    # HuggingFace Daily Papers (arXiv-linked).
+    "huggingface_papers": (
+        _DATA_ROOT / "index/huggingface_papers/duckdb/huggingface_papers.duckdb",
+        "papers",
+    ),
+    # GitLab — one split store per (instance, entity). Each lives in its
+    # own DuckDB named after the collection; the headline table is the
+    # entity name (groups / projects / users).
+    "gitlab_epfl_groups": (
+        _DATA_ROOT / "index/gitlab_epfl_groups/duckdb/gitlab_epfl_groups.duckdb",
+        "groups",
+    ),
+    "gitlab_epfl_projects": (
+        _DATA_ROOT / "index/gitlab_epfl_projects/duckdb/gitlab_epfl_projects.duckdb",
+        "projects",
+    ),
+    "gitlab_epfl_users": (
+        _DATA_ROOT / "index/gitlab_epfl_users/duckdb/gitlab_epfl_users.duckdb",
+        "users",
+    ),
+    "gitlab_ethz_groups": (
+        _DATA_ROOT / "index/gitlab_ethz_groups/duckdb/gitlab_ethz_groups.duckdb",
+        "groups",
+    ),
+    "gitlab_ethz_projects": (
+        _DATA_ROOT / "index/gitlab_ethz_projects/duckdb/gitlab_ethz_projects.duckdb",
+        "projects",
+    ),
+    "gitlab_ethz_users": (
+        _DATA_ROOT / "index/gitlab_ethz_users/duckdb/gitlab_ethz_users.duckdb",
+        "users",
+    ),
+    "gitlab_datascience_groups": (
+        _DATA_ROOT / "index/gitlab_datascience_groups/duckdb/gitlab_datascience_groups.duckdb",
+        "groups",
+    ),
+    "gitlab_datascience_projects": (
+        _DATA_ROOT / "index/gitlab_datascience_projects/duckdb/gitlab_datascience_projects.duckdb",
+        "projects",
+    ),
+    "gitlab_datascience_users": (
+        _DATA_ROOT / "index/gitlab_datascience_users/duckdb/gitlab_datascience_users.duckdb",
+        "users",
+    ),
 }
 
 
@@ -725,6 +774,18 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "zenodo_files": (".pdf", ".csv", ".zip", "dataset"),
     "zenodo_record_creators": ("first", "corresponding", "co-author", "1"),
     "zenodo_record_communities": ("epfl", "cern", "ethz", "openlab"),
+    # DockerHub / HuggingFace papers / GitLab
+    "dockerhub": ("library", "epfl", "python", "official"),
+    "huggingface_papers": ("transformer", "diffusion", "llm", "agent"),
+    "gitlab_epfl_groups": ("lab", "epfl", "research", "course"),
+    "gitlab_epfl_projects": ("python", "thesis", "data", "epfl"),
+    "gitlab_epfl_users": ("anna", "patrick", "müller", "martin"),
+    "gitlab_ethz_groups": ("eth", "institute", "lab", "course"),
+    "gitlab_ethz_projects": ("robotics", "thesis", "data", "eth"),
+    "gitlab_ethz_users": ("müller", "schmidt", "anna", "thomas"),
+    "gitlab_datascience_groups": ("sdsc", "renku", "research", "course"),
+    "gitlab_datascience_projects": ("renku", "machine learning", "data", "tutorial"),
+    "gitlab_datascience_users": ("sdsc", "alice", "patrick", "anna"),
 }
 
 

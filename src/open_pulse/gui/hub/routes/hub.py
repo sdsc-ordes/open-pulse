@@ -129,6 +129,22 @@ _SOURCE_METADATA: dict[str, dict[str, str]] = {
         "homepage": "https://graphsearch.epfl.ch",
         "description": "EPFL's category graph — disciplines and concepts.",
     },
+    "hub.docker.com": {
+        "homepage": "https://hub.docker.com",
+        "description": "Docker Hub — container images, namespaces, pulls.",
+    },
+    "gitlab.epfl.ch": {
+        "homepage": "https://gitlab.epfl.ch",
+        "description": "EPFL's GitLab — projects, groups, and users.",
+    },
+    "gitlab.ethz.ch": {
+        "homepage": "https://gitlab.ethz.ch",
+        "description": "ETH Zürich's GitLab — projects, groups, and users.",
+    },
+    "gitlab.datascience.ch": {
+        "homepage": "https://gitlab.datascience.ch",
+        "description": "SDSC DataScience GitLab — projects, groups, and users.",
+    },
 }
 
 
@@ -207,12 +223,28 @@ _COLLECTION_LABELS: dict[str, tuple[str, str]] = {
     # OAM Monitor: publications carry openalex IDs as URLs, organisations
     # carry ROR URLs — both surface as clickable samples via the
     # entity_id-is-a-URL fallback in qdrant._canonical_url_for_point.
-    # Journals + publishers carry internal numeric IDs / slugged names
-    # with no canonical landing page, so their cards just stay text.
+    # Journals + publishers carry internal numeric IDs with no canonical
+    # landing page, but the OA Monitor corpus is OpenAlex-derived, so we
+    # point their host at openalex.org for a recognisable tile logo.
     "oamonitor_publications": ("OAM Monitor publications", "openalex.org"),
     "oamonitor_organisations": ("OAM Monitor organisations", "ror.org"),
-    "oamonitor_journals": ("OAM Monitor journals", ""),
-    "oamonitor_publishers": ("OAM Monitor publishers", ""),
+    "oamonitor_journals": ("OAM Monitor journals", "openalex.org"),
+    "oamonitor_publishers": ("OAM Monitor publishers", "openalex.org"),
+    # DockerHub container registry.
+    "dockerhub": ("DockerHub images", "hub.docker.com"),
+    # HuggingFace Daily Papers (arXiv-linked).
+    "huggingface_papers": ("HuggingFace papers", "huggingface.co"),
+    # GitLab instances — one set of stores per host (groups / projects /
+    # users). EPFL, ETH Zürich, and the SDSC DataScience GitLab.
+    "gitlab_epfl_groups": ("GitLab EPFL groups", "gitlab.epfl.ch"),
+    "gitlab_epfl_projects": ("GitLab EPFL projects", "gitlab.epfl.ch"),
+    "gitlab_epfl_users": ("GitLab EPFL users", "gitlab.epfl.ch"),
+    "gitlab_ethz_groups": ("GitLab ETHZ groups", "gitlab.ethz.ch"),
+    "gitlab_ethz_projects": ("GitLab ETHZ projects", "gitlab.ethz.ch"),
+    "gitlab_ethz_users": ("GitLab ETHZ users", "gitlab.ethz.ch"),
+    "gitlab_datascience_groups": ("GitLab DataScience groups", "gitlab.datascience.ch"),
+    "gitlab_datascience_projects": ("GitLab DataScience projects", "gitlab.datascience.ch"),
+    "gitlab_datascience_users": ("GitLab DataScience users", "gitlab.datascience.ch"),
 }
 
 # Tiny module-level cache for the collection stats. The home page is
