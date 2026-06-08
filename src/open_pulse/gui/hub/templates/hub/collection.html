@@ -652,6 +652,17 @@ function collectionRows(init) {
           this.pinnedCols = [this.meta.columns[0]];
           this._pinsInitialized = true;
         }
+        // Default-hide a bulky ``raw`` source-JSON column on first view —
+        // only when the user has no saved column preference yet. They can
+        // re-enable it from the ⚏ Columns menu and that choice persists.
+        if (!this._hiddenInitialized) {
+          this._hiddenInitialized = true;
+          let saved = null;
+          try { saved = localStorage.getItem(this._hideKey()); } catch (_) { /* no storage */ }
+          if (saved === null && Array.isArray(this.meta.columns)) {
+            this.hiddenCols = this.meta.columns.filter(c => String(c).toLowerCase() === 'raw');
+          }
+        }
         this.jumpPage = j.page || 1;
         this.$nextTick(() => this._measurePins());
       } catch (e) {
