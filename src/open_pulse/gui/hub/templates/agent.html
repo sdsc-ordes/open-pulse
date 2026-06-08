@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Agent chat · Open Pulse{% endblock %}
+{% block heading %}Agent chat{% endblock %}
+{% block subheading %}
+  An assistant with the read-only tool belt — SPARQL, Cypher, OpenSearch,
+  and DuckDB across every index store. Attach files (kept in <span class="kbd">/tmp</span>),
+  type <span class="kbd">/</span> for commands, and it renders Markdown,
+  code, images, Vega-Lite plots, and (sandboxed) HTML.
+{% endblock %}
+
+{% block content %}
+{# Rich-render stack: marked + DOMPurify (Markdown → safe HTML),
+   highlight.js (code), vega-embed (```vega-lite / ```vega plots). #}
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.5/dist/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" />
+<link id="hljs-dark"  rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" disabled />
+<script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+<script>
+  (function syncHljs() {
+    const apply = () => {
+      const dark = document.documentElement.dataset.theme !== 'light';
+      const l = document.getElementById('hljs-light');
+      const d = document.getElementById('hljs-dark');
+      if (l) l.disabled = dark;
+      if (d) d.disabled = !dark;
+    };
+    apply();
+    new MutationObserver(apply).observe(document.documentElement,
+      { attributes: true, attributeFilter: ['data-theme'] });
+  })();
+  window.OP_AGENT_DEFAULT_MODEL = {{ default_model | tojson }};
+</script>
+<link rel="stylesheet" href="/static/css/agent-chat.css" />
+<script src="/static/js/agent-chat.js"></script>
+
+<div class="agent-wrap" x-data="agentChat()" x-init="init()">
+
+  {# ── header: enabled tools · settings · clear ──────────────────── #}
+  <div class="agent-head">
+    <span class="agent-tools-badge" title="The assistant can call the checked read-only tools">
+      🛠 <template x-for="(t, i) in tools.filter(x => x.on)" :key="t.id"><span><span x-show="i" x-cloak> · </span><span x-text="t.label"></span></span></template>
+      <span x-show="!tools.some(x => x.on)" class="card-meta">no tools</span>
+    </span>
+    <div class="agent-head-right">
+      <span class="card-meta" x-show="files.length" x-text="files.length + ' file' + (files.length>1?'s':'')" title="Attached files"></span>
+      <button class="btn btn-ghost" @click="settingsOpen = !settingsOpen"
+              :class="settingsOpen ? 'is-active' : ''" title="Agent & tools">⚙ Agent &amp; tools</button>
+      <button class="btn btn-ghost" @click="clearChat()" x-show="messages.length" title="Clear the conversation">Clear</button>
+    </div>
+  </div>
+
+  {# ── settings panel: model · tool checkboxes · context · files ──── #}
+  <div class="agent-settings" x-show="settingsOpen" x-cloak>
+    <div class="agent-settings-grid">
+      <div class="agent-set-block">
+        <div class="agent-set-label">Agent (model)</div>
+        <input class="agent-model" list="agent-models" x-model="model"
+               :placeholder="defaultModel || 'model id'" @change="model && localStorage.setItem('op:agent:chat:v1:model', model)" />
+        <datalist id="agent-models">
+          <template x-for="m in models" :key="m"><option :value="m"></option></template>
+        </datalist>
+        <div class="card-meta" x-show="models.length" x-text="models.length + ' models available · blank = hub default'"></div>
+      </div>
+
+      <div class="agent-set-block">
+        <div class="agent-set-label">Tools</div>
+        <div class="agent-tool-toggles">
+          <template x-for="t in tools" :key="t.id">
+            <label class="agent-tool-toggle" :class="t.action ? 'is-action' : ''"
+                   :title="t.action ? 'Action — can start a job' : 'Read-only query tool'">
+              <input type="checkbox" :checked="t.on" @change="toggleTool(t.id)" />
+              <span x-text="t.label"></span>
+              <span x-show="t.action" class="agent-tool-act" title="kicks off a job">⚡</span>
+            </label>
+          </template>
+        </div>
+        <div class="card-meta">⚡ actions start jobs (off by default) · file read/list tools always on</div>
+      </div>
+
+      <div class="agent-set-block agent-set-wide">
+        <div class="agent-set-label">Context note <span class="card-meta">(prepended to every turn)</span></div>
+        <textarea class="agent-note" x-ref="note" x-model="contextNote" @input="saveNote()" rows="2"
+                  placeholder="e.g. 'We care about EPFL-affiliated repos. Prefer counts over lists.'"></textarea>
+      </div>
+
+      <div class="agent-set-block agent-set-wide">
+        <div class="agent-set-label">Files <span class="card-meta">(kept in /tmp; query with read_file or run_duckdb's read_csv)</span></div>
+        <div class="agent-files">
+          <template x-for="f in files" :key="f.name">
+            <span class="agent-file-chip">
+              📄 <span x-text="f.name"></span>
+              <span class="agent-file-size" x-text="fmtSize(f.size)"></span>
+              <button @click="removeFile(f.name)" title="Remove">✕</button>
+            </span>
+          </template>
+          <button class="btn btn-ghost" @click="pickFile()" :disabled="uploading">
+            <span x-show="!uploading">+ Attach file</span><span x-show="uploading" x-cloak>uploading…</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# hidden picker driven by /attach + the Attach button #}
+  <input type="file" multiple x-ref="file" @change="onFilePicked($event)" style="display:none" />
+
+  {# ── transcript ─────────────────────────────────────────────────── #}
+  <div class="agent-scroll" x-ref="scroll">
+    <template x-if="!messages.length && !busy">
+      <div class="agent-empty">
+        <div class="agent-empty-title">Ask across the data planes</div>
+        <p class="card-meta">The agent queries the stores itself and shows its work. Try one, or type <span class="kbd">/</span> for commands.</p>
+        <div class="agent-examples">
+          <template x-for="ex in [
+            'Top 10 GitHub repo owners by repo count — query DuckDB and show a Vega-Lite bar chart.',
+            'Plot monthly commit activity across all repos from OpenSearch as a Vega-Lite line chart.',
+            'Use Cypher to find the 5 repos with the most contributors, then summarise.',
+            'How many SPARQL triples describe software licenses? Break it down.'
+          ]" :key="ex">
+            <button class="agent-example" @click="loadExample(ex)" x-text="ex"></button>
+          </template>
+        </div>
+      </div>
+    </template>
+
+    <template x-for="(m, i) in messages" :key="i">
+      <div class="agent-msg" :class="'agent-msg-' + m.role">
+        <template x-if="m.role === 'tool'">
+          <details class="agent-tool" :open="i >= messages.length - 2">
+            <summary>
+              <span class="agent-tool-name" x-text="m.name || 'tool'"></span>
+              <code class="agent-tool-arg" x-text="toolArgs(m)"></code>
+            </summary>
+            <div class="agent-tool-body" x-html="renderToolResult(m)"></div>
+          </details>
+        </template>
+        <template x-if="m.role !== 'tool' && (m.content || (m.tool_calls && m.tool_calls.length))">
+          <div class="agent-bubble">
+            <div class="agent-role" x-text="m.role === 'user' ? 'you' : 'assistant'"></div>
+            <div class="agent-msg-body" x-html="renderMessage(m.content || '')"
+                 x-init="$nextTick(() => enhance($el))"></div>
+            <template x-if="m.tool_calls && m.tool_calls.length && !m.content">
+              <div class="card-meta agent-thinking">
+                calling <span x-text="m.tool_calls.map(t => t.function.name).join(', ')"></span>…
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <div class="agent-msg agent-msg-assistant" x-show="busy">
+      <div class="agent-bubble">
+        <div class="agent-role">assistant <span class="agent-dot"></span></div>
+        <div class="agent-msg-body" x-html="renderMessage(partial || '…')"></div>
+      </div>
+    </div>
+  </div>
+
+  {# ── quick examples (always visible) ────────────────────────────── #}
+  <div class="agent-quick">
+    <template x-for="ex in [
+      {l:'Top repo owners', t:'Top 10 GitHub repo owners by repo count — query DuckDB and show a Vega-Lite bar chart.'},
+      {l:'Commit timeline', t:'Plot monthly commit activity across all repos from OpenSearch as a Vega-Lite line chart.'},
+      {l:'Most contributors', t:'Use Cypher to find the 5 repos with the most contributors, then summarise.'},
+      {l:'Store sizes', t:'Using run_duckdb, count rows for the 8 biggest index tables and chart them with Vega-Lite.'}
+    ]" :key="ex.l">
+      <button class="agent-quick-btn" @click="loadExample(ex.t)" :title="ex.t" x-text="ex.l"></button>
+    </template>
+  </div>
+
+  {# ── composer with slash palette ────────────────────────────────── #}
+  <form class="agent-composer" @submit.prevent="send()">
+    <div class="agent-slash" x-show="slashOpen" x-cloak @mousedown.prevent>
+      <template x-for="(it, i) in slashItems" :key="it.key">
+        <div class="agent-slash-item" :class="i === slashIdx ? 'is-active' : ''"
+             @mouseenter="slashIdx = i" @click="applySlash(it)">
+          <code x-text="it.key"></code><span class="card-meta" x-text="it.hint"></span>
+        </div>
+      </template>
+    </div>
+    <button type="button" class="agent-attach" @click="pickFile()" title="Attach a file (/attach)">📎</button>
+    <textarea x-ref="input" x-model="input" @keydown="onKeydown($event)" @input="onComposerInput()"
+              @blur="setTimeout(() => slashOpen = false, 150)"
+              rows="1" :disabled="busy"
+              placeholder="Ask the agent…  ( / for commands · Enter to send · Shift+Enter newline )"></textarea>
+    <button class="btn btn-primary" type="submit" :disabled="busy || !input.trim()">
+      <span x-show="!busy">Send</span><span x-show="busy" x-cloak>…</span>
+    </button>
+  </form>
+</div>
+{% endblock %}
