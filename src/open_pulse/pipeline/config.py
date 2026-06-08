@@ -163,6 +163,16 @@ class MetadataExtractorStepConfig(StepConfig):
     ``gme-internal:location``, ``gme-internal:keywords`` survive into the
     JSON-LD output and therefore into the RDF triples uploaded to SPARQL.
     Default False for ontology compliance."""
+    extract_users: bool = False
+    """Also extract the crawler-discovered GitHub *users* (not just repos).
+    The GME v2 ``/extract`` auto-detects entity type from the URL, so users
+    get the same rich person profile (bio / affiliations / ``gme-internal:*``
+    account fields) instead of only the lightweight contributor nodes that
+    come along with a repo extraction. Default False."""
+    extract_orgs: bool = False
+    """Also extract the crawler-discovered GitHub *organizations* (not just
+    repos). Same mechanism as ``extract_users`` — the GME auto-detects the
+    org type and emits a full org profile. Default False."""
     stream_to_sparql: bool = False
     """Publish each successful extraction to the SPARQL store immediately,
     instead of waiting for a downstream ``sparql_upload`` step. Triples
