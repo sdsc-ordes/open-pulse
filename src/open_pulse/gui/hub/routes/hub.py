@@ -144,6 +144,11 @@ _SOURCE_METADATA: dict[str, dict[str, str]] = {
     "gitlab.datascience.ch": {
         "homepage": "https://gitlab.datascience.ch",
         "description": "SDSC DataScience GitLab — projects, groups, and users.",
+        # Per request: show the SDSC brand mark on the DataScience tiles
+        # instead of the generic GitLab tanuki. ``datascience.ch`` is the
+        # SDSC site, so its favicon is the SDSC logo. (Swap to a
+        # ``/static/img/...`` path if you want to pin an exact asset.)
+        "logo_url": "https://www.google.com/s2/favicons?domain=datascience.ch&sz=128",
     },
 }
 
@@ -290,6 +295,19 @@ def _collection_stats() -> list[dict[str, object]]:
         return list(rows)
 
 
+# DuckDB-only stores to show on the home grid even when they have no
+# Qdrant collection yet (no vectors). Listed explicitly so we surface only
+# these intentional ones — e.g. the GitLab user stores, which are created
+# by the GitLab ingest but stay empty until the user-crawl step runs; the
+# operator still wants them visible (tiling with a 0 count) rather than
+# hidden. They click through to the (currently empty) row browser.
+_ALWAYS_SURFACE: tuple[str, ...] = (
+    "gitlab_epfl_users",
+    "gitlab_ethz_users",
+    "gitlab_datascience_users",
+)
+
+
 def _compute_collection_stats() -> list[dict[str, object]]:
     """Gather per-collection counts + presentation metadata (uncached).
 
@@ -301,7 +319,14 @@ def _compute_collection_stats() -> list[dict[str, object]]:
     Each DuckDB count opens its own read-only connection and runs a plain
     ``COUNT(*)``, so concurrent reads are safe.
     """
-    names = qdrant.list_collections()
+    names = list(qdrant.list_collections())
+    # Append the intentionally-surfaced DuckDB-only stores (e.g. GitLab
+    # users) that aren't in Qdrant yet, so they tile even with 0 rows.
+    _seen = set(names)
+    for extra in _ALWAYS_SURFACE:
+        if extra not in _seen and duckdb_browser.is_browsable(extra):
+            names.append(extra)
+            _seen.add(extra)
 
     def _count_for(name: str) -> int | None:
         # Prefer the source-of-truth DuckDB row count over Qdrant
