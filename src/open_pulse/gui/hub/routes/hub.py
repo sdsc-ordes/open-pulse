@@ -145,10 +145,10 @@ _SOURCE_METADATA: dict[str, dict[str, str]] = {
         "homepage": "https://gitlab.datascience.ch",
         "description": "SDSC DataScience GitLab — projects, groups, and users.",
         # Per request: show the SDSC brand mark on the DataScience tiles
-        # instead of the generic GitLab tanuki. ``datascience.ch`` is the
-        # SDSC site, so its favicon is the SDSC logo. (Swap to a
-        # ``/static/img/...`` path if you want to pin an exact asset.)
-        "logo_url": "https://www.google.com/s2/favicons?domain=datascience.ch&sz=128",
+        # instead of the generic GitLab tanuki. Pinned to a first-party
+        # static asset (the SDSC webclip logo) so it doesn't depend on an
+        # external favicon service.
+        "logo_url": "/static/img/gitlab-datascience.png",
     },
 }
 
