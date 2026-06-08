@@ -41,6 +41,7 @@ from ..auth import get_settings, maybe_require_auth
 from ..knowledge import duckdb_browser
 from ..knowledge import enrich as enrich_mod
 from ..knowledge import (
+    manifest,
     normalize,
     opensearch,
     qdrant,
@@ -172,6 +173,10 @@ _COLLECTION_LABELS: dict[str, tuple[str, str]] = {
     "github_organizations": ("GitHub organizations", "github.com"),
     "zenodo_records": ("Zenodo records", "zenodo.org"),
     "communities": ("Zenodo communities", "zenodo.org"),
+    # Dedicated DuckDB-only store (GME v3 split-store layout). Surfaced as
+    # a tile via the federated manifest's surface_as_source allowlist
+    # rather than a Qdrant collection — see _compute_collection_stats.
+    "zenodo_communities": ("Zenodo communities", "zenodo.org"),
     "hf_models": ("HuggingFace models", "huggingface.co"),
     "hf_datasets": ("HuggingFace datasets", "huggingface.co"),
     "hf_spaces": ("HuggingFace spaces", "huggingface.co"),
@@ -320,13 +325,21 @@ def _compute_collection_stats() -> list[dict[str, object]]:
     ``COUNT(*)``, so concurrent reads are safe.
     """
     names = list(qdrant.list_collections())
+    _seen = set(names)
     # Append the intentionally-surfaced DuckDB-only stores (e.g. GitLab
     # users) that aren't in Qdrant yet, so they tile even with 0 rows.
-    _seen = set(names)
     for extra in _ALWAYS_SURFACE:
         if extra not in _seen and duckdb_browser.is_browsable(extra):
             names.append(extra)
             _seen.add(extra)
+    # Manifest-driven extra tiles: DuckDB-only stores the GME explicitly
+    # allowlists (surface_as_source) that have no Qdrant collection — e.g.
+    # zenodo_communities. Best-effort: an empty/unreachable manifest leaves
+    # the grid Qdrant-only (see knowledge/manifest.py).
+    for _store in manifest.surfaced_duckdb_stores():
+        if _store["name"] not in _seen:
+            names.append(_store["name"])
+            _seen.add(_store["name"])
 
     def _count_for(name: str) -> int | None:
         # Prefer the source-of-truth DuckDB row count over Qdrant
