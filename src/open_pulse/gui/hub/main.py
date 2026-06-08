@@ -257,6 +257,22 @@ def databases_page(request: Request, _: None = Depends(require_auth)) -> HTMLRes
     )
 
 
+@app.get("/agent", response_class=HTMLResponse)
+def agent_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
+    """Agent chat — a full-page assistant with the read-only tool belt
+    (SPARQL / Cypher / OpenSearch / DuckDB), rendering markdown, code,
+    images, Vega-Lite plots, and sandboxed HTML."""
+    settings = get_settings()
+    return templates.TemplateResponse(
+        request,
+        "agent.html",
+        {
+            "page": "agent",
+            "default_model": settings.llm_model or "",
+        },
+    )
+
+
 @app.get("/pipeline", response_class=HTMLResponse)
 def pipeline_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
     return templates.TemplateResponse(request, "pipeline.html", {"page": "pipeline"})

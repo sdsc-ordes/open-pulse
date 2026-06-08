@@ -18,15 +18,23 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..auth import get_settings, require_auth
-from .ai_tools import MAX_TOOL_TURNS, TOOLS_SPEC, ToolError, run_tool
+from .ai_tools import (
+    AGENT_FILES_DIR,
+    MAX_TOOL_TURNS,
+    TOOLS_SPEC,
+    ToolError,
+    run_tool,
+)
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 log = logging.getLogger(__name__)
@@ -299,10 +307,17 @@ _SYSTEM_PROMPT = (
     "tabular data, ``**bold**`` for emphasis, ``- `` for lists. The "
     "chat renderer supports tables, lists, headings, blockquotes, "
     "task lists, and inline ``code``.\n"
+    "* To VISUALISE data, emit a ```vega-lite fenced block containing a "
+    "JSON Vega-Lite spec (or ```vega for full Vega) — the agent chat "
+    "renders it as a live chart. You may also emit a ```html block "
+    "(shown in a sandboxed iframe on demand) and Markdown images. When "
+    "the user asks to plot / chart / visualise, prefer a vega-lite chart "
+    "(embed the actual rows as inline ``data.values``) over an ASCII table.\n"
     "* Keep responses tight: 1-2 sentence preamble, the code block, "
     "then a 1-2 sentence follow-up if useful. The chat panel is "
     "420px wide so very long paragraphs hurt readability.\n\n"
-    "Agentic mode: when tools (``run_sparql`` / ``run_cypher``) are "
+    "Agentic mode: when tools (``run_sparql`` / ``run_cypher`` / "
+    "``run_opensearch`` / ``run_duckdb``) are "
     "exposed in this turn, prefer calling them to verify your answer "
     "before quoting numbers. Use the result rows to refine the query "
     "if needed — you can chain up to a handful of tool calls before "
@@ -353,6 +368,23 @@ def _build_messages(
             parts.append("```json")
             parts.append(json.dumps(rows, indent=2, default=str)[:4000])
             parts.append("```")
+        note = context.get("note")
+        if note:
+            parts.append("User-provided context note:")
+            parts.append(str(note)[:4000])
+        files = context.get("files") or []
+        if files:
+            parts.append(
+                "Files the user attached (read them with the ``read_file`` / "
+                "``list_files`` tools, or query tabular ones with run_duckdb's "
+                "``read_csv`` / ``read_parquet`` on the path):"
+            )
+            for f in files[:20]:
+                if isinstance(f, dict):
+                    parts.append(
+                        f"- `{f.get('name', '')}` "
+                        f"({f.get('size', '?')} bytes) → `{f.get('path', '')}`"
+                    )
         out.append({"role": "system", "content": "\n\n".join(parts)})
     out.extend(user_messages)
     return out
@@ -510,6 +542,15 @@ async def chat(
     # that just renders text) keeps working unchanged. The agent path
     # only kicks in when the client opts in.
     tools_enabled = bool(payload.get("tools_enabled", False))
+    # Optional per-tool selection — the "tools checkpoints" in the agent UI.
+    # A list exposes only those tools; absent → all of TOOLS_SPEC; an empty
+    # list disables tools for this turn.
+    tool_names = payload.get("tool_names")
+    if isinstance(tool_names, list):
+        allow = {str(n) for n in tool_names}
+        active_tools = [t for t in TOOLS_SPEC if t["function"]["name"] in allow]
+    else:
+        active_tools = TOOLS_SPEC
     messages = _build_messages(user_messages, context)
 
     async def event_source():
@@ -530,8 +571,8 @@ async def chat(
                         "temperature": temperature,
                         "stream": True,
                     }
-                    if tools_enabled:
-                        body["tools"] = TOOLS_SPEC
+                    if tools_enabled and active_tools:
+                        body["tools"] = active_tools
                         body["tool_choice"] = "auto"
                     async with client.stream(
                         "POST",
@@ -638,3 +679,71 @@ async def chat(
             "Cache-Control": "no-cache",
         },
     )
+
+
+# ── Attached files (Agent chat) ─────────────────────────────────────────────
+# Uploads land in AGENT_FILES_DIR (under /tmp — ephemeral). The agent reads
+# them back through the read_file / list_files tools, or queries tabular ones
+# with run_duckdb's read_csv / read_parquet on the returned path.
+
+_MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB / file
+
+
+def _sanitize_filename(name: str) -> str:
+    base = re.sub(r"[^A-Za-z0-9._-]", "_", Path(name or "").name).strip("._")
+    return (base or "file")[:120]
+
+
+@router.get("/files", dependencies=[Depends(require_auth)])
+def list_agent_files() -> dict[str, Any]:
+    """List the files attached to the agent chat (scratch dir under /tmp)."""
+    files: list[dict[str, Any]] = []
+    if AGENT_FILES_DIR.is_dir():
+        for p in sorted(AGENT_FILES_DIR.iterdir()):
+            if p.is_file():
+                files.append(
+                    {"name": p.name, "size": p.stat().st_size, "path": str(p)}
+                )
+    return {"files": files, "dir": str(AGENT_FILES_DIR)}
+
+
+@router.post("/files", dependencies=[Depends(require_auth)])
+async def upload_agent_file(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Save an uploaded file to the agent scratch dir, streaming to disk."""
+    AGENT_FILES_DIR.mkdir(parents=True, exist_ok=True)
+    name = _sanitize_filename(file.filename or "file")
+    target = AGENT_FILES_DIR / name
+    # Don't clobber a different existing upload — suffix the stem.
+    if target.exists():
+        stem = target.stem
+        suffix = target.suffix
+        i = 1
+        while target.exists():
+            name = f"{stem}-{i}{suffix}"
+            target = AGENT_FILES_DIR / name
+            i += 1
+    size = 0
+    try:
+        with target.open("wb") as out:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > _MAX_FILE_BYTES:
+                    raise HTTPException(
+                        status_code=413, detail="File too large (max 25 MB)."
+                    )
+                out.write(chunk)
+    except HTTPException:
+        target.unlink(missing_ok=True)
+        raise
+    return {"name": name, "size": size, "path": str(target)}
+
+
+@router.delete("/files/{name}", dependencies=[Depends(require_auth)])
+def delete_agent_file(name: str) -> dict[str, str]:
+    """Remove one attached file (name is confined to the scratch dir)."""
+    base = AGENT_FILES_DIR.resolve()
+    target = (base / Path(name).name).resolve()
+    if base not in target.parents:
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+    target.unlink(missing_ok=True)
+    return {"status": "deleted", "name": target.name}
