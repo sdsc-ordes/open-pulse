@@ -365,17 +365,133 @@ def _shape_sql_response(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _agg_key(bucket: dict[str, Any]) -> Any:
+    """Bucket label: date_histogram exposes ``key_as_string``; terms uses ``key``."""
+    v = bucket.get("key_as_string")
+    return v if v is not None else bucket.get("key")
+
+
+def _metric_value(node: dict[str, Any]) -> Any:
+    """Scalar value of a metric sub-agg (cardinality/sum/avg/value_count/…)."""
+    if "value_as_string" in node:
+        return node["value_as_string"]
+    return node.get("value")
+
+
+def _shape_aggregations(
+    aggs: dict[str, Any],
+) -> tuple[list[str], list[list[Any]]] | None:
+    """Flatten an OpenSearch ``aggregations`` block into ``(columns, rows)``.
+
+    ``size: 0`` aggregation queries return no hits, so without this their
+    buckets only ever reached the UI as an opaque JSON dump. Flattening
+    them into a real table lets the row browser — and the chart layer —
+    use them directly. Shapes handled (covering every curated example):
+
+    * ``date_histogram`` / ``terms`` buckets   → ``[key, doc_count]``
+    * bucket agg + metric sub-aggs (sum/avg/…)  → ``[key, doc_count, m1, m2…]``
+    * bucket agg + a nested bucket sub-agg      → cross-tab ``[parent, child, doc_count]``
+    * a bare top-level metric agg (no buckets)  → one row of metric values
+
+    Returns ``None`` when nothing is bucketable/metric, so the caller keeps
+    the raw-dump fallback rather than inventing an empty table.
+    """
+    if not isinstance(aggs, dict):
+        return None
+
+    # First named agg that has buckets wins; remember bare metric aggs as
+    # a fallback for the no-buckets case.
+    bucket_name: str | None = None
+    bucket_node: dict[str, Any] | None = None
+    metric_only: list[tuple[str, Any]] = []
+    for name, node in aggs.items():
+        if not isinstance(node, dict):
+            continue
+        if isinstance(node.get("buckets"), list):
+            bucket_name, bucket_node = name, node
+            break
+        if "value" in node or "value_as_string" in node:
+            metric_only.append((name, _metric_value(node)))
+
+    if bucket_node is None:
+        if metric_only:
+            return [n for n, _ in metric_only], [[v for _, v in metric_only]]
+        return None
+
+    buckets = bucket_node.get("buckets") or []
+    # Friendly key column: ``by_month`` → ``month``, ``by_author`` → ``author``.
+    key_col = bucket_name[3:] if bucket_name.startswith("by_") else bucket_name
+
+    sample = buckets[0] if buckets else {}
+    nested_name = next(
+        (
+            k
+            for k, v in sample.items()
+            if isinstance(v, dict) and isinstance(v.get("buckets"), list)
+        ),
+        None,
+    )
+
+    # Cross-tab: parent bucket × child bucket → [parent, child, doc_count].
+    if nested_name is not None:
+        child_col = (
+            nested_name[3:] if nested_name.startswith("by_") else nested_name
+        )
+        cols = [key_col, child_col, "doc_count"]
+        rows: list[list[Any]] = []
+        for b in buckets:
+            parent = _agg_key(b)
+            for cb in (b.get(nested_name) or {}).get("buckets") or []:
+                rows.append([parent, _agg_key(cb), int(cb.get("doc_count") or 0)])
+        return cols, rows
+
+    # Metric sub-aggs → extra numeric columns (stable first-seen union).
+    metric_names: list[str] = []
+    for b in buckets:
+        for k, v in b.items():
+            if k in ("key", "key_as_string", "doc_count"):
+                continue
+            if isinstance(v, dict) and ("value" in v or "value_as_string" in v):
+                if k not in metric_names:
+                    metric_names.append(k)
+
+    cols = [key_col, "doc_count", *metric_names]
+    rows = []
+    for b in buckets:
+        row: list[Any] = [_agg_key(b), int(b.get("doc_count") or 0)]
+        for m in metric_names:
+            sub = b.get(m)
+            row.append(_metric_value(sub) if isinstance(sub, dict) else None)
+        rows.append(row)
+    return cols, rows
+
+
 def _shape_dsl_response(body: dict[str, Any]) -> dict[str, Any]:
     """Reshape a `_search` response: hits + scalar columns from _source.
 
     For each hit we emit one row; columns are the flattened union of all
     ``_source`` top-level keys plus ``_id`` / ``_index`` / ``_score`` so
-    you always have the document identity. Aggregations are returned in
-    ``raw`` so the UI can still surface them.
+    you always have the document identity. For aggregation-only responses
+    (``size: 0``) the buckets are flattened into a real table via
+    :func:`_shape_aggregations`; ``raw`` still carries the untouched
+    aggregations as a fallback.
     """
     hits_block = body.get("hits") or {}
     hits = hits_block.get("hits") or []
     aggs = body.get("aggregations")
+
+    # Aggregation-only response: turn the buckets into a table the row
+    # browser + chart layer can consume, instead of an opaque JSON dump.
+    if aggs and not hits:
+        shaped = _shape_aggregations(aggs)
+        if shaped is not None:
+            agg_cols, agg_rows = shaped
+            return {
+                "columns": agg_cols,
+                "rows": agg_rows,
+                "row_count": len(agg_rows),
+                "raw": {"aggregations": aggs},
+            }
 
     cols: list[str] = ["_index", "_id", "_score"]
     seen = set(cols)

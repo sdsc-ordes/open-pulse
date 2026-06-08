@@ -950,7 +950,7 @@ OPENSEARCH: list[dict[str, Any]] = [
         '  "size": 0,\n'
         '  "aggs": {\n'
         '    "by_author": {\n'
-        '      "terms": { "field": "author_name.keyword", "size": 20 }\n'
+        '      "terms": { "field": "author_name", "size": 20 }\n'
         "    }\n"
         "  }\n"
         "}",
@@ -988,7 +988,7 @@ OPENSEARCH: list[dict[str, Any]] = [
         "  },\n"
         '  "aggs": {\n'
         '    "by_author": {\n'
-        '      "terms": { "field": "author_name.keyword", "size": 15 }\n'
+        '      "terms": { "field": "author_name", "size": 15 }\n'
         "    }\n"
         "  }\n"
         "}",
@@ -1028,6 +1028,84 @@ OPENSEARCH: list[dict[str, Any]] = [
         '  "aggs": {\n'
         '    "by_index": {\n'
         '      "terms": { "field": "_index", "size": 50 }\n'
+        "    }\n"
+        "  }\n"
+        "}",
+    },
+    {
+        "id": "os-dsl-activity-month-all",
+        "name": "Monthly commits (all repos)",
+        "mode": "dsl",
+        "summary": "Network-wide date_histogram by month — pick 'Time series' on the result.",
+        "body": "// size:0 → no hits; the agg buckets become tabular rows (key, doc_count).\n"
+        "// Switch the result's 'View as' to Time series to plot it.\n"
+        "{\n"
+        '  "index": "git_*_enriched",\n'
+        '  "size": 0,\n'
+        '  "aggs": {\n'
+        '    "by_month": {\n'
+        '      "date_histogram": {\n'
+        '        "field": "grimoire_creation_date",\n'
+        '        "calendar_interval": "month",\n'
+        '        "min_doc_count": 1\n'
+        "      }\n"
+        "    }\n"
+        "  }\n"
+        "}",
+    },
+    {
+        "id": "os-dsl-commits-by-repo",
+        "name": "Commits per repo (terms)",
+        "mode": "dsl",
+        "summary": "Top repos by commit count — clean terms agg; plots as a bar/scatter.",
+        "body": "// Each bucket → one row [repo, doc_count].\n"
+        "{\n"
+        '  "index": "git_*_enriched",\n'
+        '  "size": 0,\n'
+        '  "aggs": {\n'
+        '    "by_repo": { "terms": { "field": "origin", "size": 20 } }\n'
+        "  }\n"
+        "}",
+    },
+    {
+        "id": "os-dsl-author-metrics",
+        "name": "Author metrics (4-D scatter)",
+        "mode": "dsl",
+        "summary": "Per-author label + 4 numeric metrics — exercises the x/y/color/size scatter.",
+        "body": "// Sub-aggs become extra numeric columns:\n"
+        "//   [author, doc_count, commits, lines_added, lines_removed, files_touched].\n"
+        "// Switch 'View as' to 2-D Scatter and map columns to x / y / color / size.\n"
+        "{\n"
+        '  "index": "git_*_enriched",\n'
+        '  "size": 0,\n'
+        '  "aggs": {\n'
+        '    "by_author": {\n'
+        '      "terms": { "field": "author_name", "size": 40 },\n'
+        '      "aggs": {\n'
+        '        "commits": { "value_count": { "field": "author_uuid" } },\n'
+        '        "lines_added": { "sum": { "field": "lines_added" } },\n'
+        '        "lines_removed": { "sum": { "field": "lines_removed" } },\n'
+        '        "files_touched": { "sum": { "field": "files" } }\n'
+        "      }\n"
+        "    }\n"
+        "  }\n"
+        "}",
+    },
+    {
+        "id": "os-dsl-author-by-repo-crosstab",
+        "name": "Author × repo (cross-tab)",
+        "mode": "dsl",
+        "summary": "Nested terms-over-terms — flattens to [repo, author, doc_count] rows.",
+        "body": "// Outer terms on origin, inner terms on author — one row per pair.\n"
+        "{\n"
+        '  "index": "git_*_enriched",\n'
+        '  "size": 0,\n'
+        '  "aggs": {\n'
+        '    "by_repo": {\n'
+        '      "terms": { "field": "origin", "size": 10 },\n'
+        '      "aggs": {\n'
+        '        "by_author": { "terms": { "field": "author_name", "size": 10 } }\n'
+        "      }\n"
         "    }\n"
         "  }\n"
         "}",
