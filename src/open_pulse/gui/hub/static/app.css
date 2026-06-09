@@ -51,9 +51,9 @@
   --code-meta:      #4078f2;
   --code-literal:   #986801;
   --code-title:     #e45649;    /* function names */
-  --code-ln-bg:     rgba(0, 0, 0, 0.035);
-  --code-ln-fg:     rgba(70, 80, 95, 0.55);
-  --code-ln-border: rgba(0, 0, 0, 0.08);
+  --code-ln-bg:     rgba(0, 0, 0, 0.04);
+  --code-ln-fg:     rgba(70, 80, 95, 0.74);
+  --code-ln-border: rgba(0, 0, 0, 0.10);
 
   --shadow-sm:     0 1px 2px rgba(15,23,42,.05);
   --shadow:        0 4px 16px rgba(15,23,42,.06);
@@ -93,16 +93,16 @@
   --code-keyword:   #c678dd;
   --code-string:    #98c379;
   --code-number:    #d19a66;
-  --code-comment:   #5c6370;
+  --code-comment:   #828b9e;   /* was #5c6370 — too dim to read on the panel */
   --code-symbol:    #61afef;
   --code-variable:  #e5c07b;
   --code-attribute: #56b6c2;
   --code-meta:      #56b6c2;
   --code-literal:   #d19a66;
   --code-title:     #e06c75;
-  --code-ln-bg:     rgba(0, 0, 0, 0.18);
-  --code-ln-fg:     rgba(160, 168, 180, 0.42);
-  --code-ln-border: rgba(255, 255, 255, 0.06);
+  --code-ln-bg:     rgba(0, 0, 0, 0.22);
+  --code-ln-fg:     rgba(178, 188, 204, 0.68);   /* was 0.42 — barely visible */
+  --code-ln-border: rgba(255, 255, 255, 0.08);
 
   --shadow-sm:     0 1px 2px rgba(0,0,0,.4);
   --shadow:        0 8px 32px rgba(0,0,0,.5);
@@ -1191,6 +1191,7 @@ button.chaoss-trace-head:hover { background: var(--surface); }
 button.chaoss-trace-head.is-open {
   background: var(--surface);
   border-bottom-color: var(--border);
+  box-shadow: inset 3px 0 0 var(--chaoss-tone-info, var(--accent));
 }
 .chaoss-trace-chevron {
   display: inline-flex;
@@ -1224,7 +1225,7 @@ button.chaoss-trace-head.is-open {
 }
 .chaoss-trace-summary-line.is-error { color: var(--chaoss-tone-danger, #c43); }
 
-.chaoss-trace-body { /* x-show toggles display */ }
+.chaoss-trace-body { padding: 10px; }   /* inset the code panel + actions */
 .chaoss-trace-body-enter            { transition: opacity .14s ease; }
 .chaoss-trace-body-enter-start      { opacity: 0; }
 .chaoss-trace-body-enter-end        { opacity: 1; }
@@ -1248,11 +1249,18 @@ button.chaoss-trace-head.is-open {
   background: var(--code-bg);
   border-top: 1px solid var(--border);
 }
+/* Inside a trace expander the code is an inset, rounded panel so it reads
+   as a distinct codeblock rather than bleeding into the card. (The recipe
+   block keeps its own flush chrome via .chaoss-recipe .chaoss-trace-pre.) */
+.chaoss-trace-body .chaoss-trace-pre {
+  border: 1px solid var(--code-ln-border);
+  border-radius: 8px;
+}
 .chaoss-trace-pre code {
   display: block;
   padding: 12px 0;
-  font-size: 12.5px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.6;
   background: transparent !important;
   color: var(--code-fg);
 }
@@ -1271,7 +1279,7 @@ td.hljs-ln-numbers {
   text-align: right;
   vertical-align: top;
   color: var(--code-ln-fg);
-  padding: 0 14px 0 16px;
+  padding: 0 12px 0 14px;
   border-right: 1px solid var(--code-ln-border);
   background: var(--code-ln-bg);
   width: 1%;
@@ -1292,9 +1300,8 @@ td.hljs-ln-code {
 .chaoss-trace-actions {
   display: flex;
   gap: 6px;
-  padding: 8px 12px;
-  background: var(--surface-sunk);
-  border-top: 1px solid var(--border);
+  padding: 10px 2px 2px;
+  background: transparent;
 }
 
 /* ── Token colours — universal so any <code class="hljs"> anywhere
