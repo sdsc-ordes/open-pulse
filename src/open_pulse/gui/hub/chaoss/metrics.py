@@ -1961,6 +1961,43 @@ def _metric_academic_impact(
     )
 
 
+# GrimoireLab's "hours to first response" enrichment field. Bot-aware
+# enrichments write ``time_to_first_attention_without_bot``; deployments
+# without the bot-marking study write the plain ``time_to_first_attention``.
+# We query both names and prefer the bot-excluded value when it is present,
+# so the metric works regardless of which the running GrimoireLab produced.
+_TTFA_FIELDS = (
+    "time_to_first_attention_without_bot",
+    "time_to_first_attention",
+)
+
+
+def _ttfa_aggs() -> dict:
+    """P50/P90 + exists-count aggs over every known response-time field name."""
+    aggs: dict = {}
+    for i, fld in enumerate(_TTFA_FIELDS):
+        aggs[f"median_{i}"] = {"percentiles": {"field": fld, "percents": [50]}}
+        aggs[f"p90_{i}"] = {"percentiles": {"field": fld, "percents": [90]}}
+        aggs[f"count_{i}"] = {"filter": {"exists": {"field": fld}}}
+    return aggs
+
+
+def _ttfa_read(aggs: dict) -> tuple:
+    """Return ``(n, p50, p90)`` from the first field name that has documents."""
+    for i in range(len(_TTFA_FIELDS)):
+        n = int(((aggs.get(f"count_{i}") or {}).get("doc_count") or 0))
+        if not n:
+            continue
+        p50_raw = ((aggs.get(f"median_{i}") or {}).get("values") or {}).get("50.0")
+        p90_raw = ((aggs.get(f"p90_{i}") or {}).get("values") or {}).get("90.0")
+        return (
+            n,
+            float(p50_raw) if p50_raw is not None else None,
+            float(p90_raw) if p90_raw is not None else None,
+        )
+    return 0, None, None
+
+
 # ── Metric 11 · Time to First Response ──────────────────────────────────
 
 
@@ -1988,23 +2025,7 @@ def _metric_first_response(
                 ]
             }
         },
-        "aggs": {
-            "median": {
-                "percentiles": {
-                    "field": "time_to_first_attention_without_bot",
-                    "percents": [50],
-                }
-            },
-            "p90": {
-                "percentiles": {
-                    "field": "time_to_first_attention_without_bot",
-                    "percents": [90],
-                }
-            },
-            "count_with_response": {
-                "filter": {"exists": {"field": "time_to_first_attention_without_bot"}}
-            },
-        },
+        "aggs": _ttfa_aggs(),
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
@@ -2038,11 +2059,7 @@ def _metric_first_response(
         )
 
     aggs = raw.get("aggregations") or {}
-    n = int(((aggs.get("count_with_response") or {}).get("doc_count") or 0))
-    p50_raw = ((aggs.get("median") or {}).get("values") or {}).get("50.0")
-    p90_raw = ((aggs.get("p90") or {}).get("values") or {}).get("90.0")
-    p50 = float(p50_raw) if p50_raw is not None else None
-    p90 = float(p90_raw) if p90_raw is not None else None
+    n, p50, p90 = _ttfa_read(aggs)
 
     traces.append(
         QueryTrace(
@@ -2083,9 +2100,9 @@ def _metric_first_response(
         traces=traces,
         extracts=[
             {
-                "python": "r1.get('raw', {}).get('aggregations', {}).get('median', {}).get('values', {}).get('50.0')",
-                "bash": '.raw.aggregations.median.values."50.0" // 0',
-                "js": "r1.raw?.aggregations?.median?.values?.['50.0'] ?? 0",
+                "python": "r1.get('raw', {}).get('aggregations', {}).get('median_0', {}).get('values', {}).get('50.0')",
+                "bash": '.raw.aggregations.median_0.values."50.0" // 0',
+                "js": "r1.raw?.aggregations?.median_0?.values?.['50.0'] ?? 0",
             },
         ],
         combine={
@@ -4959,23 +4976,7 @@ def _metric_issue_response_time(
                 ]
             }
         },
-        "aggs": {
-            "median": {
-                "percentiles": {
-                    "field": "time_to_first_attention_without_bot",
-                    "percents": [50],
-                }
-            },
-            "p90": {
-                "percentiles": {
-                    "field": "time_to_first_attention_without_bot",
-                    "percents": [90],
-                }
-            },
-            "count_with_response": {
-                "filter": {"exists": {"field": "time_to_first_attention_without_bot"}}
-            },
-        },
+        "aggs": _ttfa_aggs(),
     }
     body_text = json.dumps(body, indent=2)
     raw = os_mod._post("/github_*_enriched/_search", body)
@@ -5010,11 +5011,7 @@ def _metric_issue_response_time(
         )
 
     aggs = raw.get("aggregations") or {}
-    n = int(((aggs.get("count_with_response") or {}).get("doc_count") or 0))
-    p50_raw = ((aggs.get("median") or {}).get("values") or {}).get("50.0")
-    p90_raw = ((aggs.get("p90") or {}).get("values") or {}).get("90.0")
-    p50 = float(p50_raw) if p50_raw is not None else None
-    p90 = float(p90_raw) if p90_raw is not None else None
+    n, p50, p90 = _ttfa_read(aggs)
     traces.append(
         QueryTrace(
             store="OpenSearch",
