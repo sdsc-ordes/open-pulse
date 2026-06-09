@@ -337,6 +337,45 @@
   color: var(--accent); font-size: 12.5px;
 }
 
+.agent-range { width: 100%; accent-color: var(--accent); }
+
+/* ── conversation history list ──────────────────────────────────── */
+.agent-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 62vh;
+  overflow-y: auto;
+}
+.agent-history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.agent-history-item:hover { border-color: var(--border-strong); }
+.agent-history-item.is-current {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+}
+.agent-history-main { flex: 1; min-width: 0; }
+.agent-history-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 1px;
+}
+.agent-history-del {
+  background: none; border: none; cursor: pointer;
+  color: var(--fg-muted); padding: 2px 6px; font-size: 13px; flex-shrink: 0;
+}
+.agent-history-del:hover { color: var(--danger, #e66); }
+
 @media (max-width: 720px) {
   .agent-settings-grid { grid-template-columns: 1fr; }
 }
