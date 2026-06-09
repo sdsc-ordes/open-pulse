@@ -43,6 +43,10 @@ log = logging.getLogger(__name__)
 
 _MODELS_TIMEOUT = 10.0
 _CHAT_TIMEOUT = 600.0
+# Cadence of SSE keepalive comments emitted while a tool runs, so a long
+# (e.g. ~20s gme_search) round-trip never leaves the connection idle long
+# enough for an intermediary proxy to drop it with a 502.
+_HEARTBEAT_SECONDS = 10.0
 _SCHEMA_CACHE_TTL = 600.0  # 10 min — store schema changes on quest runs, not minutes
 _SCHEMA_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -574,6 +578,9 @@ async def chat(
         # can render them), append the assistant + tool messages, and
         # re-call the LLM. Bounded by ``MAX_TOOL_TURNS`` to keep a
         # runaway loop from melting the LLM budget.
+        # Flush an initial comment so the proxy commits the 200 and starts
+        # streaming immediately, before the first model token arrives.
+        yield ": connected\n\n"
         try:
             async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
                 for turn in range(max_turns + 1):
@@ -676,8 +683,20 @@ async def chat(
                         # loop so a single-worker hub stays responsive — a
                         # synchronous call here freezes every other request
                         # (and the reverse proxy 502s) for the tool's whole
-                        # duration.
-                        result = await asyncio.to_thread(_execute_tool_safely, tc)
+                        # duration. While it runs (gme_search can take ~20s),
+                        # emit SSE keepalive comments so the connection never
+                        # goes idle long enough for an intermediary proxy to
+                        # drop it with a 502.
+                        task = asyncio.ensure_future(
+                            asyncio.to_thread(_execute_tool_safely, tc)
+                        )
+                        while not task.done():
+                            done, _ = await asyncio.wait(
+                                {task}, timeout=_HEARTBEAT_SECONDS
+                            )
+                            if not done:
+                                yield ": keepalive\n\n"
+                        result = task.result()
                         messages.append(
                             {
                                 "role": "tool",
