@@ -41,7 +41,8 @@
 }
 .agent-head-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .agent-model {
-  width: 180px;
+  width: 100%;
+  max-width: 340px;
   background: var(--surface);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -49,6 +50,7 @@
   padding: 5px 8px;
   font-size: 12px;
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  cursor: pointer;
 }
 
 /* transcript */
