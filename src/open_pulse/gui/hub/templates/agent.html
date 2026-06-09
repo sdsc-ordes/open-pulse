@@ -233,8 +233,10 @@
     <template x-for="(m, i) in messages" :key="i">
       <div class="agent-msg" :class="'agent-msg-' + m.role">
         <template x-if="m.role === 'tool'">
-          <details class="agent-tool" :open="i >= messages.length - 2">
+          <details class="agent-tool" :class="toolErrored(m) ? 'is-error' : ''" :open="i >= messages.length - 2">
             <summary>
+              <span class="agent-tool-chevron" aria-hidden="true">▸</span>
+              <span class="agent-tool-icon" aria-hidden="true">🛠</span>
               <span class="agent-tool-name" x-text="m.name || 'tool'"></span>
               <span class="agent-tool-meta" x-text="toolMeta(m)"></span>
             </summary>
