@@ -262,18 +262,6 @@
     </div>
   </div>
 
-  {# ── quick examples — only while the input is blank ─────────────── #}
-  <div class="agent-quick" x-show="!input.trim()" x-cloak>
-    <template x-for="ex in [
-      {l:'Top repo owners', t:'Top 10 GitHub repo owners by repo count — query DuckDB and show a Vega-Lite bar chart.'},
-      {l:'Commit timeline', t:'Plot monthly commit activity across all repos from OpenSearch as a Vega-Lite line chart.'},
-      {l:'Most contributors', t:'Use Cypher to find the 5 repos with the most contributors, then summarise.'},
-      {l:'Store sizes', t:'Using run_duckdb, count rows for the 8 biggest index tables and chart them with Vega-Lite.'}
-    ]" :key="ex.l">
-      <button class="agent-quick-btn" @click="loadExample(ex.t)" :title="ex.t" x-text="ex.l"></button>
-    </template>
-  </div>
-
   {# ── composer with slash palette ────────────────────────────────── #}
   <form class="agent-composer" @submit.prevent="send()">
     <div class="agent-slash" x-show="slashOpen" x-cloak @mousedown.prevent>
