@@ -679,6 +679,7 @@ _AGG_RULE: dict[str, str] = {
     # Median response time averages across repos; committers is a distinct
     # head-count (summed, flagged approx below).
     "issue_response_time": "mean",
+    "first_response": "mean",
 }
 _AGG_APPROX = {"contributors", "new_contributors", "org_diversity", "committers"}
 # Bound on fan-out per request; larger projects are truncated (reported)
