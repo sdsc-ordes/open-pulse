@@ -1284,6 +1284,14 @@ button.chaoss-trace-head.is-open {
   border: 1px solid var(--code-ln-border);
   border-radius: 8px;
 }
+/* Inside the methodology modal, let code blocks grow to their full height
+   and let the modal body be the single scroll container — no cramped
+   scroll-within-a-scroll. (overflow-x stays auto for long lines.) */
+.chaoss-modal .chaoss-trace-pre {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 .chaoss-trace-pre code {
   display: block;
   padding: 12px 0;
@@ -1301,28 +1309,32 @@ table.hljs-ln {
   border-spacing: 0;
   width: 100%;
 }
-td.hljs-ln-numbers {
+/* NB: the line-numbers plugin injects its own <style> at runtime with
+   `.hljs-ln td { padding: 0 }` — same specificity as a bare `td.hljs-ln-*`
+   but later in the cascade, so it zeroes our padding and glues the numbers
+   to the code. Qualifying with the `.hljs-ln` ancestor (0,2,1) outranks it. */
+.hljs-ln td.hljs-ln-numbers {
   user-select: none;
   -webkit-user-select: none;
   text-align: right;
   vertical-align: top;
   color: var(--code-ln-fg);
-  padding: 0 12px 0 14px;
+  padding: 0 16px 0 14px;
   border-right: 1px solid var(--code-ln-border);
   background: var(--code-ln-bg);
   width: 1%;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-td.hljs-ln-code {
-  padding-left: 14px;
-  padding-right: 14px;
+.hljs-ln td.hljs-ln-code {
+  padding-left: 18px;   /* clear gap between the gutter and the code */
+  padding-right: 16px;
   white-space: pre;
 }
 @media (max-width: 720px) {
   /* Allow wrap on narrow screens so visitors don't have to
      scroll horizontally over long SPARQL filters. */
-  td.hljs-ln-code { white-space: pre-wrap; word-break: break-word; }
+  .hljs-ln td.hljs-ln-code { white-space: pre-wrap; word-break: break-word; }
 }
 
 .chaoss-trace-actions {
