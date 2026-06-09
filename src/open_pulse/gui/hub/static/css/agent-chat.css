@@ -5,8 +5,17 @@
    flex child of .layout (height: 100vh - marquee), so we turn it into a
    flex column on this page and let .page-body (then .agent-wrap) flex to
    fill the space below the page header. */
-.main:has(.agent-wrap) { display: flex; flex-direction: column; min-height: 0; }
-.main:has(.agent-wrap) .page-body {
+/* .main-agent is emitted by base.html (class="main main-{{ page }}"); it does
+   the same job as the :has() rule but works in browsers without :has()
+   support, where the transcript would otherwise grow to content height and
+   shove the composer below the fold. */
+.main-agent, .main:has(.agent-wrap) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;   /* main never scrolls — only .agent-scroll does */
+}
+.main-agent .page-body, .main:has(.agent-wrap) .page-body {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -84,25 +93,21 @@
   color: var(--fg-faint);
   margin-bottom: 4px;
 }
-.agent-thinking {
-  margin-top: 6px;
+/* a finished pure tool-call turn — one quiet line, same height as a tool
+   card summary, instead of a lingering full assistant bubble. */
+.agent-callrow {
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface-sunk));
-  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  padding: 2px 2px;
   font-size: 11.5px;
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
-  color: var(--fg-muted);
+  color: var(--fg-faint);
+  white-space: nowrap;
 }
-.agent-thinking::before {
-  content: "";
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent);
-  animation: agent-pulse 1s ease-in-out infinite;
-}
+.agent-callrow-ico { opacity: 0.7; }
+.agent-callrow-name { color: var(--fg-muted); font-weight: 600; }
 .agent-dot {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--accent); animation: agent-pulse 1s ease-in-out infinite;
