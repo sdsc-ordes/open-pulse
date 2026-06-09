@@ -25,6 +25,7 @@ an agentic loop accidentally wipe the store.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import re
@@ -530,7 +531,15 @@ def _run_opensearch(query: str, mode: str = "sql") -> dict[str, Any]:
         raise ToolError(f"OpenSearch request failed: {exc}") from exc
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     if resp.status_code != 200:
-        raise ToolError(f"OpenSearch HTTP {resp.status_code}: {resp.text[:300]}")
+        detail = resp.text[:300]
+        # The model often guesses an index that doesn't exist (e.g.
+        # ``git_commits_enriched``). On a not-found, hand it the real list
+        # so it can self-correct on the next tool round.
+        if resp.status_code == 404 or "IndexNotFound" in resp.text:
+            names = opensearch_data_indices()
+            if names:
+                detail += " — available indices: " + ", ".join(names[:40])
+        raise ToolError(f"OpenSearch HTTP {resp.status_code}: {detail}")
     shaped = (shape_dsl if mode == "dsl" else shape_sql)(resp.json())
     rows, truncated = _truncate_rows(shaped.get("rows") or [])
     return {
@@ -542,6 +551,78 @@ def _run_opensearch(query: str, mode: str = "sql") -> dict[str, Any]:
         "truncated": truncated,
         "elapsed_ms": elapsed_ms,
     }
+
+
+# Cache the live OpenSearch index list so the tool description + 404 hints
+# name real indices instead of letting the model guess. System indices
+# (security-auditlog, top_queries, dot-prefixed) are filtered out.
+_OS_INDEX_CACHE: dict[str, Any] = {"at": 0.0, "names": []}
+_OS_INDEX_TTL = 600.0  # 10 min — indices change on ingest, not minute-to-minute
+
+
+def _is_data_index(name: str) -> bool:
+    return bool(name) and not name.startswith(
+        (".", "security-auditlog", "top_queries", "opensearch_dashboards")
+    )
+
+
+def opensearch_data_indices() -> list[str]:
+    """Live list of user-data OpenSearch indices (cached ~10 min). Returns
+    ``[]`` on any probe failure so callers degrade to the static text."""
+    now = time.monotonic()
+    if _OS_INDEX_CACHE["names"] and now - _OS_INDEX_CACHE["at"] < _OS_INDEX_TTL:
+        return _OS_INDEX_CACHE["names"]
+    settings = get_settings()
+    base = (settings.opensearch_url or "").rstrip("/")
+    if not base:
+        return []
+    auth = (
+        (settings.opensearch_username, settings.opensearch_password)
+        if settings.opensearch_password
+        else None
+    )
+    try:
+        resp = httpx.get(
+            f"{base}/_cat/indices?h=index&s=index",
+            auth=auth,
+            verify=settings.opensearch_verify_tls,
+            timeout=5.0,
+        )
+        if resp.status_code != 200:
+            return _OS_INDEX_CACHE["names"]
+        names = sorted(
+            {ln.strip() for ln in resp.text.splitlines() if _is_data_index(ln.strip())}
+        )
+    except httpx.HTTPError as exc:
+        log.info("opensearch index probe failed: %s", exc)
+        return _OS_INDEX_CACHE["names"]
+    _OS_INDEX_CACHE["at"] = now
+    _OS_INDEX_CACHE["names"] = names
+    return names
+
+
+def runtime_tools_spec(allow: set[str] | None = None) -> list[dict[str, Any]]:
+    """TOOLS_SPEC filtered to ``allow`` (all when None), with live context
+    folded into the descriptions — currently the real OpenSearch index list,
+    so the model queries names that actually exist instead of inventing them."""
+    out: list[dict[str, Any]] = []
+    indices: list[str] | None = None
+    for t in TOOLS_SPEC:
+        name = t["function"]["name"]
+        if allow is not None and name not in allow:
+            continue
+        spec = copy.deepcopy(t)
+        if name == "run_opensearch":
+            if indices is None:
+                indices = opensearch_data_indices()
+            if indices:
+                listed = ", ".join(f"``{i}``" for i in indices[:40])
+                spec["function"]["description"] += (
+                    " Indices on THIS deployment right now — use these exact "
+                    f"names, do not invent others: {listed}."
+                )
+        out.append(spec)
+    return out
 
 
 def _duckdb_stores() -> list[tuple[str, str]]:
