@@ -237,8 +237,9 @@
 .agent-modal {
   position: fixed;
   inset: 0;
-  z-index: 60;
-  background: color-mix(in srgb, #000 45%, transparent);
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
