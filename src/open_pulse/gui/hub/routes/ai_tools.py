@@ -55,7 +55,8 @@ TOOL_TIMEOUT_SECONDS = 20.0
 # Semantic search (embed query + vector search + rerank) is much slower
 # than a SQL/SPARQL round-trip, so gme_search gets its own longer budget.
 SEARCH_TIMEOUT_SECONDS = 60.0
-MAX_TOOL_TURNS = 5
+MAX_TOOL_TURNS = 8  # default chained tool rounds per reply
+MAX_TOOL_TURNS_CEILING = 20  # hard cap the client may request up to
 
 
 # OpenAI-style tool definitions. The descriptions are deliberately
