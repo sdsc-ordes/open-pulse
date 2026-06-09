@@ -625,6 +625,11 @@
           this.models = ids.sort();
         } catch (_) { this.models = []; }
       },
+      saveModel() {
+        // '' means "use the hub default" — clear the override.
+        if (this.model) localStorage.setItem(STORAGE + ':model', this.model);
+        else localStorage.removeItem(STORAGE + ':model');
+      },
 
       // ── context note ─────────────────────────────────────────────────
       saveNote() { localStorage.setItem(STORAGE + ':note', this.contextNote || ''); },
