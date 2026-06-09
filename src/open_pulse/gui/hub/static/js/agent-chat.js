@@ -524,6 +524,82 @@
       },
       _enhanceAll() {
         document.querySelectorAll('.agent-msg-body:not([data-enhanced="1"])').forEach((el) => this.enhance(el));
+        this._enhanceTables();
+      },
+
+      // ── conversation export (markdown / json) ───────────────────────
+      _download(filename, text, mime) {
+        const blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      },
+      _exportStamp() {
+        // No Date math beyond a filename hint — keep it simple + safe.
+        const c = this.conversations.find((x) => x.id === this.currentId);
+        const t = (c && c.title) ? c.title : 'conversation';
+        return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'conversation';
+      },
+      exportJson() {
+        const c = this.conversations.find((x) => x.id === this.currentId);
+        const doc = { title: c ? c.title : 'New chat', model: this.model || this.defaultModel || null, messages: this.messages };
+        this._download(`openpulse-chat-${this._exportStamp()}.json`, JSON.stringify(doc, null, 2), 'application/json');
+      },
+      exportMarkdown() {
+        const lines = [];
+        const c = this.conversations.find((x) => x.id === this.currentId);
+        lines.push('# ' + (c && c.title ? c.title : 'Open Pulse — agent chat'), '');
+        for (const m of this.messages) {
+          if (m.role === 'user') {
+            lines.push('## You', '', String(m.content || ''), '');
+          } else if (m.role === 'tool') {
+            const res = this._toolRes(m);
+            lines.push('### 🛠 ' + (m.name || 'tool') + (res ? ' — ' + this.toolMeta(m) : ''), '');
+            const q = this._toolQueryText(m);
+            if (q) { lines.push('```' + this._toolLang(m), q, '```', ''); }
+          } else if (m.content) {
+            lines.push('## Assistant', '', String(m.content), '');
+          } else if (m.tool_calls && m.tool_calls.length) {
+            lines.push('_↳ calling ' + m.tool_calls.map((t) => t.function.name).join(', ') + '_', '');
+          }
+        }
+        this._download(`openpulse-chat-${this._exportStamp()}.md`, lines.join('\n'), 'text/markdown;charset=utf-8');
+      },
+
+      // ── per-table CSV export ─────────────────────────────────────────
+      // Any rendered <table> (markdown table in an answer, or a tool-result
+      // table) gets a hover "⬇ CSV" button that serialises its cells.
+      _enhanceTables() {
+        document.querySelectorAll('.agent-scroll table:not([data-csv="1"])').forEach((table) => {
+          table.setAttribute('data-csv', '1');
+          const wrap = document.createElement('div');
+          wrap.className = 'agent-table-wrap';
+          table.parentNode.insertBefore(wrap, table);
+          wrap.appendChild(table);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'agent-table-csv';
+          btn.textContent = '⬇ CSV';
+          btn.title = 'Download this table as CSV';
+          btn.addEventListener('click', () => {
+            this._download('openpulse-table.csv', this._tableToCsv(table), 'text/csv;charset=utf-8');
+          });
+          wrap.appendChild(btn);
+        });
+      },
+      _csvCell(v) {
+        const s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      },
+      _tableToCsv(table) {
+        const rows = [];
+        table.querySelectorAll('tr').forEach((tr) => {
+          const cells = [...tr.querySelectorAll('th,td')].map((c) => this._csvCell(c.textContent));
+          if (cells.length) rows.push(cells.join(','));
+        });
+        return rows.join('\r\n');
       },
       _renderVega(el) {
         if (typeof window.vegaEmbed === 'undefined') return;
