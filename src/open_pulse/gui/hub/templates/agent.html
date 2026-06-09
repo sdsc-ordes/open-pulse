@@ -246,16 +246,20 @@
             </div>
           </details>
         </template>
-        <template x-if="m.role !== 'tool' && (m.content || (m.tool_calls && m.tool_calls.length))">
+        {# normal text message — full bubble #}
+        <template x-if="m.role !== 'tool' && m.content">
           <div class="agent-bubble">
             <div class="agent-role" x-text="m.role === 'user' ? 'you' : 'assistant'"></div>
-            <div class="agent-msg-body" x-html="renderMessage(m.content || '')"
+            <div class="agent-msg-body" x-html="renderMessage(m.content)"
                  x-init="$nextTick(() => enhance($el))"></div>
-            <template x-if="m.tool_calls && m.tool_calls.length && !m.content">
-              <div class="card-meta agent-thinking">
-                calling <span x-text="m.tool_calls.map(t => t.function.name).join(', ')"></span>…
-              </div>
-            </template>
+          </div>
+        </template>
+        {# pure tool-call turn (no text) — collapse to one compact line, not a
+           full assistant bubble that lingers forever above the tool card. #}
+        <template x-if="m.role !== 'tool' && !m.content && m.tool_calls && m.tool_calls.length">
+          <div class="agent-callrow">
+            <span class="agent-callrow-ico" aria-hidden="true">↳</span>
+            calling <span class="agent-callrow-name" x-text="m.tool_calls.map(t => t.function.name).join(', ')"></span>
           </div>
         </template>
       </div>
