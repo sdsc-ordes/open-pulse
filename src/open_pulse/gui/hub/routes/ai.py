@@ -16,6 +16,7 @@ Future surfaces can add their own keys without changing the wire format.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -668,7 +669,13 @@ async def chat(
                         }
                     )
                     for tc in accumulated_tool_calls:
-                        result = _execute_tool_safely(tc)
+                        # Tools make blocking DB/HTTP calls (Neo4j, SPARQL,
+                        # OpenSearch, DuckDB, GME). Run them off the event
+                        # loop so a single-worker hub stays responsive — a
+                        # synchronous call here freezes every other request
+                        # (and the reverse proxy 502s) for the tool's whole
+                        # duration.
+                        result = await asyncio.to_thread(_execute_tool_safely, tc)
                         messages.append(
                             {
                                 "role": "tool",
