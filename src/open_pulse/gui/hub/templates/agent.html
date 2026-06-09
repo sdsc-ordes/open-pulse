@@ -226,10 +226,16 @@
             </div>
           </details>
         </template>
-        {# normal text message — full bubble #}
-        <template x-if="m.role !== 'tool' && m.content">
-          <div class="agent-bubble">
-            <div class="agent-role" x-text="m.role === 'user' ? 'you' : 'assistant'"></div>
+        {# user text — the only message with a bounding box, right-aligned #}
+        <template x-if="m.role === 'user' && m.content">
+          <div class="agent-bubble-user">
+            <div class="agent-msg-body" x-html="renderMessage(m.content)"
+                 x-init="$nextTick(() => enhance($el))"></div>
+          </div>
+        </template>
+        {# assistant text — no box, no label, spans the full width #}
+        <template x-if="m.role !== 'tool' && m.role !== 'user' && m.content">
+          <div class="agent-answer">
             <div class="agent-msg-body" x-html="renderMessage(m.content)"
                  x-init="$nextTick(() => enhance($el))"></div>
           </div>
@@ -246,9 +252,9 @@
     </template>
 
     <div class="agent-msg agent-msg-assistant" x-show="busy">
-      <div class="agent-bubble">
-        <div class="agent-role">assistant <span class="agent-dot"></span></div>
+      <div class="agent-answer">
         <div class="agent-msg-body" x-html="renderMessage(partial || '…')"></div>
+        <span class="agent-dot" x-show="!partial"></span>
       </div>
     </div>
   </div>
@@ -276,6 +282,13 @@
       <button type="button" class="agent-iconbtn" @click="newConversation()" title="New conversation">＋</button>
       <button type="button" class="agent-iconbtn" @click="clearChat()" x-show="messages.length" x-cloak
               title="Clear this conversation">🗑</button>
+      <div class="agent-export" x-data="{ open: false }" @click.outside="open = false" x-show="messages.length" x-cloak>
+        <button type="button" class="agent-iconbtn" @click="open = !open" title="Export this conversation">⬇</button>
+        <div class="agent-export-menu" x-show="open" x-cloak x-transition.opacity.duration.120ms>
+          <button type="button" @click="exportMarkdown(); open = false">⬇ Markdown (.md)</button>
+          <button type="button" @click="exportJson(); open = false">⬇ JSON (.json)</button>
+        </div>
+      </div>
     </div>
     <textarea x-ref="input" x-model="input" @keydown="onKeydown($event)" @input="onComposerInput()"
               @blur="setTimeout(() => slashOpen = false, 150)"
