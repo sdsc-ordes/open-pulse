@@ -298,38 +298,114 @@
         });
       },
 
-      // Render a tool message's result as a compact table (when it has
-      // columns/rows) or pretty JSON otherwise.
-      renderToolResult(m) {
+      // ── tool cards: query block + result table ───────────────────────
+      _toolRes(m) {
         let res = m.content;
         if (typeof res === 'string') {
-          try { res = JSON.parse(res); } catch (_) { return '<pre>' + this._esc(m.content) + '</pre>'; }
+          try { res = JSON.parse(res); } catch (_) { return null; }
         }
-        if (res && Array.isArray(res.columns) && Array.isArray(res.rows)) {
-          const cols = res.columns;
-          const rows = res.rows.slice(0, 20);
-          const cell = (v) =>
-            v == null ? '' : typeof v === 'object' ? this._esc(JSON.stringify(v)) : this._esc(String(v));
-          let html = '<div class="agent-tool-meta">' +
-            this._esc(`${res.engine || 'tool'} · ${res.row_count != null ? res.row_count + ' rows' : ''}` +
-              (res.elapsed_ms != null ? ` · ${res.elapsed_ms} ms` : '') +
-              (res.truncated ? ' · truncated' : '')) + '</div>';
-          html += '<div class="agent-tool-table"><table><thead><tr>' +
-            cols.map((c) => `<th>${this._esc(c)}</th>`).join('') + '</tr></thead><tbody>' +
-            rows.map((r) => '<tr>' + cols.map((_, i) => `<td>${cell(r[i])}</td>`).join('') + '</tr>').join('') +
-            '</tbody></table></div>';
-          if (res.rows.length > rows.length) {
-            html += `<div class="agent-tool-meta">…${res.rows.length - rows.length} more rows</div>`;
-          }
-          return html;
-        }
-        return '<pre>' + this._esc(JSON.stringify(res, null, 2)) + '</pre>';
+        return res && typeof res === 'object' ? res : null;
       },
-      toolArgs(m) {
-        if (m.arguments && typeof m.arguments === 'object') {
-          return m.arguments.query || m.arguments.sql || JSON.stringify(m.arguments);
+      // Compact summary line shown in the expander header.
+      toolMeta(m) {
+        const res = this._toolRes(m);
+        if (!res) return '';
+        const bits = [res.engine || m.name || 'tool'];
+        if (res.row_count != null) bits.push(res.row_count + ' rows');
+        else if (res.count != null) bits.push(res.count + ' hits');
+        if (res.elapsed_ms != null) bits.push(res.elapsed_ms + ' ms');
+        if (res.truncated) bits.push('truncated');
+        if (res.submitted) bits.push('job ' + (res.job_id || 'submitted'));
+        if (res.error) bits.push('error');
+        return bits.join(' · ');
+      },
+      // The query/args this tool ran, mapped to a highlight language.
+      _toolLang(m) {
+        switch (m.name) {
+          case 'run_cypher': return 'cypher';
+          case 'run_sparql': return 'sparql';
+          case 'run_duckdb': return 'sql';
+          case 'run_opensearch':
+            return (m.arguments && m.arguments.mode === 'dsl') ? 'json' : 'sql';
+          default: return 'json';
         }
-        return String(m.arguments || '');
+      },
+      _toolQueryText(m) {
+        const a = m.arguments;
+        if (a && typeof a === 'object') {
+          if (a.query) return String(a.query);
+          if (a.sql) return String(a.sql);
+          return JSON.stringify(a, null, 2);
+        }
+        return String(a || '');
+      },
+      // Pretty-print a query for display: pretty JSON, or break SQL /
+      // Cypher / SPARQL onto multiple lines at clause keywords (only when
+      // the model emitted it as one line — keep its own formatting if any).
+      _formatQuery(text, lang) {
+        if (!text) return text;
+        if (lang === 'json') {
+          try { return JSON.stringify(JSON.parse(text), null, 2); } catch (_) { return text; }
+        }
+        if (text.includes('\n')) return text;
+        const kw = /\s+(?=\b(SELECT|FROM|WHERE|GROUP BY|ORDER BY|HAVING|LIMIT|OFFSET|UNION ALL|UNION|MATCH|OPTIONAL MATCH|RETURN|WITH|UNWIND|MERGE|CREATE|PREFIX|CONSTRUCT|ASK|DESCRIBE|FILTER|BIND|VALUES|LEFT JOIN|JOIN)\b)/gi;
+        return text.replace(kw, '\n').trim();
+      },
+      // Multiline, syntax-highlighted code block for the tool's query.
+      renderToolQuery(m) {
+        let text = this._toolQueryText(m);
+        if (!text) return '';
+        const lang = this._toolLang(m);
+        text = this._formatQuery(text, lang);
+        let inner;
+        if (window.hljs && window.hljs.getLanguage(lang)) {
+          inner = `<code class="hljs language-${lang}">${window.hljs.highlight(text, { language: lang, ignoreIllegals: true }).value}</code>`;
+        } else if (window.hljs) {
+          inner = `<code class="hljs">${window.hljs.highlightAuto(text).value}</code>`;
+        } else {
+          inner = `<code>${this._esc(text)}</code>`;
+        }
+        return `<pre class="agent-tool-query">${inner}</pre>`;
+      },
+      _cellHtml(v) {
+        return v == null ? '' : (typeof v === 'object' ? this._esc(JSON.stringify(v)) : this._esc(String(v)));
+      },
+      // Render rows whether each row is an array (duckdb/opensearch) or a
+      // dict keyed by column (cypher/sparql/gme) — the old code assumed
+      // arrays, so dict-rows showed up as empty cells.
+      _toolTable(cols, rows) {
+        const get = (row, col, i) =>
+          Array.isArray(row) ? row[i] : (row && typeof row === 'object' ? row[col] : undefined);
+        const shown = rows.slice(0, 25);
+        let html = '<div class="agent-tool-table"><table><thead><tr>' +
+          cols.map((c) => `<th>${this._esc(c)}</th>`).join('') + '</tr></thead><tbody>' +
+          shown.map((r) => '<tr>' + cols.map((c, i) => `<td>${this._cellHtml(get(r, c, i))}</td>`).join('') + '</tr>').join('') +
+          '</tbody></table></div>';
+        if (rows.length > shown.length) {
+          html += `<div class="agent-tool-more">…${rows.length - shown.length} more rows</div>`;
+        }
+        return html;
+      },
+      _jsonBlock(obj) {
+        const j = JSON.stringify(obj, null, 2);
+        if (window.hljs && window.hljs.getLanguage('json')) {
+          return `<pre class="agent-tool-query"><code class="hljs language-json">${window.hljs.highlight(j, { language: 'json' }).value}</code></pre>`;
+        }
+        return '<pre>' + this._esc(j) + '</pre>';
+      },
+      renderToolResult(m) {
+        const res = this._toolRes(m);
+        if (!res) return '<pre>' + this._esc(String(m.content || '')) + '</pre>';
+        if (res.error) return `<div class="agent-tool-err">⚠ ${this._esc(String(res.error))}</div>`;
+        if (Array.isArray(res.columns) && Array.isArray(res.rows)) {
+          return res.rows.length ? this._toolTable(res.columns, res.rows) : '<div class="agent-tool-more">no rows</div>';
+        }
+        if (Array.isArray(res.hits)) {
+          const rows = res.hits.map((h) => [h.title || h.id, h.url || '', h.score]);
+          return rows.length ? this._toolTable(['title', 'url', 'score'], rows) : '<div class="agent-tool-more">no hits</div>';
+        }
+        // job submissions / list_files / read_file / anything else → JSON.
+        return this._jsonBlock(res);
       },
 
       // ── post-render enhancement (charts + html sandbox) ──────────────
@@ -439,7 +515,16 @@
         try {
           const r = await fetch('/api/ai/models', { credentials: 'include' });
           const j = await r.json();
-          this.models = (j.data || []).map((m) => m.id).filter(Boolean).sort();
+          let ids = (j.data || []).map((m) => m.id).filter(Boolean);
+          // The endpoint lists 250+ entries including embedding / reranker
+          // models (not chat-capable) and dtype variants (…-bfloat16 /
+          // -fp8 / -float32) that just clutter the picker. Keep the chat
+          // models so big ones (Qwen3-235B, Qwen3-30B, QwQ-32B, …) are easy
+          // to find; the field still accepts any id the user types.
+          ids = ids
+            .filter((id) => !/embed|rerank|gte-|bge-|^BAAI\//i.test(id))
+            .filter((id) => !/-(float32|bfloat16|fp8)$/i.test(id));
+          this.models = ids.sort();
         } catch (_) { this.models = []; }
       },
 
