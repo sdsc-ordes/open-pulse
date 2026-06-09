@@ -34,72 +34,128 @@
   })();
   window.OP_AGENT_DEFAULT_MODEL = {{ default_model | tojson }};
 </script>
+{# Register SPARQL + Cypher with highlight.js (neither ships in the common
+   bundle) so the agent's tool-query blocks are colour-coded like the
+   Databases console. SQL + JSON are already bundled. #}
+<script>
+(function () {
+  if (!window.hljs) return;
+  hljs.registerLanguage('sparql', () => ({
+    name: 'SPARQL', case_insensitive: true,
+    keywords: {
+      keyword:
+        'BASE PREFIX SELECT CONSTRUCT DESCRIBE ASK FROM NAMED WHERE ' +
+        'OPTIONAL UNION MINUS FILTER NOT EXISTS BIND VALUES SERVICE GRAPH ' +
+        'DISTINCT REDUCED ORDER BY ASC DESC LIMIT OFFSET GROUP HAVING',
+      built_in:
+        'STR LANG DATATYPE BOUND IF COALESCE REGEX REPLACE CONCAT SUBSTR ' +
+        'STRLEN UCASE LCASE CONTAINS COUNT SUM MIN MAX AVG SAMPLE ' +
+        'GROUP_CONCAT IRI URI BNODE',
+      literal: 'true false',
+    },
+    contains: [
+      hljs.HASH_COMMENT_MODE,
+      { className: 'variable', begin: /[?$][A-Za-z_][\w]*/ },
+      { className: 'symbol', begin: /<[^>\s]+>/ },
+      { className: 'symbol', begin: /\b[A-Za-z_][\w-]*:[A-Za-z_][\w-]*/ },
+      hljs.QUOTE_STRING_MODE, hljs.APOS_STRING_MODE, hljs.C_NUMBER_MODE,
+    ],
+  }));
+  hljs.registerLanguage('cypher', () => ({
+    name: 'Cypher', case_insensitive: true,
+    keywords: {
+      keyword:
+        'MATCH OPTIONAL RETURN WHERE WITH UNWIND CREATE MERGE DELETE ' +
+        'DETACH SET REMOVE FOREACH CALL YIELD UNION ORDER BY ASC DESC ' +
+        'LIMIT SKIP DISTINCT AS IS NULL NOT AND OR XOR IN STARTS ENDS ' +
+        'CONTAINS CASE WHEN THEN ELSE END EXISTS ANY ALL NONE SINGLE',
+      built_in:
+        'count sum avg min max collect size length head tail last ' +
+        'toString toInteger toFloat toLower toUpper trim split replace ' +
+        'coalesce labels type id keys properties nodes relationships',
+      literal: 'true false null TRUE FALSE NULL',
+    },
+    contains: [
+      hljs.C_LINE_COMMENT_MODE, hljs.C_BLOCK_COMMENT_MODE,
+      { className: 'symbol', begin: /:[A-Za-z_][\w]*/ },
+      { className: 'variable', begin: /\$[A-Za-z_][\w]*/ },
+      hljs.QUOTE_STRING_MODE, hljs.APOS_STRING_MODE, hljs.C_NUMBER_MODE,
+    ],
+  }));
+})();
+</script>
 <link rel="stylesheet" href="/static/css/agent-chat.css" />
 <script src="/static/js/agent-chat.js"></script>
 
 <div class="agent-wrap" x-data="agentChat()" x-init="init()">
 
-  {# ── header: enabled tools · settings · clear ──────────────────── #}
+  {# ── header: thin bar — active-tools summary · clear ───────────── #}
   <div class="agent-head">
-    <span class="agent-tools-badge" title="The assistant can call the checked read-only tools">
+    <span class="agent-tools-badge" title="Active tools — change them with the ⚙ button by the input">
       🛠 <template x-for="(t, i) in tools.filter(x => x.on)" :key="t.id"><span><span x-show="i" x-cloak> · </span><span x-text="t.label"></span></span></template>
       <span x-show="!tools.some(x => x.on)" class="card-meta">no tools</span>
     </span>
     <div class="agent-head-right">
       <span class="card-meta" x-show="files.length" x-text="files.length + ' file' + (files.length>1?'s':'')" title="Attached files"></span>
-      <button class="btn btn-ghost" @click="settingsOpen = !settingsOpen"
-              :class="settingsOpen ? 'is-active' : ''" title="Agent & tools">⚙ Agent &amp; tools</button>
       <button class="btn btn-ghost" @click="clearChat()" x-show="messages.length" title="Clear the conversation">Clear</button>
     </div>
   </div>
 
-  {# ── settings panel: model · tool checkboxes · context · files ──── #}
-  <div class="agent-settings" x-show="settingsOpen" x-cloak>
-    <div class="agent-settings-grid">
-      <div class="agent-set-block">
-        <div class="agent-set-label">Agent (model)</div>
-        <input class="agent-model" list="agent-models" x-model="model"
-               :placeholder="defaultModel || 'model id'" @change="model && localStorage.setItem('op:agent:chat:v1:model', model)" />
-        <datalist id="agent-models">
-          <template x-for="m in models" :key="m"><option :value="m"></option></template>
-        </datalist>
-        <div class="card-meta" x-show="models.length" x-text="models.length + ' models available · blank = hub default'"></div>
+  {# ── settings MODAL: model · tools · context · files (opened from
+        the ⚙ button next to the composer, so it doesn't eat space) ── #}
+  <div class="agent-modal" x-show="settingsOpen" x-cloak
+       @click.self="settingsOpen = false" @keydown.escape.window="settingsOpen = false">
+    <div class="agent-modal-card">
+      <div class="agent-modal-head">
+        <div class="card-title">Agent &amp; tools</div>
+        <button class="btn btn-ghost" @click="settingsOpen = false" title="Close (Esc)">✕</button>
       </div>
-
-      <div class="agent-set-block">
-        <div class="agent-set-label">Tools</div>
-        <div class="agent-tool-toggles">
-          <template x-for="t in tools" :key="t.id">
-            <label class="agent-tool-toggle" :class="t.action ? 'is-action' : ''"
-                   :title="t.action ? 'Action — can start a job' : 'Read-only query tool'">
-              <input type="checkbox" :checked="t.on" @change="toggleTool(t.id)" />
-              <span x-text="t.label"></span>
-              <span x-show="t.action" class="agent-tool-act" title="kicks off a job">⚡</span>
-            </label>
-          </template>
+      <div class="agent-settings-grid">
+        <div class="agent-set-block">
+          <div class="agent-set-label">Agent (model)</div>
+          <input class="agent-model" list="agent-models" x-model="model"
+                 :placeholder="defaultModel || 'model id'" @change="model && localStorage.setItem('op:agent:chat:v1:model', model)" />
+          <datalist id="agent-models">
+            <template x-for="m in models" :key="m"><option :value="m"></option></template>
+          </datalist>
+          <div class="card-meta" x-show="models.length" x-text="models.length + ' chat models · type to filter · blank = hub default'"></div>
         </div>
-        <div class="card-meta">⚡ actions start jobs (off by default) · file read/list tools always on</div>
-      </div>
 
-      <div class="agent-set-block agent-set-wide">
-        <div class="agent-set-label">Context note <span class="card-meta">(prepended to every turn)</span></div>
-        <textarea class="agent-note" x-ref="note" x-model="contextNote" @input="saveNote()" rows="2"
-                  placeholder="e.g. 'We care about EPFL-affiliated repos. Prefer counts over lists.'"></textarea>
-      </div>
+        <div class="agent-set-block">
+          <div class="agent-set-label">Tools</div>
+          <div class="agent-tool-toggles">
+            <template x-for="t in tools" :key="t.id">
+              <label class="agent-tool-toggle" :class="t.action ? 'is-action' : ''"
+                     :title="t.action ? 'Action — can start a job' : 'Read-only query tool'">
+                <input type="checkbox" :checked="t.on" @change="toggleTool(t.id)" />
+                <span x-text="t.label"></span>
+                <span x-show="t.action" class="agent-tool-act" title="kicks off a job">⚡</span>
+              </label>
+            </template>
+          </div>
+          <div class="card-meta">⚡ actions start jobs (off by default) · file read/list tools always on</div>
+        </div>
 
-      <div class="agent-set-block agent-set-wide">
-        <div class="agent-set-label">Files <span class="card-meta">(kept in /tmp; query with read_file or run_duckdb's read_csv)</span></div>
-        <div class="agent-files">
-          <template x-for="f in files" :key="f.name">
-            <span class="agent-file-chip">
-              📄 <span x-text="f.name"></span>
-              <span class="agent-file-size" x-text="fmtSize(f.size)"></span>
-              <button @click="removeFile(f.name)" title="Remove">✕</button>
-            </span>
-          </template>
-          <button class="btn btn-ghost" @click="pickFile()" :disabled="uploading">
-            <span x-show="!uploading">+ Attach file</span><span x-show="uploading" x-cloak>uploading…</span>
-          </button>
+        <div class="agent-set-block agent-set-wide">
+          <div class="agent-set-label">Context note <span class="card-meta">(prepended to every turn)</span></div>
+          <textarea class="agent-note" x-ref="note" x-model="contextNote" @input="saveNote()" rows="2"
+                    placeholder="e.g. 'We care about EPFL-affiliated repos. Prefer counts over lists.'"></textarea>
+        </div>
+
+        <div class="agent-set-block agent-set-wide">
+          <div class="agent-set-label">Files <span class="card-meta">(kept in /tmp; query with read_file or run_duckdb's read_csv)</span></div>
+          <div class="agent-files">
+            <template x-for="f in files" :key="f.name">
+              <span class="agent-file-chip">
+                📄 <span x-text="f.name"></span>
+                <span class="agent-file-size" x-text="fmtSize(f.size)"></span>
+                <button @click="removeFile(f.name)" title="Remove">✕</button>
+              </span>
+            </template>
+            <button class="btn btn-ghost" @click="pickFile()" :disabled="uploading">
+              <span x-show="!uploading">+ Attach file</span><span x-show="uploading" x-cloak>uploading…</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -133,9 +189,12 @@
           <details class="agent-tool" :open="i >= messages.length - 2">
             <summary>
               <span class="agent-tool-name" x-text="m.name || 'tool'"></span>
-              <code class="agent-tool-arg" x-text="toolArgs(m)"></code>
+              <span class="agent-tool-meta" x-text="toolMeta(m)"></span>
             </summary>
-            <div class="agent-tool-body" x-html="renderToolResult(m)"></div>
+            <div class="agent-tool-body">
+              <div class="agent-tool-q" x-html="renderToolQuery(m)" x-show="renderToolQuery(m)"></div>
+              <div class="agent-tool-result" x-html="renderToolResult(m)"></div>
+            </div>
           </details>
         </template>
         <template x-if="m.role !== 'tool' && (m.content || (m.tool_calls && m.tool_calls.length))">
@@ -161,8 +220,8 @@
     </div>
   </div>
 
-  {# ── quick examples (always visible) ────────────────────────────── #}
-  <div class="agent-quick">
+  {# ── quick examples — only while the input is blank ─────────────── #}
+  <div class="agent-quick" x-show="!input.trim()" x-cloak>
     <template x-for="ex in [
       {l:'Top repo owners', t:'Top 10 GitHub repo owners by repo count — query DuckDB and show a Vega-Lite bar chart.'},
       {l:'Commit timeline', t:'Plot monthly commit activity across all repos from OpenSearch as a Vega-Lite line chart.'},
@@ -183,7 +242,9 @@
         </div>
       </template>
     </div>
-    <button type="button" class="agent-attach" @click="pickFile()" title="Attach a file (/attach)">📎</button>
+    <button type="button" class="agent-iconbtn" @click="settingsOpen = true"
+            title="Agent & tools — pick the model and tools">⚙</button>
+    <button type="button" class="agent-iconbtn" @click="pickFile()" title="Attach a file (/attach)">📎</button>
     <textarea x-ref="input" x-model="input" @keydown="onKeydown($event)" @input="onComposerInput()"
               @blur="setTimeout(() => slashOpen = false, 150)"
               rows="1" :disabled="busy"
