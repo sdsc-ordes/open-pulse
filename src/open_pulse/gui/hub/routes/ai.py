@@ -33,9 +33,9 @@ from .ai_tools import (
     AGENT_FILES_DIR,
     MAX_TOOL_TURNS,
     MAX_TOOL_TURNS_CEILING,
-    TOOLS_SPEC,
     ToolError,
     run_tool,
+    runtime_tools_spec,
 )
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -550,9 +550,11 @@ async def chat(
     tool_names = payload.get("tool_names")
     if isinstance(tool_names, list):
         allow = {str(n) for n in tool_names}
-        active_tools = [t for t in TOOLS_SPEC if t["function"]["name"] in allow]
     else:
-        active_tools = TOOLS_SPEC
+        allow = None
+    # Build the spec per-request so descriptions carry live context (e.g. the
+    # real OpenSearch index names) — keeps the model from inventing indices.
+    active_tools = runtime_tools_spec(allow)
     # How many chained tool rounds the agent may take this reply. Client
     # can raise/lower it in the UI; clamped to a hard ceiling so a runaway
     # loop can't melt the LLM budget.
