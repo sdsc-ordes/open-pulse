@@ -129,58 +129,90 @@
     <span class="card-meta ml-auto" style="padding: 10px 14px;" x-text="hint()"></span>
   </div>
 
-  <!-- Welcome-mat: clickable example chips (always visible) -->
-  <div class="examples-rail">
-    <span class="examples-label">Try one</span>
-    <template x-for="ex in (examples[engine] || [])" :key="ex.id">
-      <button class="example-chip"
-              :class="activeExampleId === ex.id ? 'is-active' : ''"
-              :title="ex.summary || ex.name"
-              @click="loadExample(ex)">
-        <span class="example-chip-name" x-text="ex.name"></span>
-        <span class="example-chip-mode" x-show="ex.mode" x-text="ex.mode"></span>
-      </button>
-    </template>
-    <template x-if="!(examples[engine] || []).length">
-      <span class="card-meta" style="font-style: italic;">no curated examples yet for <span x-text="engine"></span>.</span>
-    </template>
-  </div>
-  <p class="examples-summary" x-show="activeExampleSummary" x-text="activeExampleSummary"></p>
-
-  <!-- Snapshots rail: SPARQL-only. Lists the named graphs currently in
-       the store (typically ``YYYY-MM/{runtime}``). Clicking a chip
-       prepends a ``FROM <iri>`` to the editor so the query targets that
-       snapshot; clicking the same chip again removes it (toggle). The
-       ``default`` chip is always present so users can reset back to
-       the un-scoped query. -->
-  <div class="snapshots-rail" x-show="engine === 'sparql'" x-cloak>
-    <span class="examples-label">Snapshot</span>
-    <button class="example-chip"
-            :class="activeGraphFromUri === null ? 'is-active' : ''"
-            title="Run against the SPARQL store's default graph (un-scoped)."
-            @click="setActiveGraph(null)">
-      <span class="example-chip-name">default</span>
-      <span class="example-chip-mode" x-text="formatGraphCount(snapshotsDefaultCount)"></span>
+  <!-- Compact toolbar: Examples + Snapshot now open modals, freeing the
+       vertical space the always-visible rails used to take. -->
+  <div class="db-toolbar">
+    <button class="btn btn-ghost" @click="examplesOpen = true"
+            title="Browse curated example queries for this engine">
+      📚 Examples<span class="db-count" x-show="(examples[engine]||[]).length" x-text="(examples[engine]||[]).length"></span>
     </button>
-    <template x-for="g in (sparqlNamedGraphs || [])" :key="g.uri">
-      <button class="example-chip"
-              :class="activeGraphFromUri === g.uri ? 'is-active' : ''"
-              :title="g.uri + ' · ' + g.triples + ' triples'"
-              @click="setActiveGraph(g.uri)">
-        <span class="example-chip-name"
-              x-text="g.uri.replace('https://open-pulse.epfl.ch/graph/','')"></span>
-        <span class="example-chip-mode" x-text="formatGraphCount(g.triples)"></span>
-      </button>
-    </template>
-    <template x-if="!(sparqlNamedGraphs || []).length && !snapshotsLoading">
-      <span class="card-meta" style="font-style: italic;">no named graphs — only default.</span>
-    </template>
-    <span class="card-meta ml-auto" x-show="snapshotsLoading">probing store…</span>
-    <button class="btn btn-ghost"
-            @click="refreshSnapshots()"
-            :disabled="snapshotsLoading"
-            title="Re-probe the SPARQL store for new named graphs"
-            style="margin-left: 4px; padding: 2px 8px; font-size: 11px;">↻</button>
+    <button class="btn btn-ghost" x-show="engine === 'sparql'" x-cloak
+            @click="snapshotsOpen = true" title="Scope the query to a snapshot named graph">
+      📸 Snapshot<span class="db-scope" x-show="activeGraphFromUri"
+            x-text="': ' + (activeGraphFromUri||'').replace('https://open-pulse.epfl.ch/graph/','')"></span>
+    </button>
+    <span class="card-meta db-loaded" x-show="activeExampleSummary" x-text="activeExampleSummary"></span>
+  </div>
+
+  <!-- Examples modal -->
+  <div class="db-modal" x-show="examplesOpen" x-cloak
+       @click.self="examplesOpen = false" @keydown.escape.window="examplesOpen = false">
+    <div class="db-modal-card">
+      <div class="db-modal-head">
+        <div>
+          <div class="card-title">Example queries</div>
+          <div class="card-meta" x-text="'Curated ' + (engineLabels[engine] || engine) + ' queries — click to load one into the editor.'"></div>
+        </div>
+        <button class="btn btn-ghost" @click="examplesOpen = false" title="Close (Esc)">✕</button>
+      </div>
+      <div class="db-modal-list">
+        <template x-for="ex in (examples[engine] || [])" :key="ex.id">
+          <button class="db-opt-row" :class="activeExampleId === ex.id ? 'is-active' : ''"
+                  @click="loadExample(ex); examplesOpen = false">
+            <div class="db-opt-head">
+              <span class="db-opt-name" x-text="ex.name"></span>
+              <span class="example-chip-mode" x-show="ex.mode" x-text="ex.mode"></span>
+            </div>
+            <div class="card-meta" x-show="ex.summary" x-text="ex.summary"></div>
+          </button>
+        </template>
+        <template x-if="!(examples[engine] || []).length">
+          <div class="card-meta" style="font-style: italic;">No curated examples yet for <span x-text="engine"></span>.</div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Snapshots modal (SPARQL): pick a named graph to scope the query. -->
+  <div class="db-modal" x-show="snapshotsOpen" x-cloak
+       @click.self="snapshotsOpen = false" @keydown.escape.window="snapshotsOpen = false">
+    <div class="db-modal-card">
+      <div class="db-modal-head">
+        <div>
+          <div class="card-title">Snapshot graphs</div>
+          <div class="card-meta">Each ingest publishes a named graph (<span class="kbd">YYYY-MM/&lt;runtime&gt;</span>). Pick one to prepend a <span class="kbd">FROM &lt;iri&gt;</span> so the query targets just that snapshot; pick <b>default</b> for the un-scoped store.</div>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn btn-ghost" @click="refreshSnapshots()" :disabled="snapshotsLoading"
+                  title="Re-probe the SPARQL store for new named graphs">↻ refresh</button>
+          <button class="btn btn-ghost" @click="snapshotsOpen = false" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div class="db-modal-list">
+        <button class="db-opt-row" :class="activeGraphFromUri === null ? 'is-active' : ''"
+                @click="setActiveGraph(null); snapshotsOpen = false">
+          <div class="db-opt-head">
+            <span class="db-opt-name">default</span>
+            <span class="example-chip-mode" x-text="formatGraphCount(snapshotsDefaultCount)"></span>
+          </div>
+          <div class="card-meta">The store's default graph — every triple, un-scoped.</div>
+        </button>
+        <template x-for="g in (sparqlNamedGraphs || [])" :key="g.uri">
+          <button class="db-opt-row" :class="activeGraphFromUri === g.uri ? 'is-active' : ''"
+                  @click="setActiveGraph(g.uri); snapshotsOpen = false">
+            <div class="db-opt-head">
+              <span class="db-opt-name" x-text="g.uri.replace('https://open-pulse.epfl.ch/graph/','')"></span>
+              <span class="example-chip-mode" x-text="formatGraphCount(g.triples)"></span>
+            </div>
+            <div class="card-meta mono" x-text="g.uri"></div>
+          </button>
+        </template>
+        <template x-if="!(sparqlNamedGraphs || []).length && !snapshotsLoading">
+          <div class="card-meta" style="font-style: italic;">No named graphs — only the default graph is available.</div>
+        </template>
+        <div class="card-meta" x-show="snapshotsLoading">probing store…</div>
+      </div>
+    </div>
   </div>
 
   <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;">
@@ -719,6 +751,45 @@
   }
   .example-chip-mode { font-size: 9px; text-transform: uppercase; color: var(--fg-faint); letter-spacing: .08em; }
   .examples-summary { font-size: 12px; color: var(--fg-muted); margin: 8px 4px 0; font-style: italic; }
+
+  /* ── compact Examples/Snapshot toolbar ─────────────────────────── */
+  .db-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .db-count {
+    margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 8px;
+    background: var(--surface-sunk); color: var(--fg-muted);
+  }
+  .db-scope { margin-left: 4px; color: var(--accent); font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+  .db-loaded {
+    font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1;
+  }
+
+  /* ── Examples / Snapshots modal ────────────────────────────────── */
+  .db-modal {
+    position: fixed; inset: 0; z-index: 60;
+    background: color-mix(in srgb, #000 45%, transparent);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .db-modal-card {
+    width: min(680px, 100%); max-height: 84vh; overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 12px; box-shadow: var(--shadow); padding: 16px 18px;
+  }
+  .db-modal-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px; margin-bottom: 14px;
+  }
+  .db-modal-list { display: flex; flex-direction: column; gap: 6px; }
+  .db-opt-row {
+    text-align: left; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 12px; cursor: pointer; width: 100%;
+  }
+  .db-opt-row:hover { border-color: var(--border-strong); background: var(--surface-sunk); }
+  .db-opt-row.is-active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  }
+  .db-opt-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+  .db-opt-name { font-weight: 600; font-size: 13px; color: var(--fg); }
 
   /* ── browser-style tab strip ───────────────────────────────────── */
   .tabs-strip {
@@ -1668,6 +1739,10 @@ function dbConsole() {
     examples: {},
     activeExampleId: null,
     activeExampleSummary: '',
+    // Examples + Snapshots live in modals now (the always-visible rails
+    // ate too much vertical space).
+    examplesOpen: false,
+    snapshotsOpen: false,
 
     // ── tabs ─────────────────────────────────────────────────────
     tabs: [],
