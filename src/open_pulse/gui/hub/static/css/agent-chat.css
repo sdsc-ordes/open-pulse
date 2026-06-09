@@ -84,7 +84,25 @@
   color: var(--fg-faint);
   margin-bottom: 4px;
 }
-.agent-thinking { margin-top: 6px; font-style: italic; }
+.agent-thinking {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-sunk));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  font-size: 11.5px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  color: var(--fg-muted);
+}
+.agent-thinking::before {
+  content: "";
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent);
+  animation: agent-pulse 1s ease-in-out infinite;
+}
 .agent-dot {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--accent); animation: agent-pulse 1s ease-in-out infinite;
@@ -134,27 +152,44 @@
 /* tool result card */
 .agent-tool {
   max-width: min(820px, 90%);
-  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--border));
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 9px;
   background: var(--surface-sunk);
   font-size: 12.5px;
+  overflow: hidden;
 }
+/* one-line summary: chevron · icon · name · meta (meta ellipsises) */
 .agent-tool > summary {
   cursor: pointer;
-  padding: 8px 12px;
+  padding: 7px 12px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   list-style: none;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background 0.12s ease;
 }
+.agent-tool > summary:hover { background: color-mix(in srgb, var(--accent) 7%, var(--surface-sunk)); }
 .agent-tool > summary::-webkit-details-marker { display: none; }
+.agent-tool-chevron {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+.agent-tool[open] > summary .agent-tool-chevron { transform: rotate(90deg); }
+.agent-tool-icon { flex: 0 0 auto; font-size: 12px; opacity: 0.75; }
 .agent-tool-name {
+  flex: 0 0 auto;
   font-weight: 600;
   color: var(--accent);
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
 }
-/* compact summary line (engine · N rows · ms) */
+/* compact summary tail (engine · N rows · ms) — truncates to keep one line */
 .agent-tool-meta {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--fg-faint);
   font-size: 11px;
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
@@ -162,7 +197,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agent-tool-body { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.agent-tool[open] > summary { border-bottom: 1px solid var(--border); }
+.agent-tool.is-error { border-color: color-mix(in srgb, var(--danger, #e66) 50%, var(--border)); }
+.agent-tool.is-error .agent-tool-name { color: var(--danger, #e66); }
+.agent-tool-body { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
 /* the multiline, syntax-highlighted query the tool ran */
 .agent-tool-q .agent-tool-query {
   margin: 0;
