@@ -148,12 +148,17 @@
       <div class="agent-settings-grid">
         <div class="agent-set-block">
           <div class="agent-set-label">Agent (model)</div>
-          <input class="agent-model" list="agent-models" x-model="model"
-                 :placeholder="defaultModel || 'model id'" @change="model && localStorage.setItem('op:agent:chat:v1:model', model)" />
-          <datalist id="agent-models">
-            <template x-for="m in models" :key="m"><option :value="m"></option></template>
-          </datalist>
-          <div class="card-meta" x-show="models.length" x-text="models.length + ' chat models · type to filter · blank = hub default'"></div>
+          <select class="agent-model" x-model="model" @change="saveModel()">
+            <option value="" x-text="defaultModel ? 'Hub default · ' + defaultModel : 'Hub default'"></option>
+            {# keep the saved model selectable even if it was filtered out of the list #}
+            <template x-if="model && !models.includes(model)">
+              <option :value="model" x-text="model + ' (custom)'"></option>
+            </template>
+            <template x-for="m in models" :key="m">
+              <option :value="m" x-text="m"></option>
+            </template>
+          </select>
+          <div class="card-meta" x-show="models.length" x-text="models.length + ' chat models · blank = hub default'"></div>
         </div>
 
         <div class="agent-set-block">
