@@ -31,6 +31,7 @@ from ..auth import get_settings, require_auth
 from .ai_tools import (
     AGENT_FILES_DIR,
     MAX_TOOL_TURNS,
+    MAX_TOOL_TURNS_CEILING,
     TOOLS_SPEC,
     ToolError,
     run_tool,
@@ -551,6 +552,14 @@ async def chat(
         active_tools = [t for t in TOOLS_SPEC if t["function"]["name"] in allow]
     else:
         active_tools = TOOLS_SPEC
+    # How many chained tool rounds the agent may take this reply. Client
+    # can raise/lower it in the UI; clamped to a hard ceiling so a runaway
+    # loop can't melt the LLM budget.
+    try:
+        max_turns = int(payload.get("max_tool_turns") or MAX_TOOL_TURNS)
+    except (TypeError, ValueError):
+        max_turns = MAX_TOOL_TURNS
+    max_turns = max(1, min(max_turns, MAX_TOOL_TURNS_CEILING))
     messages = _build_messages(user_messages, context)
 
     async def event_source():
@@ -564,7 +573,7 @@ async def chat(
         # runaway loop from melting the LLM budget.
         try:
             async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
-                for turn in range(MAX_TOOL_TURNS + 1):
+                for turn in range(max_turns + 1):
                     body = {
                         "model": model,
                         "messages": messages,
@@ -633,12 +642,14 @@ async def chat(
                         or not accumulated_tool_calls
                     ):
                         return  # plain text reply (or final turn) — done
-                    if turn >= MAX_TOOL_TURNS:
+                    if turn >= max_turns:
                         yield (
                             'data: {"error":'
                             + json.dumps(
-                                f"Tool-loop budget exhausted after {MAX_TOOL_TURNS} "
-                                "turns. The model is still asking to call tools."
+                                f"Tool-step budget exhausted after {max_turns} "
+                                "rounds. The model is still asking to call tools — "
+                                "raise 'Max tool steps' in ⚙ Agent & tools if you "
+                                "need a longer chain."
                             )
                             + "}\n\n"
                         )

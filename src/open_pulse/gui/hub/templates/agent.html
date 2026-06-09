@@ -97,7 +97,42 @@
     </span>
     <div class="agent-head-right">
       <span class="card-meta" x-show="files.length" x-text="files.length + ' file' + (files.length>1?'s':'')" title="Attached files"></span>
-      <button class="btn btn-ghost" @click="clearChat()" x-show="messages.length" title="Clear the conversation">Clear</button>
+      <button class="btn btn-ghost" @click="historyOpen = true" title="Previous conversations">
+        🕘 History<span x-show="conversations.length > 1" x-text="' (' + conversations.length + ')'"></span>
+      </button>
+      <button class="btn btn-ghost" @click="newConversation()" title="Start a new conversation">＋ New</button>
+      <button class="btn btn-ghost" @click="clearChat()" x-show="messages.length" title="Clear this conversation">Clear</button>
+    </div>
+  </div>
+
+  {# ── history MODAL: past conversations, stored in the browser ───── #}
+  <div class="agent-modal" x-show="historyOpen" x-cloak
+       @click.self="historyOpen = false" @keydown.escape.window="historyOpen = false">
+    <div class="agent-modal-card">
+      <div class="agent-modal-head">
+        <div class="card-title">Conversations</div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn btn-ghost" @click="newConversation()" title="Start a new conversation">＋ New chat</button>
+          <button class="btn btn-ghost" @click="clearAllHistory()" x-show="conversations.length > 1"
+                  title="Delete every stored conversation">Clear all</button>
+          <button class="btn btn-ghost" @click="historyOpen = false" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div class="agent-history-list">
+        <template x-for="c in conversations" :key="c.id">
+          <div class="agent-history-item" :class="c.id === currentId ? 'is-current' : ''"
+               @click="loadConversation(c.id)">
+            <div class="agent-history-main">
+              <div class="agent-history-title" x-text="c.title || 'New chat'"></div>
+              <div class="card-meta" x-text="((c.messages ? c.messages.length : 0)) + ' msgs · ' + relTime(c.updatedAt)"></div>
+            </div>
+            <button class="agent-history-del" @click.stop="deleteConversation(c.id)" title="Delete">✕</button>
+          </div>
+        </template>
+        <template x-if="!conversations.length">
+          <div class="card-meta" style="font-style: italic;">No conversations yet.</div>
+        </template>
+      </div>
     </div>
   </div>
 
@@ -134,6 +169,13 @@
             </template>
           </div>
           <div class="card-meta">⚡ actions start jobs (off by default) · file read/list tools always on</div>
+        </div>
+
+        <div class="agent-set-block">
+          <div class="agent-set-label">Max tool steps <span class="card-meta" x-text="'· ' + maxToolTurns"></span></div>
+          <input type="range" min="1" max="20" step="1" class="agent-range"
+                 x-model.number="maxToolTurns" @change="saveMaxTurns()" />
+          <div class="card-meta">how many chained tool calls the agent may make before it must reply</div>
         </div>
 
         <div class="agent-set-block agent-set-wide">
