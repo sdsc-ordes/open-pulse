@@ -247,9 +247,15 @@
             }),
           });
           if (!resp.ok || !resp.body) {
+            const s = resp.status;
+            const hint = (s === 502 || s === 503 || s === 504)
+              ? 'The hub or model gateway was busy or unreachable — wait a moment and try again.'
+              : (s === 401 || s === 403)
+              ? 'Not authorised — check the LLM API key and endpoint in Settings.'
+              : 'Check the LLM endpoint and model under ⚙ Settings.';
             this.messages.push({
               role: 'assistant',
-              content: `⚠ Request failed (HTTP ${resp.status}). Check the LLM endpoint under Settings.`,
+              content: `⚠ Request failed (HTTP ${s}). ${hint}`,
             });
             this.persist();
             return;
