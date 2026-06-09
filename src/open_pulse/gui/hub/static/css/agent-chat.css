@@ -13,6 +13,13 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Pin to the viewport (minus the 36px marquee) so the flex children have a
+     bounded height to distribute. The layout row in base.html (.flex.flex-1)
+     has no fixed height, so without this .main grows with the transcript and
+     pushes the composer below the fold once the conversation gets long. The
+     sidebar uses the same calc. */
+  height: calc(100vh - 36px);
+  max-height: calc(100vh - 36px);
   overflow: hidden;   /* main never scrolls — only .agent-scroll does */
 }
 .main-agent .page-body, .main:has(.agent-wrap) .page-body {
@@ -21,12 +28,23 @@
   display: flex;
   padding: 12px 24px 16px;
 }
+/* The shared .page-chrome is `position: sticky; top: 36px`, which is right
+   when the page scrolls under the marquee. But here .main-agent is the
+   overflow:hidden flex container, so it becomes the sticky containing block
+   and the 36px offset pushes the chrome down 36px — opening a gap under the
+   marquee AND overlapping the chat box. The chrome never scrolls on this
+   page, so pin it static. */
+.main-agent .page-chrome, .main:has(.agent-wrap) .page-chrome { position: static; }
 
 .agent-wrap {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  /* Cap the reading width on large screens; shrink to fit on small ones. */
+  width: 100%;
+  max-width: 920px;
+  margin-inline: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
@@ -64,23 +82,18 @@
 .agent-msg-user { justify-content: flex-end; }
 .agent-msg-assistant, .agent-msg-tool { justify-content: flex-start; }
 
-.agent-bubble {
-  max-width: min(820px, 90%);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 14px;
-  background: var(--surface);
-}
-.agent-msg-user .agent-bubble {
+/* Only the USER's message gets a bounding box, right-aligned. */
+.agent-bubble-user {
+  max-width: 85%;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 12px 12px 4px 12px;
+  padding: 9px 13px;
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
-.agent-role {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--fg-faint);
-  margin-bottom: 4px;
+/* The assistant reply has no box and no label — it spans the full width. */
+.agent-answer {
+  width: 100%;
+  min-width: 0;
 }
 /* a finished pure tool-call turn — one quiet line, same height as a tool
    card summary, instead of a lingering full assistant bubble. */
@@ -357,6 +370,31 @@
   border-radius: 8px; background: var(--accent); color: #fff;
   font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
 }
+/* export (markdown / json) popover anchored to the ⬇ button */
+.agent-export { position: relative; display: inline-flex; }
+.agent-export-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0;
+  display: flex; flex-direction: column; min-width: 150px; z-index: 40;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 4px; box-shadow: var(--shadow);
+}
+.agent-export-menu button {
+  text-align: left; background: none; border: 0; cursor: pointer;
+  padding: 7px 10px; border-radius: 6px; font-size: 12.5px; color: var(--fg);
+}
+.agent-export-menu button:hover { background: var(--surface-sunk); }
+
+/* CSV export button floated over any rendered table */
+.agent-table-wrap { position: relative; }
+.agent-table-csv {
+  position: absolute; top: 4px; right: 4px; z-index: 2;
+  font-size: 10px; padding: 2px 7px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--fg-muted); cursor: pointer; opacity: 0; transition: opacity .12s ease;
+}
+.agent-table-wrap:hover .agent-table-csv,
+.agent-table-csv:focus { opacity: 1; }
+.agent-table-csv:hover { border-color: var(--accent); color: var(--fg); }
 .agent-slash {
   position: absolute;
   left: 12px; right: 12px; bottom: calc(100% + 6px);
