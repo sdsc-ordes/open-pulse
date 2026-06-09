@@ -1,12 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Agent chat · Open Pulse{% endblock %}
 {% block heading %}Agent chat{% endblock %}
-{% block subheading %}
-  An assistant with the read-only tool belt — SPARQL, Cypher, OpenSearch,
-  and DuckDB across every index store. Attach files (kept in <span class="kbd">/tmp</span>),
-  type <span class="kbd">/</span> for commands, and it renders Markdown,
-  code, images, Vega-Lite plots, and (sandboxed) HTML.
-{% endblock %}
+{% block subheading %}Read-only tools across every store — SPARQL · Cypher · OpenSearch · DuckDB. Renders Markdown, code &amp; Vega-Lite. Type <span class="kbd">/</span> for commands.{% endblock %}
 
 {% block content %}
 {# Rich-render stack: marked + DOMPurify (Markdown → safe HTML),
@@ -89,21 +84,6 @@
 
 <div class="agent-wrap" x-data="agentChat()" x-init="init()">
 
-  {# ── header: thin bar — active-tools summary · clear ───────────── #}
-  <div class="agent-head">
-    <span class="agent-tools-badge" title="Active tools — change them with the ⚙ button by the input">
-      🛠 <template x-for="(t, i) in tools.filter(x => x.on)" :key="t.id"><span><span x-show="i" x-cloak> · </span><span x-text="t.label"></span></span></template>
-      <span x-show="!tools.some(x => x.on)" class="card-meta">no tools</span>
-    </span>
-    <div class="agent-head-right">
-      <span class="card-meta" x-show="files.length" x-text="files.length + ' file' + (files.length>1?'s':'')" title="Attached files"></span>
-      <button class="btn btn-ghost" @click="historyOpen = true" title="Previous conversations">
-        🕘 History<span x-show="conversations.length > 1" x-text="' (' + conversations.length + ')'"></span>
-      </button>
-      <button class="btn btn-ghost" @click="newConversation()" title="Start a new conversation">＋ New</button>
-      <button class="btn btn-ghost" @click="clearChat()" x-show="messages.length" title="Clear this conversation">Clear</button>
-    </div>
-  </div>
 
   {# ── history MODAL: past conversations, stored in the browser ───── #}
   <div class="agent-modal" x-show="historyOpen" x-cloak
@@ -283,9 +263,20 @@
         </div>
       </template>
     </div>
-    <button type="button" class="agent-iconbtn" @click="settingsOpen = true"
-            title="Agent & tools — pick the model and tools">⚙</button>
-    <button type="button" class="agent-iconbtn" @click="pickFile()" title="Attach a file (/attach)">📎</button>
+    <div class="agent-tools-group">
+      <button type="button" class="agent-iconbtn" @click="settingsOpen = true"
+              title="Agent & tools — pick the model and tools">⚙</button>
+      <button type="button" class="agent-iconbtn" @click="pickFile()" title="Attach a file (/attach)">
+        📎<span class="agent-iconbtn-badge" x-show="files.length" x-text="files.length"></span>
+      </button>
+      <span class="agent-iconbtn-sep" aria-hidden="true"></span>
+      <button type="button" class="agent-iconbtn" @click="historyOpen = true" title="Previous conversations">
+        🕘<span class="agent-iconbtn-badge" x-show="conversations.length > 1" x-text="conversations.length"></span>
+      </button>
+      <button type="button" class="agent-iconbtn" @click="newConversation()" title="New conversation">＋</button>
+      <button type="button" class="agent-iconbtn" @click="clearChat()" x-show="messages.length" x-cloak
+              title="Clear this conversation">🗑</button>
+    </div>
     <textarea x-ref="input" x-model="input" @keydown="onKeydown($event)" @input="onComposerInput()"
               @blur="setTimeout(() => slashOpen = false, 150)"
               rows="1" :disabled="busy"
