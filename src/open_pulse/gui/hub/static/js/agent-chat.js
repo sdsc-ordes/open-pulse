@@ -18,6 +18,7 @@
   'use strict';
 
   const STORAGE = 'op:agent:chat:v1';
+  const CONV_KEY = 'op:agent:chat:conversations:v1';
 
   function agentChat() {
     return {
@@ -54,15 +55,17 @@
       slashOpen: false,
       slashItems: [],
       slashIdx: 0,
+      // how many chained tool rounds the agent may take per reply
+      maxToolTurns: 8,
+      // conversation history (kept in localStorage like the other assistants)
+      conversations: [],
+      currentId: null,
+      historyOpen: false,
 
       // ── lifecycle ────────────────────────────────────────────────────
       init() {
         this.defaultModel = (window.OP_AGENT_DEFAULT_MODEL || '').trim();
         this.model = localStorage.getItem(STORAGE + ':model') || this.defaultModel;
-        try {
-          const raw = localStorage.getItem(STORAGE);
-          if (raw) this.messages = JSON.parse(raw) || [];
-        } catch (_) { this.messages = []; }
         try {
           const t = JSON.parse(localStorage.getItem(STORAGE + ':tools') || 'null');
           if (Array.isArray(t)) {
@@ -70,6 +73,9 @@
           }
         } catch (_) { /* keep defaults */ }
         this.contextNote = localStorage.getItem(STORAGE + ':note') || '';
+        const mt = parseInt(localStorage.getItem(STORAGE + ':maxturns'), 10);
+        if (Number.isFinite(mt)) this.maxToolTurns = Math.max(1, Math.min(20, mt));
+        this._loadConversations();
         this.loadModels();
         this.refreshFiles();
         // Enhance any restored messages once the DOM + CDN libs are ready.
@@ -77,16 +83,107 @@
         this._scroll();
       },
 
+      // ── conversation history (localStorage) ───────────────────────────
+      _genId() { return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); },
+      _convTitle(msgs) {
+        const u = (msgs || []).find((m) => m.role === 'user' && m.content);
+        const t = u ? String(u.content).replace(/\s+/g, ' ').trim() : '';
+        return t ? (t.length > 48 ? t.slice(0, 47) + '…' : t) : 'New chat';
+      },
+      _newConversationObj() {
+        const c = { id: this._genId(), title: 'New chat', messages: [], updatedAt: Date.now() };
+        this.conversations.unshift(c);
+        this.currentId = c.id;
+        this.messages = c.messages;
+      },
+      _loadConversations() {
+        let list = [];
+        try { list = JSON.parse(localStorage.getItem(CONV_KEY) || '[]') || []; } catch (_) { list = []; }
+        if (!Array.isArray(list)) list = [];
+        // Migrate the old single-conversation blob into the new list.
+        if (!list.length) {
+          try {
+            const old = JSON.parse(localStorage.getItem(STORAGE) || 'null');
+            if (Array.isArray(old) && old.length) {
+              list = [{ id: this._genId(), title: this._convTitle(old), messages: old, updatedAt: Date.now() }];
+              localStorage.removeItem(STORAGE);
+            }
+          } catch (_) { /* ignore */ }
+        }
+        this.conversations = list;
+        if (list.length) { this.currentId = list[0].id; this.messages = list[0].messages || []; }
+        else { this._newConversationObj(); }
+      },
       persist() {
+        const c = this.conversations.find((x) => x.id === this.currentId);
+        if (c) {
+          c.messages = this.messages;
+          c.updatedAt = Date.now();
+          if (!c.title || c.title === 'New chat') c.title = this._convTitle(this.messages);
+        }
         try {
-          localStorage.setItem(STORAGE, JSON.stringify(this.messages.slice(-120)));
+          const slim = this.conversations.slice(0, 50).map((x) => ({
+            id: x.id, title: x.title, updatedAt: x.updatedAt,
+            messages: (x.messages || []).slice(-200),
+          }));
+          localStorage.setItem(CONV_KEY, JSON.stringify(slim));
         } catch (_) { /* quota — best effort */ }
+      },
+      newConversation() {
+        this.persist();
+        this._newConversationObj();
+        this.input = ''; this.partial = ''; this.error = '';
+        this.historyOpen = false;
+        this.persist();
+        this.$nextTick(() => { this._enhanceAll(); this._scroll(); });
+      },
+      loadConversation(id) {
+        if (id !== this.currentId) {
+          this.persist();
+          const c = this.conversations.find((x) => x.id === id);
+          if (!c) return;
+          this.currentId = id;
+          this.messages = c.messages || [];
+          this.partial = ''; this.error = '';
+        }
+        this.historyOpen = false;
+        this.$nextTick(() => { this._enhanceAll(); this._scroll(); });
+      },
+      deleteConversation(id) {
+        this.conversations = this.conversations.filter((x) => x.id !== id);
+        if (id === this.currentId) {
+          if (this.conversations.length) {
+            this.currentId = this.conversations[0].id;
+            this.messages = this.conversations[0].messages || [];
+          } else { this._newConversationObj(); }
+          this.$nextTick(() => { this._enhanceAll(); this._scroll(); });
+        }
+        this.persist();
+      },
+      clearAllHistory() {
+        this.conversations = [];
+        this._newConversationObj();
+        this.historyOpen = false;
+        this.persist();
+        this.$nextTick(() => this._enhanceAll());
+      },
+      relTime(ts) {
+        const s = Math.max(0, (Date.now() - (ts || 0)) / 1000);
+        if (s < 60) return 'just now';
+        if (s < 3600) return Math.floor(s / 60) + 'm ago';
+        if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+        return Math.floor(s / 86400) + 'd ago';
+      },
+      saveMaxTurns() {
+        try { localStorage.setItem(STORAGE + ':maxturns', String(this.maxToolTurns)); } catch (_) { /* ignore */ }
       },
 
       clearChat() {
         this.messages = [];
         this.partial = '';
         this.error = '';
+        const c = this.conversations.find((x) => x.id === this.currentId);
+        if (c) { c.messages = []; c.title = 'New chat'; }
         this.persist();
       },
 
@@ -145,6 +242,7 @@
               temperature: 0.3,
               tools_enabled: this.toolsEnabled,
               tool_names: this.enabledToolNames(),
+              max_tool_turns: this.maxToolTurns,
               context: this._buildContext(),
             }),
           });
