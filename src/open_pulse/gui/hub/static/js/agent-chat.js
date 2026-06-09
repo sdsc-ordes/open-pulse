@@ -417,6 +417,8 @@
         if (res.error) bits.push('error');
         return bits.join(' · ');
       },
+      // True when the tool returned an error — used to tint the summary.
+      toolErrored(m) { const r = this._toolRes(m); return !!(r && r.error); },
       // The query/args this tool ran, mapped to a highlight language.
       _toolLang(m) {
         switch (m.name) {
