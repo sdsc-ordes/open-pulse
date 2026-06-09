@@ -32,6 +32,8 @@
   --bad-soft:      #fbe8e8;
   --bad-border:    #f0b9b6;
   --kbd-bg:        #f3f3f5;
+  --scrollbar-thumb:       rgba(0, 0, 0, 0.18);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.34);
 
   /* ── Code rendering palette ──────────────────────────────────────
    * One palette feeds every <code class="hljs"> block on the hub —
@@ -86,6 +88,8 @@
   --bad-soft:      rgba(239,68,68,.15);
   --bad-border:    rgba(239,68,68,.30);
   --kbd-bg:        #1e293b;
+  --scrollbar-thumb:       rgba(148, 163, 184, 0.28);
+  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.48);
 
   /* Code rendering palette — dark variant (see light theme above). */
   --code-bg:        #1a1d21;
@@ -124,6 +128,30 @@ body {
   background-attachment: fixed;
   font-feature-settings: "ss01", "cv11";
 }
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────
+   Theme the native scrollbars so every scroll area (transcript, code
+   blocks, tables, modals, the page itself) reads as part of the UI rather
+   than the OS default bright bar. Firefox uses scrollbar-width/-color
+   (inherited from the root); WebKit/Blink use the ::-webkit-* pseudos. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  /* transparent border = padding, so the thumb reads as a slim pill */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner { background: transparent; }
 
 /* ── Marquee ──────────────────────────────────────────────────────────── */
 .marquee {
