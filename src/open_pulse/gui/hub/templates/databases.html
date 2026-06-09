@@ -129,23 +129,8 @@
     <span class="card-meta ml-auto" style="padding: 10px 14px;" x-text="hint()"></span>
   </div>
 
-  <!-- Compact toolbar: Examples + Snapshot now open modals, freeing the
-       vertical space the always-visible rails used to take. -->
-  <div class="db-toolbar">
-    <button class="btn btn-ghost" @click="examplesOpen = true"
-            title="Browse curated example queries for this engine">
-      📚 Examples<span class="db-count" x-show="(examples[engine]||[]).length" x-text="(examples[engine]||[]).length"></span>
-    </button>
-    <button class="btn btn-ghost" x-show="engine === 'sparql'" x-cloak
-            @click="snapshotsOpen = true" title="Scope the query to a snapshot named graph">
-      📸 Snapshot<span class="db-scope" x-show="activeGraphFromUri"
-            x-text="': ' + (activeGraphFromUri||'').replace('https://open-pulse.epfl.ch/graph/','')"></span>
-    </button>
-    <span class="card-meta db-loaded" x-show="activeExampleSummary" x-text="activeExampleSummary"></span>
-  </div>
-
   <!-- Examples modal -->
-  <div class="db-modal" x-show="examplesOpen" x-cloak
+  <div class="db-modal-backdrop" x-show="examplesOpen" x-cloak
        @click.self="examplesOpen = false" @keydown.escape.window="examplesOpen = false">
     <div class="db-modal-card">
       <div class="db-modal-head">
@@ -174,7 +159,7 @@
   </div>
 
   <!-- Snapshots modal (SPARQL): pick a named graph to scope the query. -->
-  <div class="db-modal" x-show="snapshotsOpen" x-cloak
+  <div class="db-modal-backdrop" x-show="snapshotsOpen" x-cloak
        @click.self="snapshotsOpen = false" @keydown.escape.window="snapshotsOpen = false">
     <div class="db-modal-card">
       <div class="db-modal-head">
@@ -278,8 +263,21 @@
         <div class="flex gap-2 mt-3" style="align-items: center;">
           <button class="btn btn-primary" @click="run()" :disabled="busy">Run <span class="kbd ml-1">⌘↵</span></button>
           <button class="btn" @click="showSnippets = !showSnippets" :title="showSnippets ? 'Hide examples' : 'Show curl / python / js examples'" style="padding-left: 10px; padding-right: 10px;">&lt;/&gt;</button>
-          <button class="btn" @click="libraryOpen = true" title="Open the saved-queries library" style="padding-left: 10px; padding-right: 10px;">📚 Library</button>
-          <span class="card-meta ml-auto" x-text="resultMeta()"></span>
+          <span class="card-meta" x-text="resultMeta()"></span>
+          <!-- Examples / Snapshot / Saved queries — right-aligned cluster. -->
+          <div class="db-row-actions ml-auto">
+            <span class="card-meta db-loaded" x-show="activeExampleSummary" x-text="activeExampleSummary"></span>
+            <button class="btn btn-ghost" @click="examplesOpen = true"
+                    title="Browse curated example queries for this engine">
+              📚 Examples<span class="db-count" x-show="(examples[engine]||[]).length" x-text="(examples[engine]||[]).length"></span>
+            </button>
+            <button class="btn btn-ghost" x-show="engine === 'sparql'" x-cloak
+                    @click="snapshotsOpen = true" title="Scope the query to a snapshot named graph">
+              📸 Snapshot<span class="db-scope" x-show="activeGraphFromUri"
+                    x-text="': ' + (activeGraphFromUri||'').replace('https://open-pulse.epfl.ch/graph/','')"></span>
+            </button>
+            <button class="btn" @click="libraryOpen = true" title="Open the saved-queries library">💾 Saved queries</button>
+          </div>
         </div>
 
         <div x-show="showSnippets" x-cloak class="card mt-3" style="padding: 10px 14px; background: var(--panel-bg, #0f1218);">
@@ -503,7 +501,7 @@
        @keydown.escape.window="libraryOpen = false">
     <div class="db-modal">
       <div class="db-modal-header">
-        <div class="card-title" style="margin: 0;">Library &middot; <span x-text="engine"></span></div>
+        <div class="card-title" style="margin: 0;">Saved queries &middot; <span x-text="engine"></span></div>
         <button class="btn-close" @click="libraryOpen = false" aria-label="Close">&times;</button>
       </div>
       <p class="card-meta" style="margin: 0;">
@@ -752,23 +750,19 @@
   .example-chip-mode { font-size: 9px; text-transform: uppercase; color: var(--fg-faint); letter-spacing: .08em; }
   .examples-summary { font-size: 12px; color: var(--fg-muted); margin: 8px 4px 0; font-style: italic; }
 
-  /* ── compact Examples/Snapshot toolbar ─────────────────────────── */
-  .db-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  /* ── Examples / Snapshot / Saved-queries action cluster (run row) ── */
+  .db-row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   .db-count {
     margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 8px;
     background: var(--surface-sunk); color: var(--fg-muted);
   }
   .db-scope { margin-left: 4px; color: var(--accent); font-family: ui-monospace, "SF Mono", Consolas, monospace; }
   .db-loaded {
-    font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1;
+    font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; max-width: 220px;
   }
 
-  /* ── Examples / Snapshots modal ────────────────────────────────── */
-  .db-modal {
-    position: fixed; inset: 0; z-index: 60;
-    background: color-mix(in srgb, #000 45%, transparent);
-    display: flex; align-items: center; justify-content: center; padding: 24px;
-  }
+  /* ── Examples / Snapshots modal card (shares .db-modal-backdrop) ── */
   .db-modal-card {
     width: min(680px, 100%); max-height: 84vh; overflow-y: auto;
     background: var(--surface); border: 1px solid var(--border-strong);
@@ -1062,6 +1056,7 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
     z-index: 1000;
     display: flex;
     align-items: center;
