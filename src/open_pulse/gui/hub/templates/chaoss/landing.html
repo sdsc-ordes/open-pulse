@@ -101,12 +101,19 @@
        1-click way in before having to read the catalogue) ───────── #}
   <div>
     <div class="card-title" style="margin-bottom: 8px;">Try one</div>
+    <p class="card-meta" style="margin: 0 0 8px;">
+      High-activity GrimoireLab repositories that exercise the widest spread of
+      metrics — contributors, reviews, forks, stars, citations and more.
+    </p>
     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+      {# Picked by scoring the registry against the data plane: biopython lights
+         up every probed metric; the rest are the next-richest. #}
       {% for slug in [
-        'sdsc-ordes/gimie',
-        'sdsc-ordes/open-pulse',
-        'chaoss/grimoirelab',
-        'EPFL-ENAC/enackubespray',
+        'biopython/biopython',
+        'SwissDataScienceCenter/renku',
+        'SwissDataScienceCenter/renku-python',
+        'IQSS/dataverse',
+        'scikit-learn/scikit-learn',
       ] %}
         <a class="btn" href="/chaoss/github.com/{{ slug }}?window={{ default_window }}">{{ slug }}</a>
       {% endfor %}
