@@ -113,6 +113,30 @@ If there are issues in the GitHub PR and Issues dashboards with fields like Subm
 2. Restart `mordred` manually with `docker compose restart mordred`, or let the manually installed cronjob detect the change.
 3. Refresh OpenSearch Dashboards.
 
+> **Note:** depending on how the stack was started, the Mordred container may be named `open-pulse-mordred` and **not** be a service of the `open-pulse-stack` compose project. In that case `docker compose restart mordred` fails with `no such service: mordred` — restart it by container name instead: `docker restart open-pulse-mordred`.
+
+## PR review/merge metrics (`cr_*`): wire the `github:pull` backend
+
+The CHAOSS `cr_*` metrics (`cr_reviews`, `cr_accepted`, `cr_declined`, `cr_duration`, `pr_time_to_close`, self-merge) need GitHub **PR merge/review** fields (`merged`, `merge_author_login`, `num_review_comments`, `pull_reviews`). The plain `[github]` backend collects PRs only as *issues* (default `category = issue`) — those documents land in `github_demo_enriched` with **none** of those fields, so the `cr_*` metrics read empty.
+
+`setup.cfg` already defines a `[github:pull]` backend (`category = pull_request`, `enriched_index = github-pull_enriched`), but it is **idle unless a project routes repos to it**. To enable PR metrics for a project, add the repo URLs under a `"github:pull"` key in `projects.json` alongside `git`/`github`:
+
+```jsonc
+"my-project": {
+  "meta": { "title": "My Project" },
+  "git":          [ "https://github.com/owner/repo.git", ... ],
+  "github":       [ "https://github.com/owner/repo",     ... ],
+  "github:pull":  [ "https://github.com/owner/repo",     ... ]   // ← enables cr_*
+}
+```
+
+Then restart Mordred. PR data is collected into `github-pull_raw` → enriched into `github-pull_enriched`. The hub's CHAOSS API queries the `github_*_enriched` wildcard, which already matches `github-pull_enriched`, so no metrics-code change is needed.
+
+Caveats:
+
+- PR collection is rate-limited (GitHub PR API) and slow for large repo sets.
+- A PR then exists in **both** `github_demo_enriched` (issue copy, no `merged` mapping) and `github-pull_enriched` (pull copy, proper `merged`/review fields). Querying the `github_*_enriched` **wildcard** for PR/merge data is therefore wrong twice over: it double-counts each PR, and a `merged` term across the wildcard silently matches **zero** documents (mapping clash). For this reason the hub's PR/merge metrics (`cr_accepted`, `cr_declined`, `cr_duration`, `pr_time_to_close`, `cr_reviews`, `self_merge`, `closure_ratio`) query **`github-pull_enriched` directly**, not the wildcard. Issue metrics (`issues_*`, `first_response`, `issue_response_time`) keep the wildcard. Field names on the pull docs: `merged` (bool), `merged_at`, `closed_at`, `num_review_comments`, `merge_author_login` (note: **not** `merge_date` / `*_without_bot`).
+
 ## Utils for debugging
 
 ### List data sources / index patterns
@@ -148,3 +172,31 @@ It can also be seen on OpenSearch UI under Dashbaords Management - Saved Objects
 curl -u admin:YOUR_PASSWORD -X GET "http://localhost:5601/api/saved_objects/_find?type=dashboard" \
   -H "osd-xsrf: true"
 ```
+
+### Enrichment stalls at 0% CPU (SortingHat name-unify loop)
+
+**Symptom:** after `collection phase finished`, Mordred goes silent for a long time at **0% CPU** (no new log lines, `sleep_for` cycle far exceeded). Enriched indexes (`github-pull_enriched`, etc.) stop growing. The process is blocked in the **identities phase**, waiting on a SortingHat background job that never frees the worker.
+
+**Cause:** the identities phase enqueues a `unify` job by **name** that, over a large individual pool (many repos × contributors), takes ~10–11 min per pass, merges 0 individuals, and immediately re-runs — saturating the single `sortinghat_worker`. Mordred's `do_affiliate` then blocks (and, on a GrimoireLab bug, its error handler raises `UnboundLocalError: ... 'job_id'` at `sortinghat_gelk.py:189`). The loop ignores the `[sortinghat] matching` setting, is **not** a SortingHat `ScheduledTask` nor an rq-scheduler job, and regenerates with the same deterministic RQ job id if deleted.
+
+**Diagnose:**
+
+```bash
+# Mordred idle? compare last log time to now; CPU should be ~0 when hung
+docker logs --tail 1 open-pulse-mordred 2>&1 | grep -oE '^[0-9-]+ [0-9:]+'
+docker stats --no-stream --format 'CPU={{.CPUPerc}}' open-pulse-mordred
+# the offending worker job: a recurring unify(['name'], ...)
+docker logs --tail 5 $(docker ps --format '{{.Names}}' | grep sortinghat_worker) 2>&1 | grep unify
+```
+
+**Fix (reversible):** disable the identities phase so enrichment runs straight after collection. In `config/setup.cfg`:
+
+```ini
+[phases]
+collection = true
+identities = false   # was true — stops the name-unify loop that jams the worker
+enrichment = true
+panels = false
+```
+
+Then restart Mordred (`docker restart open-pulse-mordred`). The name-unify loop stops at the source and enrichment proceeds. `cr_*` and other metrics still read existing identities resolved synchronously during enrichment; only new unify/affiliate merging is skipped. **Re-enable `identities = true` once the recurring name-unify is fixed upstream** (tracked: GrimoireLab `do_affiliate` `UnboundLocalError`, and the identities phase ignoring `matching`).
