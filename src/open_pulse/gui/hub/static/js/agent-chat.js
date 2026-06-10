@@ -645,6 +645,19 @@
           let mode = code.classList.contains('language-vega-lite') ? 'vega-lite' : 'vega';
           if (schema.includes('/vega-lite/')) mode = 'vega-lite';
           else if (schema.includes('/vega/') || hasForce) mode = 'vega';
+          // Vega's `"container"` width reads the host's clientWidth, but we
+          // just inserted the host and it measures 0 before layout — the
+          // chart then renders 0-wide (invisible), which is what made model
+          // charts "stop rendering". getBoundingClientRect() forces a sync
+          // reflow, so pin the spec to that concrete width.
+          // Only a single-view spec (has `mark`) — top-level width is invalid
+          // on facet/concat/repeat/layer specs.
+          if (mode === 'vega-lite' && spec.mark
+              && (spec.width === 'container' || spec.width == null)) {
+            const w = Math.floor(host.getBoundingClientRect().width)
+              || (host.parentElement && host.parentElement.clientWidth) || 0;
+            if (w > 60) spec.width = w - 4;
+          }
           window.vegaEmbed(host, spec, {
             actions: false,
             mode,
