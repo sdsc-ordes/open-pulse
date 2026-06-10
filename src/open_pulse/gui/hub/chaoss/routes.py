@@ -181,6 +181,45 @@ def _grouped(specs: list) -> list[dict[str, Any]]:
     return out
 
 
+# The curated headline set surfaced first on the catalogue + repo dashboard.
+# Everything else in the registry falls into the collapsed "Advanced" section.
+# Slugs the product wanted but that aren't implemented yet (clones, downloads,
+# recommendability, skill-demand, a generic "change requests", contribution-type
+# split) are simply absent here — they join the featured set once they exist.
+_FEATURED_SLUGS = {
+    # Community
+    "activity_dates",
+    "contributors",
+    "new_contributors",
+    "committers",
+    "org_diversity",
+    "absence_factor",
+    "first_response",
+    "issue_response_time",
+    "closure_ratio",
+    # Popularity
+    "academic_impact",
+    "project_popularity",
+    "technical_fork",
+    # Quality
+    "cr_reviews",
+    "docs_discoverability",
+    "license_coverage",
+    "licenses_declared",
+    "programming_languages",
+    "release_frequency",
+    "test_coverage",
+    "upstream_dependencies",
+}
+
+
+def _featured_split(specs: list) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """``(featured_groups, advanced_groups)`` — each grouped by category."""
+    featured = [m for m in specs if m.slug in _FEATURED_SLUGS]
+    advanced = [m for m in specs if m.slug not in _FEATURED_SLUGS]
+    return _grouped(featured), _grouped(advanced)
+
+
 def _clamp_window(value: int) -> int:
     """Snap an arbitrary number of days to one of the offered choices."""
     if value in ALLOWED_WINDOWS:
@@ -239,6 +278,8 @@ def chaoss_landing(request: Request) -> HTMLResponse:
             "page": "chaoss",
             "metrics": metrics_mod.REGISTRY,
             "groups": _grouped(metrics_mod.REGISTRY),
+            "featured_groups": _featured_split(metrics_mod.REGISTRY)[0],
+            "advanced_groups": _featured_split(metrics_mod.REGISTRY)[1],
             "categories": CATEGORIES,
             "window_choices": ALLOWED_WINDOWS,
             "default_window": DEFAULT_WINDOW_DAYS,
@@ -275,6 +316,8 @@ def chaoss_repo(
             "canonical_url": f"https://github.com/{full}",
             "metrics": metrics_mod.REGISTRY,
             "groups": _grouped(metrics_mod.REGISTRY),
+            "featured_groups": _featured_split(metrics_mod.REGISTRY)[0],
+            "advanced_groups": _featured_split(metrics_mod.REGISTRY)[1],
             "categories": CATEGORIES,
             "window": window,
             "window_choices": ALLOWED_WINDOWS,
