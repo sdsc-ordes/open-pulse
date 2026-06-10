@@ -25,7 +25,7 @@
       />
       <select x-model.number="window" class="btn" style="padding: 6px 10px;">
         {% for w in window_choices %}
-          <option value="{{ w }}" {% if w == default_window %}selected{% endif %}>{{ w }} days</option>
+          <option value="{{ w }}" {% if w == default_window %}selected{% endif %}>{{ w|window_label }}</option>
         {% endfor %}
       </select>
       <button class="btn btn-primary" type="submit" :disabled="!value.trim()">Open</button>
