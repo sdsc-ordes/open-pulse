@@ -85,10 +85,10 @@ def test_quest_config_from_yaml(tmp_path: Path) -> None:
     assert cfg.quest.steps.metadata_extractor.enabled is True
 
 
-def test_quest_config_missing_file_uses_defaults(tmp_path: Path) -> None:
-    cfg = load_config(tmp_path / "nonexistent.yml")
-    assert cfg.quest.name == "default-quest"
-    assert cfg.quest.steps.crawler.enabled is True
+def test_quest_config_missing_file_raises(tmp_path: Path) -> None:
+    missing = tmp_path / "nonexistent.yml"
+    with pytest.raises(FileNotFoundError, match="quest config not found"):
+        load_config(missing)
 
 
 def test_quest_config_rejects_removed_step_endpoints(tmp_path: Path) -> None:

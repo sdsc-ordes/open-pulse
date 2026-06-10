@@ -62,7 +62,11 @@ def start(
     """Run the full quest pipeline end-to-end."""
     config = _resolve_quest_config(config)
     console.print(f"[dim]quest config:[/dim] {config}")
-    completed = run_pipeline(config, resume=resume)
+    try:
+        completed = run_pipeline(config, resume=resume)
+    except FileNotFoundError as exc:
+        console.print(f"[red bold]Error:[/red bold] {exc}")
+        raise typer.Exit(code=1) from exc
     console.print(
         f"[green]Pipeline finished.[/green] "
         f"Completed {len(completed)} step(s): {', '.join(completed)}"
@@ -86,7 +90,7 @@ def run_step(
     config = _resolve_quest_config(config)
     try:
         run_single_step(config, step)
-    except ValueError as exc:
+    except (ValueError, FileNotFoundError) as exc:
         console.print(f"[red bold]Error:[/red bold] {exc}")
         raise typer.Exit(code=1) from exc
     console.print(f"[green]Step '{step}' completed successfully.[/green]")
