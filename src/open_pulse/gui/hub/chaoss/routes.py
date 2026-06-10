@@ -80,13 +80,15 @@ log = logging.getLogger(__name__)
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE.parent / "templates"))
+# Render window lengths as years/months/days (e.g. 3650 → "10 years").
+templates.env.filters["window_label"] = metrics_mod.window_label
 templates.env.filters["md"] = _md_inline
 
 router = APIRouter(tags=["chaoss"])
 
 # Default time window for the time-based metrics. The page lets the
 # user override it via ?window=<days>.
-DEFAULT_WINDOW_DAYS = 365
+DEFAULT_WINDOW_DAYS = 3650  # max offered window (≈10y) — effectively all-time
 # 30 day / 90 day / 6 month / 1 year / 2 year / 5 year / 10 year — the
 # longer choices matter for older repos whose only contributors were
 # before the standard "last year" window.
