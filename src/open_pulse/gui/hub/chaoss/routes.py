@@ -27,8 +27,11 @@ trail stays continuous.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import pickle
+import threading
 import time
 import urllib.parse
 from datetime import datetime, timezone
@@ -827,12 +830,63 @@ def _compute_project(window: int, repos: list[str], specs: list) -> list[tuple[s
 _PROJECT_CACHE_TTL = float(os.environ.get("CHAOSS_PROJECT_CACHE_TTL_S", "691200"))
 _PROJECT_CACHE: dict[tuple, tuple[float, Any]] = {}
 
+# Tier 2 — persist each cache entry under the host-mounted /data/hub so the
+# cache survives a hub container recreate/redeploy (the in-process dict alone is
+# lost on restart). One pickle per key: load-all on import, write-one on each
+# compute. Best-effort — any pickle error (e.g. after a MetricResult schema
+# change) is swallowed and that entry is simply recomputed. Override the dir
+# with CHAOSS_PROJECT_CACHE_DIR.
+_PROJECT_CACHE_DIR = Path(
+    os.environ.get("CHAOSS_PROJECT_CACHE_DIR", "/data/hub/chaoss-cache")
+)
+_PROJECT_CACHE_LOCK = threading.Lock()
+
+
+def _cache_file(key: tuple) -> Path:
+    digest = hashlib.sha1(repr(key).encode("utf-8")).hexdigest()[:16]
+    return _PROJECT_CACHE_DIR / f"{digest}.pkl"
+
+
+def _persist_cache_entry(key: tuple, ts: float, computed: Any) -> None:
+    """Write one cache entry to disk atomically (best-effort)."""
+    try:
+        with _PROJECT_CACHE_LOCK:
+            _PROJECT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            dest = _cache_file(key)
+            tmp = dest.with_suffix(".tmp")
+            with open(tmp, "wb") as fh:
+                pickle.dump({"key": key, "ts": ts, "computed": computed}, fh)
+            os.replace(tmp, dest)
+    except Exception:  # noqa: BLE001 — persistence must never break a request
+        log.exception("chaoss project cache: persist failed for %r", key)
+
+
+def _load_persisted_cache() -> None:
+    """Repopulate the in-memory cache from disk on startup (best-effort)."""
+    if not _PROJECT_CACHE_DIR.exists():
+        return
+    loaded = 0
+    for path in _PROJECT_CACHE_DIR.glob("*.pkl"):
+        try:
+            with open(path, "rb") as fh:
+                blob = pickle.load(fh)
+            _PROJECT_CACHE[tuple(blob["key"])] = (blob["ts"], blob["computed"])
+            loaded += 1
+        except Exception:  # noqa: BLE001 — skip a stale/corrupt entry
+            continue
+    if loaded:
+        log.info("chaoss project cache: loaded %d persisted entr(ies)", loaded)
+
+
+_load_persisted_cache()
+
 
 def _compute_project_cached(
     project: str, window: int, repos: list[str], specs: list, *, refresh: bool = False
 ) -> tuple[list[tuple[str, dict]], str | None]:
-    """``_compute_project`` behind a TTL cache. Returns ``(computed, cached_at)``
-    where ``cached_at`` is the cache timestamp on a hit, else ``None``."""
+    """``_compute_project`` behind a TTL cache (persisted to disk). Returns
+    ``(computed, cached_at)`` — ``cached_at`` is the cache timestamp on a hit,
+    else ``None``."""
     if _PROJECT_CACHE_TTL <= 0:
         return _compute_project(window, repos, specs), None
     key = (project, window, tuple(s.slug for s in specs))
@@ -844,6 +898,11 @@ def _compute_project_cached(
         )
     computed = _compute_project(window, repos, specs)
     _PROJECT_CACHE[key] = (now, computed)
+    # Only persist the full dashboard set (the slow, all-metrics request the UI
+    # loads). Single-metric drill-downs are cheap to recompute and would
+    # otherwise spawn thousands of tiny pkl files (one per project×window×slug).
+    if len(specs) >= len(metrics_mod.REGISTRY):
+        _persist_cache_entry(key, now, computed)
     if len(_PROJECT_CACHE) > 256:  # crude size bound — evict the oldest
         for k, _ in sorted(_PROJECT_CACHE.items(), key=lambda kv: kv[1][0])[:64]:
             _PROJECT_CACHE.pop(k, None)
