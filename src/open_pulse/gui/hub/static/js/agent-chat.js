@@ -607,19 +607,47 @@
         });
         return rows.join('\r\n');
       },
+      // Repair the spec a model commonly mis-writes, and report whether it
+      // uses a force layout. Models borrow D3's force names ("charge",
+      // "manyBody", "links") but Vega calls them "nbody" / "link" — the
+      // mismatch throws ``Unsupported parameter`` and the chart never renders.
+      _normalizeVega(spec) {
+        const ALIAS = { charge: 'nbody', manybody: 'nbody', manybodyforce: 'nbody', links: 'link' };
+        let hasForce = false;
+        const walk = (o) => {
+          if (Array.isArray(o)) { o.forEach(walk); return; }
+          if (o && typeof o === 'object') {
+            if (typeof o.force === 'string') {
+              const k = o.force.toLowerCase();
+              if (ALIAS[k]) o.force = ALIAS[k];
+              if (['nbody', 'link', 'center', 'collide', 'x', 'y'].includes(o.force)) hasForce = true;
+            }
+            Object.keys(o).forEach((key) => walk(o[key]));
+          }
+        };
+        walk(spec);
+        return hasForce;
+      },
       _renderVega(el) {
         if (typeof window.vegaEmbed === 'undefined') return;
         el.querySelectorAll('code.language-vega-lite, code.language-vega').forEach((code) => {
           let spec;
           try { spec = JSON.parse(code.textContent); } catch (_) { return; }
-          const isLite = code.classList.contains('language-vega-lite');
+          const hasForce = this._normalizeVega(spec);
           const host = document.createElement('div');
           host.className = 'agent-vega';
           const pre = code.closest('pre');
           (pre || code).replaceWith(host);
+          // Pick the dialect from the spec's $schema when present; force
+          // layouts only exist in full Vega, so honour those even if the
+          // block was mistagged ```vega-lite.
+          const schema = typeof spec.$schema === 'string' ? spec.$schema : '';
+          let mode = code.classList.contains('language-vega-lite') ? 'vega-lite' : 'vega';
+          if (schema.includes('/vega-lite/')) mode = 'vega-lite';
+          else if (schema.includes('/vega/') || hasForce) mode = 'vega';
           window.vegaEmbed(host, spec, {
             actions: false,
-            mode: isLite ? 'vega-lite' : 'vega',
+            mode,
             theme: (document.documentElement.dataset.theme === 'light') ? undefined : 'dark',
           }).catch((e) => { host.innerHTML = '<div class="agent-vega-err">chart error: ' + this._esc(e.message) + '</div>'; });
         });
