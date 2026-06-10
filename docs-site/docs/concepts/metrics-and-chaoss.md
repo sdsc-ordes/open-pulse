@@ -147,6 +147,29 @@ Authoritative names worth knowing when writing queries or notebooks:
 
 ## Accessing metrics
 
+### Project-metric caching & weekly warm
+
+Per-**project** metrics are expensive: the hub computes every metric for every
+repo in the project live over Neo4j + SPARQL + OpenSearch (up to 150 repos ×
+~35 metrics). To keep clicking a project in the hub instant, results are cached:
+
+- **In-process TTL cache**, default **8 days** (`CHAOSS_PROJECT_CACHE_TTL_S`,
+  seconds; `0` disables). A hit returns instantly and reports `cached_at`.
+- **Disk-persisted** under `CHAOSS_PROJECT_CACHE_DIR`
+  (default `/data/hub/chaoss-cache`, host-mounted) so the cache **survives a hub
+  restart/redeploy** — it's reloaded on startup. Only the full dashboard set is
+  persisted; single-metric drill-downs stay in-memory.
+- **Weekly warm job** — `scripts/chaoss_warm.sh` lists every project and
+  recomputes its full metric set with `?refresh=true`, populating the cache
+  off-peak. Install it from cron (e.g. `0 3 * * 0`, Sundays 03:00); it uses the
+  read-only `HUB_AUTH_READER` password. The 8-day TTL spans the week so a click
+  always lands on a warm cache.
+
+Force a fresh recompute any time with `?refresh=true` on the metrics endpoint
+(the UI's refresh control does this). Trade-off: with a weekly warm, data can be
+up to a week stale between runs — re-run the warm (or hit `refresh`) after a
+large data load to update sooner.
+
 ### OpenSearch Dashboards
 
 The browse UI lives at
