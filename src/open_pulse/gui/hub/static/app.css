@@ -839,6 +839,18 @@ svg.chaoss-topic-icon {
   color: var(--fg-muted);
 }
 
+/* ─── "All / Advanced" disclosure (featured-first metrics layout) ─── */
+.chaoss-advanced { border-top: 1px solid var(--border); }
+.chaoss-advanced-summary {
+  display: flex; align-items: center; gap: 8px;
+  list-style: none; cursor: pointer;
+  padding: 12px 6px; margin: 0; border-radius: 8px;
+  font-weight: 600; color: var(--fg);
+}
+.chaoss-advanced-summary::-webkit-details-marker { display: none; }
+.chaoss-advanced-summary:hover { background: var(--surface-sunk); }
+.chaoss-advanced[open] > .chaoss-advanced-summary .chaoss-trace-chevron { transform: rotate(90deg); }
+
 /* ─── CHAOSS query-trace block (under "How we compute this") ───── */
 
 /* "How we compute this" — the in-card button that opens the modal.
