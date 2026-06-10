@@ -341,6 +341,24 @@ def _iso(dt: datetime) -> str:
     return dt.replace(microsecond=0).isoformat()
 
 
+def window_label(days: int) -> str:
+    """Human label for a window length: years once it's at least a year
+    (``365 → "1 year"``, ``3650 → "10 years"``), otherwise days. Used for
+    metric-card labels and the window selector so a 3650-day window reads
+    "10 years" instead of a wall of days.
+    """
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        return f"{days} days"
+    if days >= 365:
+        years = days / 365
+        whole = round(years)
+        text = f"{whole}" if abs(years - whole) < 0.05 else f"{years:.1f}"
+        return f"{text} year" + ("s" if text != "1" else "")
+    return f"{days} days"
+
+
 def _xsd_datetime(dt: datetime) -> str:
     """SPARQL literal for a date filter (``"..."^^xsd:dateTime``)."""
     return f'"{_iso(dt)}"^^xsd:dateTime'
@@ -1498,7 +1516,7 @@ def _metric_activity_dates(
         recipes=ad_recipes,
         slug="activity_dates",
         value=str(total),
-        label=f"commits (last {window_days} days)",
+        label=f"commits (last {window_label(window_days)})",
         secondary=f"busiest month: {busiest['date']} ({busiest['value']} commits)",
         series=series,
         series_unit="commits",
@@ -1641,7 +1659,7 @@ def _metric_closure_ratio(
     return MetricResult(
         slug="closure_ratio",
         value=f"{ratio:.0%}",
-        label=f"closed (last {window_days} days)",
+        label=f"closed (last {window_label(window_days)})",
         recipes=closure_recipes,
         secondary=(
             f"{closed} closed of {total} PRs · {merged} merged · {open_} still open"
@@ -2117,7 +2135,7 @@ def _metric_first_response(
         recipes=fr_recipes,
         slug="first_response",
         value=f"{p50:.1f} h",
-        label=f"median response (last {window_days} days)",
+        label=f"median response (last {window_label(window_days)})",
         secondary=f"{n} responses · P90 {p90:.1f} h"
         if p90 is not None
         else f"{n} responses",
@@ -2247,7 +2265,7 @@ def _metric_issue_resolution(
         recipes=ir_recipes,
         slug="issue_resolution",
         value=f"{p50:.1f} d",
-        label=f"median time to close (last {window_days} days)",
+        label=f"median time to close (last {window_label(window_days)})",
         secondary=(
             f"{total} closed · P90 {p90:.1f} d"
             if p90 is not None
@@ -2390,7 +2408,7 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
         recipes=sm_recipes,
         slug="self_merge",
         value=f"{ratio:.0%}",
-        label=f"self-merged (last {window_days} days)",
+        label=f"self-merged (last {window_label(window_days)})",
         secondary=f"{self_merged} of {total_merged} merged PRs",
         queries=traces,
         visual={"kind": "donut", "fraction": ratio, "tone": tone},
@@ -3130,7 +3148,7 @@ def _metric_bot_activity(
         recipes=bot_recipes,
         slug="bot_activity",
         value=f"{ratio:.0%}",
-        label=f"bot share (last {window_days} days)",
+        label=f"bot share (last {window_label(window_days)})",
         secondary=f"{bot_doc_count} of {total} commits matched a bot pattern",
         series=bot_series,
         series_unit="bot commits",
@@ -3283,7 +3301,7 @@ def _metric_issues_new(full: str, canonical_url: str, window_days: int) -> Metri
         title="Issues newly opened",
         extra_must=[],
         date_field="created_at",
-        label=f"opened (last {window_days} days)",
+        label=f"opened (last {window_label(window_days)})",
         notes=(
             "All issues created on this repo in the window, excluding "
             "pull requests. A spike here without a matching spike in "
@@ -3302,7 +3320,7 @@ def _metric_issues_active(
         title="Issues with any activity",
         extra_must=[],
         date_field="updated_at",
-        label=f"touched (last {window_days} days)",
+        label=f"touched (last {window_label(window_days)})",
         notes=(
             "Issues that received any update (new comment, label, "
             "state change) in the window. Excludes PRs."
@@ -3320,7 +3338,7 @@ def _metric_issues_closed(
         title="Issues closed",
         extra_must=[{"term": {"state": "closed"}}],
         date_field="closed_at",
-        label=f"closed (last {window_days} days)",
+        label=f"closed (last {window_label(window_days)})",
         notes=(
             "Issues whose ``state`` flipped to closed inside the "
             "window. Pair with issues_new for an inflow vs outflow "
@@ -3437,7 +3455,7 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
         recipes=cr_recipes,
         slug="cr_reviews",
         value=str(reviewed),
-        label=f"reviewed PRs (last {window_days} days)",
+        label=f"reviewed PRs (last {window_label(window_days)})",
         secondary=f"{reviewed} of {total} PRs ({ratio:.0%}) had a non-bot review",
         queries=traces,
         visual={"kind": "donut", "fraction": ratio, "tone": tone},
@@ -3583,7 +3601,7 @@ def _metric_code_lines(full: str, canonical_url: str, window_days: int) -> Metri
         recipes=cl_recipes,
         slug="code_lines",
         value=f"{delta:,}",
-        label=f"lines changed (last {window_days} days)",
+        label=f"lines changed (last {window_label(window_days)})",
         secondary=(
             f"+{added:,} added · −{removed:,} removed · "
             f"{commits} commits · {files} file-changes · "
@@ -3727,7 +3745,7 @@ def _metric_inactive_contributors(
     return MetricResult(
         slug="inactive_contributors",
         value=str(n_inactive),
-        label=f"no commit in last {window_days} days",
+        label=f"no commit in last {window_label(window_days)}",
         secondary=f"{n_inactive} of {n_total} all-time contributors · {ratio:.0%}",
         queries=traces,
         examples=examples,
@@ -3997,7 +4015,7 @@ def _pr_count_metric(
     return MetricResult(
         slug=slug,
         value=str(total),
-        label=f"{label.lower()} (last {window_days} d)",
+        label=f"{label.lower()} (last {window_label(window_days)})",
         secondary=None,
         queries=traces,
         series=monthly,
@@ -4180,7 +4198,7 @@ def _pr_percentile_metric(
     return MetricResult(
         slug=slug,
         value=f"{p50:.1f} {unit}",
-        label=f"median {label.lower()} (last {window_days} d)",
+        label=f"median {label.lower()} (last {window_label(window_days)})",
         secondary=(
             f"{total} PRs · P90 {p90:.1f} {unit}" if p90 is not None else f"{total} PRs"
         ),

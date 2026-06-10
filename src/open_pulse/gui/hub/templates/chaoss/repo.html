@@ -109,7 +109,7 @@
       <label for="window-select" class="card-meta" style="font-size: 12px;">window</label>
       <select id="window-select" x-model.number="window" @change="changeWindow()" class="btn" style="padding: 6px 10px;">
         {% for w in window_choices %}
-          <option value="{{ w }}" {% if w == window %}selected{% endif %}>{{ w }} days</option>
+          <option value="{{ w }}" {% if w == window %}selected{% endif %}>{{ w|window_label }}</option>
         {% endfor %}
       </select>
     </div>
