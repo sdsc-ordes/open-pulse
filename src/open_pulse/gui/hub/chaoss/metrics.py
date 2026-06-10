@@ -1550,7 +1550,9 @@ def _metric_closure_ratio(
         },
     }
     body_text = json.dumps(body, indent=2)
-    raw = os_mod._post("/github_*_enriched/_search", body)
+    # github-pull_enriched only: the issue-category index has no ``merged``
+    # mapping (zeroes the agg on the wildcard) and would double-count each PR.
+    raw = os_mod._post("/github-pull_enriched/_search", body)
     total = closed = merged = open_ = 0
     if raw is not None:
         total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
@@ -2279,7 +2281,7 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
                     {"term": {"origin": origin}},
                     {"term": {"pull_request": True}},
                     {"term": {"merged": True}},
-                    {"range": {"merge_date": {"gte": cutoff_iso}}},
+                    {"range": {"merged_at": {"gte": cutoff_iso}}},
                 ]
             }
         },
@@ -2289,12 +2291,17 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
                     # Painless script: comparison of ``user_login`` vs
                     # ``merge_author_login``. Wrapped in try/catch so a
                     # missing-field doc doesn't blow up the aggregation.
+                    # NB: a script *query* needs the inner ``script`` key —
+                    # ``{"script": {"source": ...}}`` is rejected with
+                    # "[script] query does not support [source]".
                     "script": {
-                        "source": (
-                            "try { return doc['user_login'].value == "
-                            "doc['merge_author_login'].value; } catch "
-                            "(Exception e) { return false; }"
-                        )
+                        "script": {
+                            "source": (
+                                "try { return doc['user_login'].value == "
+                                "doc['merge_author_login'].value; } catch "
+                                "(Exception e) { return false; }"
+                            )
+                        }
                     }
                 }
             }
@@ -2302,7 +2309,8 @@ def _metric_self_merge(full: str, canonical_url: str, window_days: int) -> Metri
         "track_total_hits": True,
     }
     body_text = json.dumps(body, indent=2)
-    raw = os_mod._post("/github_*_enriched/_search", body)
+    # github-pull_enriched only: ``merged`` is unmapped in the issue index.
+    raw = os_mod._post("/github-pull_enriched/_search", body)
     if raw is None:
         traces.append(
             QueryTrace(
@@ -3327,7 +3335,7 @@ def _metric_issues_closed(
 def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> MetricResult:
     """How many pull requests received any review in the window?
     GrimoireLab enriches every PR doc with ``num_review_comments``
-    and ``num_review_comments_without_bot``; we ask how many PRs
+    and ``num_review_comments``; we ask how many PRs
     have at least one review comment from a non-bot.
     """
     cutoff = _now_minus_days(window_days)
@@ -3349,13 +3357,11 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
             }
         },
         "aggs": {
-            "reviewed": {
-                "filter": {"range": {"num_review_comments_without_bot": {"gt": 0}}}
-            }
+            "reviewed": {"filter": {"range": {"num_review_comments": {"gt": 0}}}}
         },
     }
     body_text = json.dumps(body, indent=2)
-    raw = os_mod._post("/github_*_enriched/_search", body)
+    raw = os_mod._post("/github-pull_enriched/_search", body)
     if raw is None:
         traces.append(
             QueryTrace(
@@ -3377,7 +3383,7 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
             queries=traces,
             notes="github_*_enriched has no documents for this repo yet.",
             unification=(
-                "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
+                "PRs where **OpenSearch** `github-pull_enriched.num_review_comments > 0` — filter agg inside a windowed PR query."
             ),
         )
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
@@ -3404,7 +3410,7 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
             queries=traces,
             notes="No pull requests opened on this repo in the window.",
             unification=(
-                "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
+                "PRs where **OpenSearch** `github-pull_enriched.num_review_comments > 0` — filter agg inside a windowed PR query."
             ),
         )
     ratio = reviewed / total
@@ -3436,12 +3442,12 @@ def _metric_cr_reviews(full: str, canonical_url: str, window_days: int) -> Metri
         queries=traces,
         visual={"kind": "donut", "fraction": ratio, "tone": tone},
         notes=(
-            "Counts PRs whose ``num_review_comments_without_bot`` is "
+            "Counts PRs whose ``num_review_comments`` is "
             "positive — i.e. at least one review comment from a human. "
             "Pair with self_merge to read code-review culture."
         ),
         unification=(
-            "PRs where **OpenSearch** `num_review_comments_without_bot > 0` — filter agg inside a windowed PR query."
+            "PRs where **OpenSearch** `github-pull_enriched.num_review_comments > 0` — filter agg inside a windowed PR query."
         ),
     )
 
@@ -3887,10 +3893,16 @@ def _pr_count_metric(
     series_unit: str,
     notes: str,
     unification: str,
+    index: str = "github_*_enriched",
 ) -> MetricResult:
     """Shared shape for the two PR-count metrics (accepted / declined).
     Both filter on ``pull_request:true`` plus an extra clause and a
     date range; both expose a monthly histogram sparkline.
+
+    ``index`` defaults to the ``github_*_enriched`` wildcard, but PR
+    metrics that filter on ``merged`` must pass ``github-pull_enriched``
+    explicitly: the issue-category index has no ``merged`` mapping, and a
+    ``merged`` term across the wildcard silently matches zero documents.
     """
     cutoff = _now_minus_days(window_days)
     cutoff_iso = _iso(cutoff)
@@ -3921,7 +3933,7 @@ def _pr_count_metric(
         },
     }
     body_text = json.dumps(body, indent=2)
-    raw = os_mod._post("/github_*_enriched/_search", body)
+    raw = os_mod._post(f"/{index}/_search", body)
     if raw is None:
         traces.append(
             QueryTrace(
@@ -3940,7 +3952,7 @@ def _pr_count_metric(
             label="no data",
             secondary=None,
             queries=traces,
-            notes="github_*_enriched has no documents for this repo yet.",
+            notes=f"{index} has no documents for this repo yet.",
             unification=unification,
         )
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
@@ -4008,11 +4020,12 @@ def _metric_cr_accepted(
         slug="cr_accepted",
         label="Merged PRs",
         extra_must=[{"term": {"merged": True}}],
-        date_field="merge_date",
+        date_field="merged_at",
+        index="github-pull_enriched",
         series_unit="merged PRs",
         unification=(
-            "Count of **OpenSearch** github docs with ``pull_request:true`` "
-            "+ ``merged:true`` + ``merge_date`` in the window."
+            "Count of **OpenSearch** ``github-pull_enriched`` docs with "
+            "``pull_request:true`` + ``merged:true`` + ``merged_at`` in the window."
         ),
         notes=(
             "The acceptance half of ``closure_ratio`` — PRs that "
@@ -4035,10 +4048,12 @@ def _metric_cr_declined(
         label="Declined PRs",
         extra_must=[{"term": {"state": "closed"}}, {"term": {"merged": False}}],
         date_field="closed_at",
+        index="github-pull_enriched",
         series_unit="declined PRs",
         unification=(
-            "Count of **OpenSearch** github docs with ``pull_request:true`` "
-            "+ ``state:closed`` + ``merged:false`` + ``closed_at`` in window."
+            "Count of **OpenSearch** ``github-pull_enriched`` docs with "
+            "``pull_request:true`` + ``state:closed`` + ``merged:false`` "
+            "+ ``closed_at`` in window."
         ),
         notes=(
             "Closed-without-merge PRs — explicit rejections or stale "
@@ -4062,9 +4077,13 @@ def _pr_percentile_metric(
     unit: str,
     notes: str,
     unification: str,
+    index: str = "github_*_enriched",
 ) -> MetricResult:
     """Shared P50/P90 over a GrimoireLab-precomputed duration field
-    (``time_open_days`` or similar) for a filtered PR set."""
+    (``time_open_days`` or similar) for a filtered PR set.
+
+    ``index`` defaults to the wildcard; PR metrics filtering on ``merged``
+    must pass ``github-pull_enriched`` (see ``_pr_count_metric``)."""
     cutoff = _now_minus_days(window_days)
     cutoff_iso = _iso(cutoff)
     traces: list[QueryTrace] = []
@@ -4088,7 +4107,7 @@ def _pr_percentile_metric(
         },
     }
     body_text = json.dumps(body, indent=2)
-    raw = os_mod._post("/github_*_enriched/_search", body)
+    raw = os_mod._post(f"/{index}/_search", body)
     if raw is None:
         traces.append(
             QueryTrace(
@@ -4107,7 +4126,7 @@ def _pr_percentile_metric(
             label="no data",
             secondary=None,
             queries=traces,
-            notes="github_*_enriched has no documents for this repo yet.",
+            notes=f"{index} has no documents for this repo yet.",
             unification=unification,
         )
     total = int(((raw.get("hits") or {}).get("total") or {}).get("value") or 0)
@@ -4185,13 +4204,14 @@ def _metric_cr_duration(
         label="Days from PR open to merge",
         extra_must=[
             {"term": {"merged": True}},
-            {"range": {"merge_date": {"gte": _iso(_now_minus_days(window_days))}}},
+            {"range": {"merged_at": {"gte": _iso(_now_minus_days(window_days))}}},
         ],
         field="time_open_days",
         unit="d",
+        index="github-pull_enriched",
         unification=(
-            "P50 of GrimoireLab's ``time_open_days`` on PRs where "
-            "``merged:true`` and ``merge_date`` falls inside the window."
+            "P50 of GrimoireLab's ``time_open_days`` on ``github-pull_enriched`` "
+            "PRs where ``merged:true`` and ``merged_at`` falls inside the window."
         ),
         notes=(
             "Acceptance speed — the time from PR open to merge for "
@@ -4218,9 +4238,10 @@ def _metric_pr_time_to_close(
         ],
         field="time_open_days",
         unit="d",
+        index="github-pull_enriched",
         unification=(
-            "P50 of GrimoireLab's ``time_open_days`` on PRs where "
-            "``state:closed`` (merged or declined) and ``closed_at`` "
+            "P50 of GrimoireLab's ``time_open_days`` on ``github-pull_enriched`` "
+            "PRs where ``state:closed`` (merged or declined) and ``closed_at`` "
             "is in the window."
         ),
         notes=(
