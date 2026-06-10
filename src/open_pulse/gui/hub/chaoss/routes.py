@@ -820,8 +820,11 @@ def _compute_project(window: int, repos: list[str], specs: list) -> list[tuple[s
 # In-process TTL cache for the (expensive) per-project compute, keyed by
 # (project, window, slugs). The lazy-loading UI re-hits the same project and
 # the all-metrics view re-runs on each visit, so repeats return instantly
-# within the TTL. Tune/disable via ``CHAOSS_PROJECT_CACHE_TTL_S`` (0 = off).
-_PROJECT_CACHE_TTL = float(os.environ.get("CHAOSS_PROJECT_CACHE_TTL_S", "1800"))
+# within the TTL. A weekly warm job (scripts/chaoss_warm.sh) recomputes every
+# project with ?refresh=true, so the default TTL is 8 days — long enough that
+# the cache never lapses between weekly refreshes and UI clicks always hit it.
+# Tune/disable via ``CHAOSS_PROJECT_CACHE_TTL_S`` (0 = off).
+_PROJECT_CACHE_TTL = float(os.environ.get("CHAOSS_PROJECT_CACHE_TTL_S", "691200"))
 _PROJECT_CACHE: dict[tuple, tuple[float, Any]] = {}
 
 
