@@ -232,7 +232,7 @@
 .agent-tool-err { color: var(--danger, #e66); font-size: 12.5px; }
 
 /* vega charts + sandboxed html */
-.agent-vega { margin: 10px 0; overflow-x: auto; }
+.agent-vega { margin: 10px 0; overflow-x: auto; width: 100%; }
 .agent-vega-err { color: var(--danger, #e66); font-size: 12px; }
 .agent-html { margin: 10px 0; }
 .agent-html-bar { margin-bottom: 6px; }
