@@ -727,6 +727,25 @@ CYPHER: list[dict[str, str]] = [
         "LIMIT 25",
     },
     {
+        "id": "cypher-org-top-starred",
+        "name": "Org's top-starred repo",
+        "summary": "Each organization's single most-starred repository (STARRED in-degree).",
+        "body": "// For each Org, the one repo it OWNS with the most STARRED edges\n"
+        "// from crawled users — the org's flagship within the corpus. Stars\n"
+        "// here are in-graph (a corpus-restricted proxy); raw GitHub stars\n"
+        "// live on the Repo node when issue crawling is on.\n"
+        "MATCH (o:Org)-[:OWNS]->(r:Repo)\n"
+        "OPTIONAL MATCH (r)<-[:STARRED]-(u:User)\n"
+        "WITH o, r, count(DISTINCT u) AS stars\n"
+        "// rank each org's repos by stars, then keep just the top one\n"
+        "ORDER BY stars DESC\n"
+        "WITH o, head(collect({repo: r.full_name, stars: stars})) AS top\n"
+        "RETURN o.login AS org, o.name AS name,\n"
+        "       top.repo AS top_repo, top.stars AS stars\n"
+        "ORDER BY stars DESC, org\n"
+        "LIMIT 25",
+    },
+    {
         "id": "cypher-stars-and-contributes",
         "name": "Stars → contributors funnel",
         "summary": "Users who STARRED a repo AND also CONTRIBUTES_TO it — engaged users.",
