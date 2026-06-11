@@ -139,6 +139,8 @@
             </template>
           </select>
           <div class="card-meta" x-show="models.length" x-text="models.length + ' chat models · blank = hub default'"></div>
+          <div class="card-meta" x-show="modelNotice" x-cloak
+               style="color: var(--warn, #b6700b); margin-top: 4px;" x-text="modelNotice"></div>
         </div>
 
         <div class="agent-set-block">
