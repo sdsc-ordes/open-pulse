@@ -192,6 +192,10 @@ body {
   color: var(--fg-muted);
   white-space: nowrap;
 }
+.marquee-credit-amp {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
 .marquee-logo-chip {
   display: inline-flex;
   align-items: center;
