@@ -83,6 +83,19 @@
           </div>
         </template>
       </div>
+      {# Fixed attribution pinned to the right of the marquee — always visible;
+         the stats scroll behind it. Logos sit on white chips so the colour
+         marks read on both the dark and light marquee. #}
+      <div class="marquee-credit">
+        <span class="marquee-credit-label">A project developed by</span>
+        <a class="marquee-logo-chip" href="https://datascience.ch" target="_blank" rel="noopener"
+           title="Swiss Data Science Center">
+          <img src="/static/img/sdsc-logo.svg" alt="Swiss Data Science Center" />
+        </a>
+        <a class="marquee-logo-chip" href="https://epfl.ch" target="_blank" rel="noopener" title="EPFL">
+          <img src="/static/img/epfl-logo.svg" alt="EPFL" />
+        </a>
+      </div>
     </div>
 
     <div class="flex flex-1">
