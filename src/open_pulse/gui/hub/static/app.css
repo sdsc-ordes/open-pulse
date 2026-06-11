@@ -166,6 +166,45 @@ body {
   overflow: hidden;
   height: 36px;
 }
+/* Fixed "developed by" attribution pinned right; the stats scroll behind it. */
+.marquee-credit {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 26px;
+  background: var(--surface-opaque);
+}
+.marquee-credit::before {
+  /* soft fade so the scrolling text dissolves into the credit's background */
+  content: "";
+  position: absolute;
+  left: -26px; top: 0; bottom: 0; width: 26px;
+  background: linear-gradient(to right, transparent, var(--surface-opaque));
+  pointer-events: none;
+}
+.marquee-credit-label {
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.marquee-logo-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 3px 6px;
+  box-sizing: border-box;
+  background: #fff;          /* white chip so the colour marks read on any theme */
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+.marquee-logo-chip img { height: 14px; width: auto; display: block; }
+@media (max-width: 720px) { .marquee-credit-label { display: none; } }
+@media (max-width: 460px) { .marquee-credit { display: none; } }
 .marquee-track {
   display: inline-flex;
   align-items: center;
