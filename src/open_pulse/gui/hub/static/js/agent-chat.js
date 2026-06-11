@@ -29,6 +29,7 @@
       busy: false,
       error: '',
       model: '',
+      modelNotice: '',
       defaultModel: '',
       toolsEnabled: true,
       _markedReady: false,
@@ -297,7 +298,15 @@
             let obj;
             try { obj = JSON.parse(payload); } catch (_) { continue; }
             if (obj.error) {
-              accumulated += `\n\n⚠ ${obj.error}`;
+              let msg = String(obj.error);
+              // The upstream's "key not allowed to access model" 403 dumps its
+              // full ~1KB allowlist — replace it with an actionable message.
+              if (/not allowed to access model|model.*not.*(found|exist)|HTTP 40[34]/i.test(msg)) {
+                msg = 'The selected model isn\'t available on the endpoint. Reset it to the hub default (blank) in ⚙ Agent & tools, or try again.';
+              } else if (msg.length > 280) {
+                msg = msg.slice(0, 280) + '…';
+              }
+              accumulated += `\n\n⚠ ${msg}`;
               this.partial = accumulated;
               continue;
             }
@@ -738,16 +747,26 @@
         try {
           const r = await fetch('/api/ai/models', { credentials: 'include' });
           const j = await r.json();
-          let ids = (j.data || []).map((m) => m.id).filter(Boolean);
+          const all = (j.data || []).map((m) => m.id).filter(Boolean);
+          // The endpoint's model list rotates over time. A model saved in this
+          // browser (picked earlier) that the endpoint no longer hosts would
+          // 403 on EVERY request ("key not allowed to access model") — the
+          // agent silently stops working until the user changes it. Reset a
+          // stale selection back to the hub default so it keeps working.
+          if (this.model && all.length && !all.includes(this.model)) {
+            this.modelNotice = `“${this.model}” is no longer offered by the endpoint — reset to the hub default.`;
+            this.model = '';
+            localStorage.removeItem(STORAGE + ':model');
+          }
           // The endpoint lists 250+ entries including embedding / reranker
           // models (not chat-capable) and dtype variants (…-bfloat16 /
           // -fp8 / -float32) that just clutter the picker. Keep the chat
           // models so big ones (Qwen3-235B, Qwen3-30B, QwQ-32B, …) are easy
           // to find; the field still accepts any id the user types.
-          ids = ids
+          this.models = all
             .filter((id) => !/embed|rerank|gte-|bge-|^BAAI\//i.test(id))
-            .filter((id) => !/-(float32|bfloat16|fp8)$/i.test(id));
-          this.models = ids.sort();
+            .filter((id) => !/-(float32|bfloat16|fp8)$/i.test(id))
+            .sort();
         } catch (_) { this.models = []; }
       },
       saveModel() {
