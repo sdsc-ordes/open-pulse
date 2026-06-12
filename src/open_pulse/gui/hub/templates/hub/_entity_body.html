@@ -12,6 +12,12 @@
 {% set tiles = entity.facts | selectattr('label','in', headline) | list %}
 {% set rest  = entity.facts | rejectattr('label','in', headline) | list %}
 
+{# Provenance tag — which store a fact / edge came from. #}
+{% set SRC_LABELS = {'rdf': 'RDF', 'index': 'Index', 'graph': 'Neo4j'} %}
+{% macro src_tag(s) -%}
+  {%- if s and s in SRC_LABELS %}<span class="src-tag src-{{ s }}" title="from the {{ SRC_LABELS[s] }} store">{{ SRC_LABELS[s] }}</span>{% endif -%}
+{%- endmacro %}
+
 {% macro hub_link(url) -%}
   /hub/{{ url
     | replace('https://','')
@@ -118,6 +124,16 @@
     .kv:last-child { border-bottom: 0; }
     .kv-k { font-size: 11px; color: var(--fg-muted); margin-bottom: 2px; }
     .kv-v { font-size: 12.5px; }
+
+    /* ── provenance tags — which store a fact / edge came from ── */
+    .src-tag { font-size: 8.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .04em; padding: 1px 5px; border-radius: 5px;
+      vertical-align: middle; margin-left: 6px; white-space: nowrap; }
+    .src-rdf   { background: color-mix(in srgb, #a855f7 22%, var(--surface)); color: #c084fc; }
+    .src-index { background: color-mix(in srgb, #3b82f6 20%, var(--surface)); color: #60a5fa; }
+    .src-graph { background: color-mix(in srgb, #22c55e 20%, var(--surface)); color: #4ade80; }
+    .pill.pill-rdf { background: color-mix(in srgb, #a855f7 22%, var(--surface));
+      color: #c084fc; border-color: color-mix(in srgb, #a855f7 35%, transparent); }
   </style>
   <div class="entity-hero" style="background: {{ hero_gradient }};">
     <div class="entity-hero-emoji">{{ hero_emoji }}</div>
@@ -146,7 +162,7 @@
     <div class="grid-stats">
       {% for f in tiles %}
         <div class="card tone-info">
-          <div class="card-title">{{ f.label.replace('_',' ') }}</div>
+          <div class="card-title">{{ f.label.replace('_',' ') }}{{ src_tag(f.source) }}</div>
           <div class="stat-value" style="font-size: 22px;">{{ tile_value(f.label, f.value) | safe }}</div>
         </div>
       {% endfor %}
@@ -173,7 +189,7 @@
           <div class="facts-grid" style="margin-top: 10px;">
           {% for f in rest %}
             <div class="fact">
-              <div class="fact-label">{{ f.label.replace('_',' ') }}</div>
+              <div class="fact-label">{{ f.label.replace('_',' ') }}{{ src_tag(f.source) }}</div>
               <div class="fact-value">
                 {% if f.value_links %}
                   {# Multi-valued fact with per-chip hub links — each
@@ -202,6 +218,9 @@
                       <span class="card-meta" style="align-self: center;">+{{ f.value_list|length - 12 }} more</span>
                     {% endif %}
                   </div>
+                {% elif not f.href and f.value.replace(',','').isdigit() and f.value|length < 13 %}
+                  {# Plain integer (stars, issues, …) — group digits. #}
+                  <span class="mono">{{ '{:,}'.format(f.value.replace(',','') | int) }}</span>
                 {% else %}
                   {{ hub_or_external(f.value, f.href) }}
                 {% endif %}
@@ -263,7 +282,7 @@
           {% for n in entity.neighbours %}
             <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
               {% if n.source_type %}
-                <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ n.source_type }}</span>
+                <span class="pill {{ 'pill-rdf' if n.source_type == 'RDF' else 'pill-info' }}" style="font-size: 10px; padding: 1px 6px;">{{ n.source_type }}</span>
               {% endif %}
               <span class="pill pill-neutral" style="text-transform: lowercase; font-size: 11px;">{{ n.relation }}</span>
               {% if n.kind %}<span class="card-meta" style="font-size: 11px;">{{ n.kind.lower() }}</span>{% endif %}

@@ -521,6 +521,7 @@ def _facts_from_payload(payload: dict[str, Any], collection: str) -> list[Fact]:
                 href=href,
                 value_list=items,
                 value_links=value_links,
+                source="index",
             )
         )
         seen_labels.add(label)
