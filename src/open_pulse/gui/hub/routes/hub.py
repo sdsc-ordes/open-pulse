@@ -825,7 +825,12 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
                     yield _sse_event("status", "No matches — queued in the wanted list")
                 else:
                     html = templates.get_template("hub/_entity_body.html").render(
-                        entity=entity, ref=parsed
+                        entity=entity,
+                        ref=parsed,
+                        hero_emoji=catalog_mod.kind_emoji(entity.kind),
+                        hero_gradient=catalog_mod.cover_gradient(
+                            entity.ref_url or entity.title
+                        ),
                     )
                     found = True
                     title = entity.title or parsed.display
