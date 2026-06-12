@@ -57,11 +57,13 @@ Default credentials: `openpulse` / `replace-me`. OpenSearch (in the
 
 ### `.env` wizard
 
-As an alternative to hand-editing the file, the `.env` wizard linked
-from the [project landing](https://sdsc-ordes.github.io/open-pulse/)
-walks through the questions, generates strong tokens locally with the
-Web Crypto API (nothing leaves the browser), and outputs a complete
-`infra/.env` you can paste or download.
+As an alternative to hand-editing the file, the browser-based `.env`
+wizard walks through the questions, generates strong tokens locally
+with the Web Crypto API (nothing leaves the browser), and outputs a
+complete `infra/.env` you can paste or download.
+
+<!-- markdownlint-disable-next-line MD033 -->
+<a className="button button--primary" href="https://sdsc-ordes.github.io/open-pulse/env-wizard/">Open the .env wizard →</a>
 
 ## Develop the package
 
