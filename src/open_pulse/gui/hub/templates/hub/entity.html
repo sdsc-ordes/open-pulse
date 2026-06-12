@@ -62,11 +62,16 @@
      returned no data — otherwise the parent flex column adds a 16px
      gap around an empty <div>, producing the "phantom newlines" the
      entity page used to grow when Activity / Backlinks came up empty. #}
+  {# Lazy panels tile into a two-column masonry below the body —
+     derived works, related orgs, main developers, activity statistics.
+     Each fetches its own endpoint after the entity body lands. #}
+  <div class="entity-panels">
+
   {# Non-github entities — surface the GitHub repos they reference.
      Each item navigates to the github.com hub page, where Neo4j
      neighbours + OpenSearch activity show up. #}
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "connected", "Connected on GitHub")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "connected", "🔗 Connected on GitHub")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -83,7 +88,7 @@
      across all connected GitHub repos. Lights up only when at least
      one of those repos is indexed in Neo4j. #}
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "community", "Community behind the cited code")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "community", "👥 Main developers")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -97,7 +102,7 @@
   </template>
 
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "activity", "Activity")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "activity", "📈 Activity")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -111,7 +116,7 @@
   </template>
 
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "related", "Related")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "related", "🧩 Related")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -125,7 +130,7 @@
   </template>
 
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "backlinks", "Referenced from")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "backlinks", "📄 Derived works &amp; references")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -137,6 +142,8 @@
       <div x-show="!loading && html.length > 0" x-html="html"></div>
     </div>
   </template>
+
+  </div>{# /.entity-panels #}
 
   <div x-show="error" class="card tone-bad" x-cloak>
     <div class="card-title">Stream error</div>
@@ -171,6 +178,16 @@
     flex-shrink: 0;
   }
   @keyframes hub-spin { to { transform: rotate(360deg); } }
+
+  /* Lazy panels tile into a balanced two-column masonry on wide
+     screens; each card stays whole (no mid-card column break). */
+  .entity-panels { column-gap: 16px; }
+  @media (min-width: 880px) { .entity-panels { column-count: 2; } }
+  .entity-panels > * { break-inside: avoid; }
+  .entity-panels > div { margin-bottom: 16px; }
+  /* The body's own panel cards already carry the title emoji; make the
+     lazy-panel headings match the body card-title weight. */
+  .entity-panels .card-title { display: flex; align-items: center; gap: 6px; }
 </style>
 
 <script>
