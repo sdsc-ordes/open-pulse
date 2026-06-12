@@ -94,6 +94,30 @@
       padding: 7px 13px; border-radius: 9px; background: rgba(255,255,255,.18);
       border: 1px solid rgba(255,255,255,.32); backdrop-filter: blur(3px); }
     .entity-hero-link:hover { background: rgba(255,255,255,.28); }
+
+    /* ── two-column body ── */
+    .entity-cols { display: grid; gap: 16px; align-items: start; }
+    @media (min-width: 880px) {
+      .entity-cols { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
+    }
+    .entity-col-main, .entity-col-rail {
+      display: flex; flex-direction: column; gap: 16px; min-width: 0;
+    }
+
+    /* ── facts as a 2-column masonry of key/value pairs ── */
+    .facts-grid { column-gap: 22px; }
+    @media (min-width: 560px) { .facts-grid { column-count: 2; } }
+    .facts-grid .fact { break-inside: avoid; padding: 7px 0;
+      border-bottom: 1px solid var(--border); }
+    .fact-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+      color: var(--fg-faint); margin-bottom: 2px; }
+    .fact-value { font-size: 13.5px; word-break: break-word; }
+
+    /* ── compact key/value list (cross-references) ── */
+    .kv { padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .kv:last-child { border-bottom: 0; }
+    .kv-k { font-size: 11px; color: var(--fg-muted); margin-bottom: 2px; }
+    .kv-v { font-size: 12.5px; }
   </style>
   <div class="entity-hero" style="background: {{ hero_gradient }};">
     <div class="entity-hero-emoji">{{ hero_emoji }}</div>
@@ -129,136 +153,140 @@
     </div>
   {% endif %}
 
-  {% if entity.narrative %}
-    <div class="card tone-info">
-      <div class="card-title">Summary</div>
-      {# Default whitespace handling — the LLM is instructed to output
-         a single paragraph, so any stray newlines collapse cleanly.
-         Previously ``white-space: pre-line`` was preserving them and
-         leaving visible vertical gaps. #}
-      <p style="margin: 6px 0 0; line-height: 1.55;">{{ entity.narrative }}</p>
-    </div>
-  {% endif %}
+  <div class="entity-cols">
+    <div class="entity-col-main">
 
-  {% if entity.identifiers %}
-    <div class="card">
-      <div class="card-title">Cross-references</div>
-      <table class="data" style="margin-top: 8px;">
-        <tbody>
-        {% for f in entity.identifiers %}
-          <tr>
-            <td style="width: 200px; color: var(--fg-muted); white-space: nowrap;">{{ f.label }}</td>
-            <td class="mono" style="word-break: break-all;">
-              {{ hub_or_external(f.value, f.href) }}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
-
-  {% if rest %}
-    <div class="card">
-      <div class="card-title">Facts</div>
-      <table class="data" style="margin-top: 8px;">
-        <tbody>
-        {% for f in rest %}
-          <tr>
-            <td style="width: 200px; color: var(--fg-muted); white-space: nowrap; vertical-align: top;">{{ f.label.replace('_',' ') }}</td>
-            <td style="word-break: break-word; vertical-align: top;">
-              {% if f.value_links %}
-                {# Multi-valued fact with per-chip hub links — each
-                   chip navigates to the linked entity's hub page. #}
-                <div style="display: flex; flex-wrap: wrap; gap: 4px 6px;">
-                  {% for label, url in f.value_links[:12] %}
-                    {% if url %}
-                      <a class="pill pill-info" href="{{ url }}" style="font-size: 12px; text-decoration: none;">{{ label }}</a>
-                    {% else %}
-                      <span class="pill pill-neutral" style="font-size: 12px;">{{ label }}</span>
-                    {% endif %}
-                  {% endfor %}
-                  {% if f.value_links|length > 12 %}
-                    <span class="card-meta" style="align-self: center;">+{{ f.value_links|length - 12 }} more</span>
-                  {% endif %}
-                </div>
-              {% elif f.value_list %}
-                {# Multi-valued fact — render each item as a chip so
-                   commas inside individual items (e.g. "Physics, Fluids
-                   & Plasmas") don't fragment visually. #}
-                <div style="display: flex; flex-wrap: wrap; gap: 4px 6px;">
-                  {% for item in f.value_list[:12] %}
-                    <span class="pill pill-neutral" style="font-size: 12px;">{{ item }}</span>
-                  {% endfor %}
-                  {% if f.value_list|length > 12 %}
-                    <span class="card-meta" style="align-self: center;">+{{ f.value_list|length - 12 }} more</span>
-                  {% endif %}
-                </div>
-              {% else %}
-                {{ hub_or_external(f.value, f.href) }}
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
-
-  {% if entity.neighbours %}
-    <div class="card">
-      <div class="card-title">Graph neighbours</div>
-      <div class="card-meta" style="margin: 4px 0 10px;">
-        From the Neo4j crawl graph — repos, contributors, owning orgs/users, forks.
-      </div>
-      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px;">
-      {% for n in entity.neighbours %}
-        <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
-          {% if n.source_type %}
-            <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ n.source_type }}</span>
-          {% endif %}
-          <span class="pill pill-neutral" style="text-transform: lowercase; font-size: 11px;">{{ n.relation }}</span>
-          {% if n.kind %}<span class="card-meta" style="font-size: 11px;">{{ n.kind.lower() }}</span>{% endif %}
-          {% if n.hub_url %}
-            <a href="{{ n.hub_url }}" class="mono" style="word-break: break-all;">{{ n.label }}</a>
-            {% if n.external_url %}<a href="{{ n.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>{% endif %}
-          {% elif n.external_url %}
-            <a href="{{ n.external_url }}" rel="noopener" target="_blank">{{ n.label }}</a>
-          {% else %}
-            <span>{{ n.label }}</span>
-          {% endif %}
-        </li>
-      {% endfor %}
-      </ul>
-    </div>
-  {% endif %}
-
-  {# The Backlinks panel is rendered separately by the lazy fetch in
-     entity.html — keeps slow Qdrant scans off the critical render
-     path. See /api/hub/backlinks/{ref}. #}
-
-  {% if entity.mentions %}
-    <div class="card">
-      <div class="card-title">Mentions</div>
-      <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-      {% for m in entity.mentions %}
-        <div style="border-left: 2px solid var(--border); padding: 4px 0 4px 10px;">
-          <div class="card-meta" style="margin-bottom: 4px;">
-            <span class="pill pill-info">{{ m.collection }}</span>
-            {% if m.source_label %}<span style="margin-left: 6px;">{{ m.source_label }}</span>{% endif %}
-          </div>
-          {% if m.text %}<div style="line-height: 1.55;">{{ m.text[:600] }}{% if m.text|length > 600 %}…{% endif %}</div>{% endif %}
-          {% if m.source_url %}
-            <div class="card-meta" style="margin-top: 4px;">
-              <a href="{{ hub_link(m.source_url) }}">{{ m.source_url }}</a>
-              <a href="{{ m.source_url }}" rel="noopener" target="_blank" title="open at source">↗</a>
-            </div>
-          {% endif %}
+      {% if entity.narrative %}
+        <div class="card tone-info">
+          <div class="card-title">📝 Summary</div>
+          {# Default whitespace handling — the LLM is instructed to output
+             a single paragraph, so any stray newlines collapse cleanly.
+             Previously ``white-space: pre-line`` was preserving them and
+             leaving visible vertical gaps. #}
+          <p style="margin: 6px 0 0; line-height: 1.55;">{{ entity.narrative }}</p>
         </div>
-      {% endfor %}
-      </div>
+      {% endif %}
+
+      {% if rest %}
+        <div class="card">
+          <div class="card-title">📋 Facts</div>
+          <div class="facts-grid" style="margin-top: 10px;">
+          {% for f in rest %}
+            <div class="fact">
+              <div class="fact-label">{{ f.label.replace('_',' ') }}</div>
+              <div class="fact-value">
+                {% if f.value_links %}
+                  {# Multi-valued fact with per-chip hub links — each
+                     chip navigates to the linked entity's hub page. #}
+                  <div style="display: flex; flex-wrap: wrap; gap: 4px 6px;">
+                    {% for label, url in f.value_links[:12] %}
+                      {% if url %}
+                        <a class="pill pill-info" href="{{ url }}" style="font-size: 12px; text-decoration: none;">{{ label }}</a>
+                      {% else %}
+                        <span class="pill pill-neutral" style="font-size: 12px;">{{ label }}</span>
+                      {% endif %}
+                    {% endfor %}
+                    {% if f.value_links|length > 12 %}
+                      <span class="card-meta" style="align-self: center;">+{{ f.value_links|length - 12 }} more</span>
+                    {% endif %}
+                  </div>
+                {% elif f.value_list %}
+                  {# Multi-valued fact — render each item as a chip so
+                     commas inside individual items (e.g. "Physics, Fluids
+                     & Plasmas") don't fragment visually. #}
+                  <div style="display: flex; flex-wrap: wrap; gap: 4px 6px;">
+                    {% for item in f.value_list[:12] %}
+                      <span class="pill pill-neutral" style="font-size: 12px;">{{ item }}</span>
+                    {% endfor %}
+                    {% if f.value_list|length > 12 %}
+                      <span class="card-meta" style="align-self: center;">+{{ f.value_list|length - 12 }} more</span>
+                    {% endif %}
+                  </div>
+                {% else %}
+                  {{ hub_or_external(f.value, f.href) }}
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      {% if entity.mentions %}
+        <div class="card">
+          <div class="card-title">💬 Mentions</div>
+          <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
+          {% for m in entity.mentions %}
+            <div style="border-left: 2px solid var(--border); padding: 4px 0 4px 10px;">
+              <div class="card-meta" style="margin-bottom: 4px;">
+                <span class="pill pill-info">{{ m.collection }}</span>
+                {% if m.source_label %}<span style="margin-left: 6px;">{{ m.source_label }}</span>{% endif %}
+              </div>
+              {% if m.text %}<div style="line-height: 1.55;">{{ m.text[:600] }}{% if m.text|length > 600 %}…{% endif %}</div>{% endif %}
+              {% if m.source_url %}
+                <div class="card-meta" style="margin-top: 4px;">
+                  <a href="{{ hub_link(m.source_url) }}">{{ m.source_url }}</a>
+                  <a href="{{ m.source_url }}" rel="noopener" target="_blank" title="open at source">↗</a>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
     </div>
-  {% endif %}
+
+    <div class="entity-col-rail">
+
+      {% if entity.identifiers %}
+        <div class="card">
+          <div class="card-title">🔗 Cross-references</div>
+          <div style="margin-top: 8px;">
+          {% for f in entity.identifiers %}
+            <div class="kv">
+              <div class="kv-k">{{ f.label }}</div>
+              <div class="kv-v mono" style="word-break: break-all;">{{ hub_or_external(f.value, f.href) }}</div>
+            </div>
+          {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      {% if entity.neighbours %}
+        <div class="card">
+          <div class="card-title">🕸 Related in the graph</div>
+          <div class="card-meta" style="margin: 4px 0 10px;">
+            Neo4j crawl graph — owning orgs/users, contributors, forks.
+          </div>
+          <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px;">
+          {% for n in entity.neighbours %}
+            <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
+              {% if n.source_type %}
+                <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ n.source_type }}</span>
+              {% endif %}
+              <span class="pill pill-neutral" style="text-transform: lowercase; font-size: 11px;">{{ n.relation }}</span>
+              {% if n.kind %}<span class="card-meta" style="font-size: 11px;">{{ n.kind.lower() }}</span>{% endif %}
+              {% if n.hub_url %}
+                <a href="{{ n.hub_url }}" class="mono" style="word-break: break-all;">{{ n.label }}</a>
+                {% if n.external_url %}<a href="{{ n.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>{% endif %}
+              {% elif n.external_url %}
+                <a href="{{ n.external_url }}" rel="noopener" target="_blank">{{ n.label }}</a>
+              {% else %}
+                <span>{{ n.label }}</span>
+              {% endif %}
+            </li>
+          {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
+
+    </div>
+  </div>
+
+  {# The Backlinks / Activity / Community / Related panels are rendered
+     separately by lazy fetches in entity.html — they tile into a
+     two-column masonry below the body. #}
 
   {% if entity.sources %}
     <div class="card-meta" style="display: flex; gap: 12px; flex-wrap: wrap; padding-top: 4px;">
