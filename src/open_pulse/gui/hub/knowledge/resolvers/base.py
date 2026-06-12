@@ -17,6 +17,7 @@ human-facing label/kind/identifier mapping.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import replace
 
@@ -71,7 +72,7 @@ def probe_sparql(canonical_url: str) -> list[dict]:
 
 
 def predicate_label(predicate_iri: str) -> str:
-    """Short, human-friendly label for a predicate URL.
+    """Short, machine-ish label for a predicate URL.
 
     ``http://schema.org/license`` → ``schema:license``. Anything else
     falls back to the last URL segment so the table doesn't show raw
@@ -84,11 +85,91 @@ def predicate_label(predicate_iri: str) -> str:
     return predicate_iri.rstrip("/").rsplit("/", 1)[-1]
 
 
-def facts_from_bindings(bindings: Iterable[dict]) -> list[Fact]:
-    """Render ``?p ?o`` rows as Fact entries, lightly grouped.
+def _predicate_localname(predicate_iri: str) -> str:
+    """The bare local name (no namespace), e.g. ``githubRepoStars``."""
+    return predicate_label(predicate_iri).split(":")[-1]
 
-    Multiple values for the same predicate are kept as separate rows
-    (rather than merged) so the page preserves their original order.
+
+# Curated, friendly labels for the predicates that show up most across the
+# OpenPulse / GME / schema.org vocabularies — so the RDF table reads like the
+# rest of the hub instead of raw qnames.
+_PREDICATE_LABELS: dict[str, str] = {
+    "githubRepoStars": "Stars",
+    "githubRepoForks": "Forks",
+    "open_issues_count": "Open issues",
+    "watchers_count": "Watchers",
+    "subscribers_count": "Subscribers",
+    "network_count": "Forks (network)",
+    "followers_count": "Followers",
+    "following_count": "Following",
+    "public_repos": "Public repos",
+    "contributionCount": "Contributions",
+    "size_kb": "Size (KB)",
+    "githubUsername": "GitHub username",
+    "githubRepositoryHandle": "GitHub repository",
+    "repositoryType": "Repository type",
+    "discipline": "Discipline",
+    "ror_country": "Country",
+    "html_url": "URL",
+    "avatar_url": "Avatar",
+    "pushed_at": "Last push",
+    "github_updated_at": "Updated",
+    "github_created_at": "Created",
+}
+
+
+def humanize_predicate(predicate_iri: str) -> str:
+    """A title-cased, space-separated label for a predicate.
+
+    ``schema:dateCreated`` → ``Date created``; ``githubRepoStars`` → ``Stars``
+    (curated). Splits camelCase and snake_case so unknown predicates still
+    read cleanly rather than as raw qnames."""
+    local = _predicate_localname(predicate_iri)
+    if local in _PREDICATE_LABELS:
+        return _PREDICATE_LABELS[local]
+    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", local).replace("_", " ").strip()
+    return s[:1].upper() + s[1:] if s else local
+
+
+# Object-property predicates whose object is another entity — surfaced as
+# graph edges (like Neo4j neighbours) rather than key/value rows. Maps the
+# predicate local name to (relation verb, neighbour kind).
+_RELATION_PREDICATES: dict[str, tuple[str, str]] = {
+    "author": ("authored by", "Person"),
+    "creator": ("created by", "Person"),
+    "contributor": ("contributed by", "Person"),
+    "maintainer": ("maintained by", "Person"),
+    "contributionTo": ("contributes to", "Repo"),
+    "owns": ("owns", "Repo"),
+    "ownedBy": ("owned by", "User"),
+    "owned_repositories": ("owns", "Repo"),
+    "affiliation": ("affiliated with", "Org"),
+    "memberOf": ("member of", "Org"),
+    "publisher": ("published by", "Org"),
+    "funder": ("funded by", "Org"),
+    "isPartOf": ("part of", ""),
+}
+
+# Hosts with a dedicated resolver — only these get an in-hub link from an RDF
+# object IRI; everything else stays an external link (still a graph edge).
+_RESOLVABLE_HOSTS = frozenset({
+    "github.com", "gitlab.com", "zenodo.org", "ror.org",
+    "infoscience.epfl.ch", "huggingface.co",
+})
+
+# Cap RDF-derived graph edges so an org that ``owns`` thousands of repos can't
+# flood the page (the DESCRIBE returns one triple per owned repo).
+_RDF_NEIGHBOUR_CAP = 40
+
+
+def facts_from_bindings(bindings: Iterable[dict]) -> list[Fact]:
+    """Render literal ``?p ?o`` rows as RDF Fact entries.
+
+    Object IRIs whose predicate denotes a relationship (author, owns, …) are
+    skipped here — they're surfaced as graph edges by
+    :func:`neighbours_from_bindings` instead, unifying RDF and Neo4j display.
+    Multiple values for the same predicate are kept as separate rows so the
+    page preserves their original order.
     """
     out: list[Fact] = []
     for row in bindings:
@@ -97,7 +178,48 @@ def facts_from_bindings(bindings: Iterable[dict]) -> list[Fact]:
         value = o_node.get("value", "")
         if not p or not value:
             continue
-        out.append(Fact(label=predicate_label(p), value=value))
+        is_uri = o_node.get("type") == "uri"
+        if is_uri and _predicate_localname(p) in _RELATION_PREDICATES:
+            continue  # → graph edge, not a fact row
+        href = value if is_uri and value.startswith("http") else ""
+        out.append(Fact(label=humanize_predicate(p), value=value, href=href, source="rdf"))
+    return out
+
+
+def neighbours_from_bindings(bindings: Iterable[dict]) -> list[Neighbour]:
+    """Surface RDF object-properties (author, owns, contributionTo, …) as
+    graph edges, so triples like ``schema:author`` render alongside the Neo4j
+    ``contributed by`` edges with an "RDF" source tag."""
+    out: list[Neighbour] = []
+    seen: set[tuple[str, str]] = set()
+    for row in bindings:
+        if len(out) >= _RDF_NEIGHBOUR_CAP:
+            break
+        p = row.get("p", {}).get("value", "")
+        o_node = row.get("o") or {}
+        value = o_node.get("value", "")
+        if not p or not value or o_node.get("type") != "uri":
+            continue
+        mapped = _RELATION_PREDICATES.get(_predicate_localname(p))
+        if not mapped:
+            continue
+        relation, kind = mapped
+        ref = parse_ref(value)
+        if ref.host in _RESOLVABLE_HOSTS:
+            hub_url = "/hub/" + ref.display
+            label = ref.display
+        else:
+            hub_url = ""
+            label = value
+        external = value if value.startswith("http") else ""
+        key = (relation, value)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(Neighbour(
+            label=label, relation=relation, hub_url=hub_url,
+            external_url=external, kind=kind, source_type="RDF",
+        ))
     return out
 
 
@@ -269,11 +391,23 @@ def build_entity(
     _emit(on_status, f"Probing SPARQL store for {canonical}")
     bindings = probe_sparql(canonical)
     facts = facts_from_bindings(bindings)
-    _emit(on_status, f"SPARQL: {len(bindings)} facts")
+    rdf_neighbours = neighbours_from_bindings(bindings)
+    _emit(on_status, f"SPARQL: {len(facts)} facts, {len(rdf_neighbours)} edges")
 
     _emit(on_status, "Querying Neo4j for 1-hop neighbours")
     neighbours = neighbours_from_neo4j(canonical, slug=canonical_ref.path)
     _emit(on_status, f"Neo4j: {len(neighbours)} neighbours")
+
+    # Unify the two graphs: Neo4j (GitHub) edges first, then RDF edges,
+    # de-duplicated on (relation, label) so a repo owned-by relation that
+    # both stores know isn't shown twice.
+    if rdf_neighbours:
+        seen_edges = {(n.relation, n.label) for n in neighbours}
+        for n in rdf_neighbours:
+            if (n.relation, n.label) in seen_edges:
+                continue
+            neighbours.append(n)
+            seen_edges.add((n.relation, n.label))
 
     coll_label = (
         ", ".join(collections)
