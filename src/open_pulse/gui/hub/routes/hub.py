@@ -38,6 +38,7 @@ from fastapi.responses import (
 from fastapi.templating import Jinja2Templates
 
 from ..auth import get_settings, maybe_require_auth
+from ..knowledge import catalog as catalog_mod
 from ..knowledge import duckdb_browser
 from ..knowledge import enrich as enrich_mod
 from ..knowledge import (
@@ -522,6 +523,37 @@ def hub_collection(request: Request, name: str, q: str = "") -> HTMLResponse:
             "browsable": duckdb_browser.is_browsable(name),
         },
     )
+
+
+# ── Catalog — visual, browsable view over the entities ─────────────────────
+# Declared before the catch-all ``/hub/{ref:path}`` so ``/hub/catalog`` is
+# reserved for this page.
+@router.get(
+    "/hub/catalog",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_catalog(request: Request) -> HTMLResponse:
+    """Catalog landing — featured highlights + a filterable browse grid."""
+    return templates.TemplateResponse(
+        request,
+        "hub/catalog.html",
+        {"page": "catalog", "facets": catalog_mod.facets()},
+    )
+
+
+@router.get("/api/hub/catalog", dependencies=[Depends(maybe_require_auth)])
+def api_catalog(
+    type: str = "", source: str = "", q: str = "", page: int = 1
+) -> dict[str, Any]:
+    """A page of normalised catalog items across the in-scope stores."""
+    return catalog_mod.browse(type=type, source=source, q=q, page=page)
+
+
+@router.get("/api/hub/catalog/featured", dependencies=[Depends(maybe_require_auth)])
+def api_catalog_featured() -> dict[str, Any]:
+    """Curated research highlights for the featured row."""
+    return {"items": catalog_mod.featured()}
 
 
 @router.get(

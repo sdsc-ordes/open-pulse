@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}Catalog · Open Pulse{% endblock %}
+{% block heading %}Catalog{% endblock %}
+{% block subheading %}Browse the research entities across every store — software, datasets, papers, models, organisations and people — as a visual catalog. Each card opens its detail page.{% endblock %}
+
+{% block content %}
+<style>
+  .cat-wrap { display: flex; flex-direction: column; gap: 20px; }
+
+  /* ── search ── */
+  .cat-search { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .cat-search input {
+    flex: 1; min-width: 240px; padding: 10px 14px; font-size: 14px;
+    background: var(--surface-sunk); border: 1px solid var(--border);
+    border-radius: 10px; color: var(--fg);
+  }
+  .cat-count { font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+
+  /* ── facet chips ── */
+  .cat-facets { display: flex; flex-direction: column; gap: 8px; }
+  .cat-facet-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .cat-facet-label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--fg-faint); margin-right: 4px; }
+  .cat-chip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font-size: 12px; padding: 4px 11px; border-radius: 14px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--fg-muted); white-space: nowrap;
+  }
+  .cat-chip:hover { border-color: var(--border-strong); color: var(--fg); }
+  .cat-chip.is-active { border-color: var(--accent); color: var(--fg);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+  .cat-chip-n { font-size: 10px; color: var(--fg-faint); }
+  .cat-chip-logo { width: 13px; height: 13px; border-radius: 3px; }
+
+  /* ── featured ── */
+  .cat-featured-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr);
+    gap: 12px; overflow-x: auto; padding-bottom: 6px; }
+  .cat-feat-card { height: 132px; }
+
+  /* ── grid ── */
+  .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 14px; }
+
+  /* ── card ── */
+  .cat-card {
+    display: flex; flex-direction: column; text-decoration: none; color: inherit;
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+    background: var(--surface); transition: border-color .12s ease, transform .12s ease;
+  }
+  .cat-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .cat-cover { position: relative; height: 84px; flex: 0 0 84px; }
+  .cat-feat-card .cat-cover { height: 64px; flex-basis: 64px; }
+  .cat-cover-pat { position: absolute; inset: 0; }
+  .cv-p0 { background-image: radial-gradient(rgba(255,255,255,.22) 1px, transparent 1px); background-size: 11px 11px; }
+  .cv-p1 { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.12) 0 2px, transparent 2px 11px); }
+  .cv-p2 { background-image: linear-gradient(rgba(255,255,255,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.12) 1px, transparent 1px); background-size: 13px 13px; }
+  .cv-p3 { background-image: radial-gradient(circle at 28% 30%, rgba(255,255,255,.28), transparent 45%); }
+  .cat-cover-type {
+    position: absolute; left: 10px; bottom: 8px; z-index: 1;
+    font-size: 9px; text-transform: uppercase; letter-spacing: .09em; font-weight: 700;
+    color: #fff; padding: 2px 8px; border-radius: 10px;
+    background: rgba(0,0,0,.30); backdrop-filter: blur(2px);
+  }
+  .cat-cover-logo {
+    position: absolute; right: 8px; top: 8px; z-index: 1;
+    width: 24px; height: 24px; border-radius: 6px; background: #fff;
+    padding: 3px; box-sizing: border-box; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+  }
+  .cat-cover-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .cat-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+  .cat-title { font-weight: 650; font-size: 13.5px; color: var(--fg);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-sub { font-size: 12px; color: var(--fg-muted);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 0; }
+  .cat-src { font-size: 10.5px; color: var(--fg-faint); margin-top: auto; }
+  .cat-badges { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+  .cat-badge {
+    font-size: 10px; padding: 1px 7px; border-radius: 8px;
+    background: var(--surface-sunk); color: var(--fg-muted); white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 3px;
+  }
+  .cat-badge.lang::before { content: ""; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); display: inline-block; }
+  .cat-skel { height: 168px; border-radius: 12px; background: var(--surface-sunk);
+    animation: cat-pulse 1.2s ease-in-out infinite; }
+  @keyframes cat-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+  .cat-more { display: flex; justify-content: center; padding: 6px 0 20px; }
+</style>
+
+<div class="cat-wrap" x-data="catalogPage()" x-init="init()">
+
+  {# ── search ── #}
+  <div class="cat-search">
+    <input type="text" x-model="q" @input.debounce.400ms="resetAndLoad()"
+           placeholder="Search the catalog…  (title / description)" />
+    <span class="cat-count" x-text="countLabel()"></span>
+  </div>
+
+  {# ── facets (server-rendered options) ── #}
+  <div class="cat-facets">
+    <div class="cat-facet-row">
+      <span class="cat-facet-label">Type</span>
+      <button class="cat-chip" :class="!type ? 'is-active' : ''" @click="setType('')">All</button>
+      {% for t in facets.types %}
+        <button class="cat-chip" :class="type === '{{ t.type }}' ? 'is-active' : ''"
+                @click="setType('{{ t.type }}')">{{ t.type }}<span class="cat-chip-n">{{ '{:,}'.format(t.count) }}</span></button>
+      {% endfor %}
+    </div>
+    <div class="cat-facet-row">
+      <span class="cat-facet-label">Source</span>
+      <button class="cat-chip" :class="!source ? 'is-active' : ''" @click="setSource('')">All</button>
+      {% for s in facets.sources %}
+        <button class="cat-chip" :class="source === '{{ s.collection }}' ? 'is-active' : ''"
+                @click="setSource('{{ s.collection }}')" title="{{ s.label }}">
+          {% if s.logo %}<img class="cat-chip-logo" src="{{ s.logo }}" alt="" loading="lazy">{% endif %}
+          {{ s.label }}<span class="cat-chip-n">{{ '{:,}'.format(s.count) }}</span>
+        </button>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── featured ── #}
+  <div x-show="featured.length" x-cloak>
+    <div class="card-title" style="margin-bottom: 8px;">Featured · EPFL research software</div>
+    <div class="cat-featured-row">
+      <template x-for="it in featured" :key="it.id">
+        <a class="cat-card cat-feat-card" :href="it.url" x-html="cardInner(it)"></a>
+      </template>
+    </div>
+  </div>
+
+  {# ── browse grid ── #}
+  <div>
+    <div class="cat-grid">
+      <template x-for="(it, i) in items" :key="it.source + ':' + it.id + ':' + i">
+        <a class="cat-card" :href="it.url" x-html="cardInner(it)"></a>
+      </template>
+      <template x-if="loading">
+        <template x-for="n in 8" :key="'sk' + n"><div class="cat-skel"></div></template>
+      </template>
+    </div>
+    <div x-show="!loading && !items.length" class="card-meta" style="padding: 24px; text-align: center;">
+      No items match these filters.
+    </div>
+    <div class="cat-more" x-show="hasMore && !loading">
+      <button class="btn" @click="loadMore()">Load more</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function catalogPage() {
+  return {
+    q: '', type: '', source: '',
+    items: [], featured: [],
+    page: 1, hasMore: false, total: 0, loading: false,
+
+    init() { this.loadFeatured(); this.resetAndLoad(); },
+
+    async loadFeatured() {
+      try {
+        const r = await fetch('/api/hub/catalog/featured');
+        const j = await r.json();
+        this.featured = j.items || [];
+      } catch (_) { this.featured = []; }
+    },
+
+    _qs() {
+      const p = new URLSearchParams();
+      if (this.q) p.set('q', this.q);
+      if (this.type) p.set('type', this.type);
+      if (this.source) p.set('source', this.source);
+      p.set('page', String(this.page));
+      return p.toString();
+    },
+    async _fetch() {
+      this.loading = true;
+      try {
+        const r = await fetch('/api/hub/catalog?' + this._qs());
+        const j = await r.json();
+        this.hasMore = !!j.has_more;
+        this.total = j.total || 0;
+        return j.items || [];
+      } catch (_) { return []; }
+      finally { this.loading = false; }
+    },
+    async resetAndLoad() {
+      this.page = 1; this.items = [];
+      this.items = await this._fetch();
+    },
+    async loadMore() {
+      this.page += 1;
+      const more = await this._fetch();
+      this.items = this.items.concat(more);
+    },
+    setType(t) { this.type = t; this.resetAndLoad(); },
+    setSource(s) { this.source = s; this.resetAndLoad(); },
+    countLabel() {
+      if (this.loading && !this.items.length) return 'loading…';
+      const n = this.total;
+      return (n ? n.toLocaleString() : '0') + ' item' + (n === 1 ? '' : 's');
+    },
+
+    // ── generated cover art (deterministic from the item id) ──
+    _hash(s) { let h = 2166136261 >>> 0; for (let i = 0; i < (s || '').length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; },
+    cover(id) {
+      const h = this._hash(id);
+      const a = h % 360, b = (a + 35 + (h >> 9) % 90) % 360, ang = (h >> 4) % 360;
+      return `linear-gradient(${ang}deg, hsl(${a} 62% 52%), hsl(${b} 58% 38%))`;
+    },
+    _esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); },
+    cardInner(it) {
+      const pat = 'cv-p' + (this._hash(it.id) % 4);
+      const logo = it.logo_url ? `<span class="cat-cover-logo"><img src="${this._esc(it.logo_url)}" alt="" loading="lazy"></span>` : '';
+      const badges = (it.badges || []).map(b =>
+        `<span class="cat-badge ${b.kind === 'lang' ? 'lang' : ''}">${b.icon ? this._esc(b.icon) + ' ' : ''}${this._esc(b.label)}</span>`).join('');
+      return `
+        <div class="cat-cover" style="background:${this.cover(it.id)}">
+          <div class="cat-cover-pat ${pat}"></div>
+          <span class="cat-cover-type">${this._esc(it.type)}</span>
+          ${logo}
+        </div>
+        <div class="cat-body">
+          <div class="cat-title" title="${this._esc(it.title)}">${this._esc(it.title)}</div>
+          <div class="cat-sub">${this._esc(it.subtitle)}</div>
+          ${badges ? `<div class="cat-badges">${badges}</div>` : ''}
+          <div class="cat-src">${this._esc(it.source_label)}</div>
+        </div>`;
+    },
+  };
+}
+</script>
+{% endblock %}
