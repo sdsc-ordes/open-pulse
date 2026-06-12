@@ -33,29 +33,41 @@
       <button class="btn btn-primary" type="submit" :disabled="!value.trim()">Open</button>
 
       {# Suggestion dropdown — anchored under the input. #}
-      <div x-show="suggestions.length > 0 || loading"
+      <div x-show="suggestions.length > 0 || loading || (value.trim().length >= 2)"
            x-cloak
-           style="position: absolute; top: calc(100% + 6px); left: 0; right: 80px; max-height: 360px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: var(--shadow); z-index: 40;">
-        <div x-show="loading" class="card-meta" style="padding: 8px 12px;">searching…</div>
+           class="hub-suggest-pop"
+           style="position: absolute; top: calc(100% + 6px); left: 0; right: 80px; z-index: 40;">
+        <div x-show="loading && !suggestions.length" class="hub-suggest-loading">
+          <span class="hub-spinner"></span> searching across the data plane…
+        </div>
         <template x-for="(s, i) in suggestions" :key="s.hub_url">
           <a :href="s.hub_url"
              @mousedown.prevent="window.location.href = s.hub_url"
              @mouseenter="selected = i"
              :class="i === selected ? 'is-active' : ''"
-             class="hub-suggest-row"
-             style="display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; text-decoration: none; color: inherit; border-bottom: 1px solid var(--border);">
-            <span x-show="s.source_type"
-                  class="pill pill-info"
-                  style="font-size: 10px; padding: 1px 6px;"
-                  x-text="s.source_type"></span>
-            <span class="mono" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" x-text="s.title"></span>
-            <span class="card-meta" style="font-size: 11px;" x-text="s.badge"></span>
+             class="hub-suggest-row">
+            <span class="hub-suggest-emoji" x-text="s.emoji || '🔗'"></span>
+            <span class="hub-suggest-main">
+              <span class="hub-suggest-titlerow">
+                <span class="hub-suggest-title" x-html="highlight(s.title)"></span>
+                <span x-show="s.source_type" class="pill pill-info hub-suggest-src" x-text="s.source_type"></span>
+                <span x-show="s.badge" class="hub-suggest-badge" x-text="s.badge"></span>
+              </span>
+              <span class="hub-suggest-sub" x-show="s.subtitle" x-text="s.subtitle"></span>
+              <span class="hub-suggest-path mono" x-text="s.hub_url"></span>
+            </span>
           </a>
         </template>
         <div x-show="!loading && suggestions.length === 0 && value.trim().length >= 2"
-             class="card-meta" style="padding: 8px 12px;">
+             class="card-meta" style="padding: 10px 12px;">
           no matches — pressing <span class="kbd">↵</span> opens
-          <span class="mono" x-text="'/hub/' + value"></span> directly
+          <span class="mono" x-text="'/hub/' + normalize(value)"></span> directly
+        </div>
+        <div class="hub-suggest-foot" x-show="suggestions.length > 0">
+          <span><span class="kbd">↑</span><span class="kbd">↓</span> navigate</span>
+          <span><span class="kbd">↵</span> open</span>
+          <span><span class="kbd">esc</span> dismiss</span>
+          <span style="margin-left: auto;" x-text="suggestions.length + ' match' + (suggestions.length === 1 ? '' : 'es')"></span>
         </div>
       </div>
     </form>
@@ -142,6 +154,32 @@
     flex-shrink: 0;
   }
   @keyframes hub-spin { to { transform: rotate(360deg); } }
+
+  /* ── autocomplete dropdown ── */
+  .hub-suggest-pop { max-height: 420px; overflow-y: auto; background: var(--surface);
+    border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow); }
+  .hub-suggest-loading { display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; font-size: 13px; color: var(--fg-muted); }
+  .hub-suggest-row { display: flex; align-items: flex-start; gap: 11px;
+    padding: 9px 12px; text-decoration: none; color: inherit;
+    border-bottom: 1px solid var(--border); }
+  .hub-suggest-row.is-active { background: color-mix(in srgb, var(--accent) 13%, var(--surface)); }
+  .hub-suggest-emoji { font-size: 17px; line-height: 1.25; flex-shrink: 0; }
+  .hub-suggest-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+  .hub-suggest-titlerow { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .hub-suggest-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 600; font-size: 13.5px; min-width: 0; }
+  .hub-suggest-title mark { background: color-mix(in srgb, var(--accent) 38%, transparent);
+    color: inherit; border-radius: 2px; padding: 0 1px; }
+  .hub-suggest-src { font-size: 9.5px; padding: 1px 6px; flex-shrink: 0; margin-left: auto; }
+  .hub-suggest-badge { font-size: 11px; color: var(--fg-faint); flex-shrink: 0; white-space: nowrap; }
+  .hub-suggest-sub { font-size: 12px; color: var(--fg-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hub-suggest-path { font-size: 11px; color: var(--fg-faint);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hub-suggest-foot { display: flex; align-items: center; gap: 14px; padding: 7px 12px;
+    border-top: 1px solid var(--border); font-size: 11px; color: var(--fg-faint);
+    position: sticky; bottom: 0; background: var(--surface); }
 </style>
 <script>
 function hubSearch() {
@@ -194,6 +232,22 @@ function hubSearch() {
       if (!this.suggestions.length) return;
       const n = this.suggestions.length;
       this.selected = ((this.selected + delta) % n + n) % n;
+    },
+
+    _esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    },
+    // Bold the matched query substring inside a suggestion title.
+    highlight(text) {
+      const t = String(text || '');
+      const q = this.value.trim();
+      if (!q) return this._esc(t);
+      const i = t.toLowerCase().indexOf(q.toLowerCase());
+      if (i < 0) return this._esc(t);
+      return this._esc(t.slice(0, i)) + '<mark>' +
+        this._esc(t.slice(i, i + q.length)) + '</mark>' +
+        this._esc(t.slice(i + q.length));
     },
 
     closeSuggestions() {
