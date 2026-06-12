@@ -31,7 +31,6 @@
       model: '',
       modelNotice: '',
       defaultModel: '',
-      apiKey: '',   // optional bring-your-own RCP key (browser localStorage)
       toolsEnabled: true,
       _markedReady: false,
       // agent + tool selection ("checkpoints")
@@ -67,8 +66,11 @@
       // ── lifecycle ────────────────────────────────────────────────────
       init() {
         this.defaultModel = (window.OP_AGENT_DEFAULT_MODEL || '').trim();
-        this.model = localStorage.getItem(STORAGE + ':model') || this.defaultModel;
-        this.apiKey = localStorage.getItem(STORAGE + ':apikey') || '';
+        // Model + RCP key are shared, set in Settings (op:hub:secrets:v1).
+        this.model = window.opLlm.model() || this.defaultModel;
+        window.addEventListener('op-secrets-changed', () => {
+          this.model = window.opLlm.model() || this.defaultModel;
+        });
         try {
           const t = JSON.parse(localStorage.getItem(STORAGE + ':tools') || 'null');
           if (Array.isArray(t)) {
@@ -234,11 +236,10 @@
         this.busy = true;
         this.partial = '';
         this.error = '';
-        if (this.model) localStorage.setItem(STORAGE + ':model', this.model);
         try {
           const resp = await fetch('/api/ai/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...this._keyHeader() },
+            headers: { 'Content-Type': 'application/json', ...window.opLlm.headers() },
             body: JSON.stringify({
               messages: this._messagesForUpstream(),
               model: this.model || undefined,
@@ -747,7 +748,7 @@
       },
       async loadModels() {
         try {
-          const r = await fetch('/api/ai/models', { credentials: 'include', headers: this._keyHeader() });
+          const r = await fetch('/api/ai/models', { credentials: 'include', headers: window.opLlm.headers() });
           const j = await r.json();
           const all = (j.data || []).map((m) => m.id).filter(Boolean);
           // The endpoint's model list rotates over time. A model saved in this
@@ -758,7 +759,7 @@
           if (this.model && all.length && !all.includes(this.model)) {
             this.modelNotice = `“${this.model}” is no longer offered by the endpoint — reset to the hub default.`;
             this.model = '';
-            localStorage.removeItem(STORAGE + ':model');
+            window.opSecrets.set('llm_model', '');
           }
           // The endpoint lists 250+ entries including embedding / reranker
           // models (not chat-capable) and dtype variants (…-bfloat16 /
@@ -772,22 +773,9 @@
         } catch (_) { this.models = []; }
       },
       saveModel() {
-        // '' means "use the hub default" — clear the override.
-        if (this.model) localStorage.setItem(STORAGE + ':model', this.model);
-        else localStorage.removeItem(STORAGE + ':model');
-      },
-      // Bring-your-own RCP key: sent as a header so the hub uses it upstream
-      // instead of its shared key. Never goes in the request body / logs.
-      _keyHeader() {
-        const k = (this.apiKey || '').trim();
-        return k ? { 'X-OP-LLM-Key': k } : {};
-      },
-      saveApiKey() {
-        const k = (this.apiKey || '').trim();
-        if (k) localStorage.setItem(STORAGE + ':apikey', k);
-        else localStorage.removeItem(STORAGE + ':apikey');
-        // Re-fetch models so the picker reflects this key's allowlist.
-        this.loadModels();
+        // Shared preference — also reflected in Settings + the Databases
+        // assistant. '' means "use the hub default".
+        window.opSecrets.set('llm_model', this.model || '');
       },
 
       // ── context note ─────────────────────────────────────────────────
