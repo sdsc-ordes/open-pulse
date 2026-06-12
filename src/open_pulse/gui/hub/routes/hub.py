@@ -774,6 +774,14 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
     async def run_resolver() -> None:
         try:
             entity = await asyncio.to_thread(registry.resolve, parsed, on_status)
+            if entity is None:
+                # No resolver knew this URL — fall back to a basic page
+                # built straight from the catalog's DuckDB row, if any
+                # (Docker images, GitLab projects, datasets, …).
+                on_status("No resolver match — checking the catalog index")
+                entity = await asyncio.to_thread(
+                    catalog_mod.entity_from_ref, parsed.host, parsed.path
+                )
         except Exception as exc:  # noqa: BLE001
             log.exception("resolve stream failed for %s", parsed.canonical_url)
             loop.call_soon_threadsafe(
