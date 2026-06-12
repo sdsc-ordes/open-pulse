@@ -11,18 +11,13 @@ SPARQL 1.1 store, modelled with a small custom vocabulary that re-uses
 [W3C Organization Ontology](https://www.w3.org/TR/vocab-org/) and the
 [W3C Time Ontology](https://www.w3.org/TR/owl-time/). Anything that
 speaks the SPARQL 1.1 Graph Store HTTP Protocol can host the data; the
-default deployment runs Oxigraph behind an nginx proxy
-([sparql-proxy](../services/index.md)) at
-`http://sparql-proxy:7878` inside the stack and `http://localhost:7502`
-on the host.
-
-The legacy "Tentris RDF Store" name is gone — the service is now called
-`sparql_store` (see [Services](../services/index.md)) and is
-backend-agnostic.
+default deployment runs Oxigraph behind a Caddy proxy (`sparql-proxy`)
+at `http://sparql-proxy:7878` inside the stack and
+`http://localhost:7502` on the host.
 
 ## Vocabulary
 
-The store mixes four namespaces:
+The store mixes five namespaces:
 
 | Prefix   | IRI                                          | Used for                                            |
 | -------- | -------------------------------------------- | --------------------------------------------------- |
@@ -30,20 +25,28 @@ The store mixes four namespaces:
 | `schema:`| `http://schema.org/`                         | Person, SoftwareSourceCode, ScholarlyArticle, author, name, license, programmingLanguage |
 | `org:`   | `http://www.w3.org/ns/org#`                  | Organization, Membership, role                      |
 | `time:`  | `http://www.w3.org/2006/time#`               | Membership intervals (`hasBeginning`, `hasEnd`)     |
+| `gme:`   | `https://openpulse.science/git-metadata-extractor#` | Extractor-internal signals auto-promoted to triples (`gme:ror_country`, `gme:followers_count`, `gme:github_updated_at`, release / CI / test-coverage fields, …). Outside the formal ontology but heavily used by the Hub's CHAOSS metrics. |
 
 ### Classes
 
-The classes actually present in the default stack (numbers from a live
-deployment):
+The classes present in a deployed stack (instance counts depend
+entirely on what each node has crawled — query your own with the
+snippet below):
 
-| Class                        | Approx count | Role                                  |
-| ---------------------------- | ------------:| ------------------------------------- |
-| `op:Contribution`            |        3,494 | A user's aggregate contribution to a repo (count + first/last date) |
-| `schema:Person`              |        2,890 | A contributor (GitHub user or ORCID)  |
-| `org:Membership`             |        1,462 | A user's membership in an organization (with time interval) |
-| `org:Organization`           |        1,024 | A GitHub organization or institution  |
-| `schema:SoftwareSourceCode`  |          565 | A repository                          |
-| `schema:ScholarlyArticle`    |            2 | Linked publication (when present)     |
+| Class                        | Role                                  |
+| ---------------------------- | ------------------------------------- |
+| `op:Contribution`            | A user's aggregate contribution to a repo (count + first/last date) |
+| `schema:Person`              | A contributor (GitHub user or ORCID)  |
+| `schema:SoftwareSourceCode`  | A repository                          |
+| `org:Membership`             | A user's membership in an organization (with time interval) |
+| `org:Organization`           | A GitHub organization or institution  |
+| `schema:ScholarlyArticle`    | Linked publication (when present)     |
+
+```sparql
+SELECT ?class (COUNT(?s) AS ?instances)
+WHERE { ?s a ?class }
+GROUP BY ?class ORDER BY DESC(?instances)
+```
 
 ### Property cheat sheet
 
@@ -159,22 +162,39 @@ flowchart LR
   S -->|SPARQL 1.1| U[Users / dashboards /<br/>research notebooks]
 ```
 
-The pipeline is sequential and orchestrated by `open-pulse quest run`
-([Architecture](../architecture/index.md)).
+The pipeline is sequential and orchestrated by `open-pulse quest start`
+(see [Quest Pipeline](../pipeline/index.md)).
+
+## Named graphs
+
+Quest uploads land in **monthly named graphs** following the pattern
+`{base}/{YYYY-MM}/{runtime}` — e.g.
+`https://open-pulse.epfl.ch/graph/2026-06/hybrid` — derived
+automatically from the run date and the extractor's agent runtime
+(`hybrid` or `rule-based`). Hybrid graphs are additionally mirrored
+into the default graph, so unscoped queries always see the canonical
+data. Query a specific snapshot with `GRAPH <iri> { … }`, or
+enumerate them:
+
+```sparql
+SELECT ?g (COUNT(*) AS ?triples)
+WHERE { GRAPH ?g { ?s ?p ?o } }
+GROUP BY ?g ORDER BY DESC(?triples)
+```
 
 ## The metadata extractor
 
 The extractor (image
-[`ghcr.io/imaging-plaza/git-metadata-extractor`](https://github.com/imaging-plaza/git-metadata-extractor),
-v3.0.0 at time of writing) is a FastAPI service that combines two
-strategies for any given repository:
+[`ghcr.io/imaging-plaza/git-metadata-extractor`](https://github.com/imaging-plaza/git-metadata-extractor))
+is a FastAPI service that combines two strategies for any given
+repository:
 
-- **`gimie`** — rule-based extraction using the
-  [Gimie](https://github.com/sdsc-ordes/gimie) library (v0.7.2).
-  Deterministic, fast.
-- **LLM-assisted** — augments fields a rule-based pass cannot infer
-  (e.g. discipline, repository type). Powered by a configurable
-  OpenAI-compatible endpoint.
+- **Rule-based** — deterministic extraction from the repository and
+  the GitHub API. Gimie (JSON-LD) extraction is provided by the
+  `gme-gimie-api` sidecar container rather than in-process.
+- **LLM-assisted** (`hybrid` runtime) — augments fields a rule-based
+  pass cannot infer (e.g. discipline, repository type). Powered by a
+  configurable OpenAI-compatible endpoint.
 
 ### v2 API (current)
 
@@ -187,7 +207,7 @@ curl -s -X POST http://localhost:1234/v2/extract \
   -d '{
         "source_url": "https://github.com/sdsc-ordes/gimie",
         "output_format": "json-ld",
-        "agent_runtime": "auto",
+        "agent_runtime": "hybrid",
         "include_context_summary": false
       }'
 ```
@@ -199,7 +219,7 @@ budgets when the GitHub token pool is healthy.
 
 The `metadata_extractor` service client in `open_pulse.services` is the
 one the quest pipeline uses — see
-[Services](../services/index.md) for the configuration contract.
+[Quest Pipeline](../pipeline/index.md) for the configuration contract.
 
 ## Where to query
 
@@ -209,7 +229,9 @@ one the quest pipeline uses — see
 | SPARQL update (write) — auth required | `http://sparql-proxy:7878/update`        | `http://localhost:7502/update`|
 | Graph store (PUT/POST/DELETE) | `http://sparql-proxy:7878/store` | `http://localhost:7502/store`|
 
-Writes require HTTP Basic auth read from `SPARQL_AUTH`; reads do not.
-The
-[`sparql_store` service client](../services/index.md) wraps the upload
-path used by the quest pipeline.
+Both reads and writes require HTTP Basic auth with the `SPARQL_AUTH`
+credentials by default (`SPARQL_READ_AUTH_PATHS` in `infra/.env`
+controls which paths are read-gated; set it to `__off__` for a public
+read endpoint). The `sparql_store` service client (see
+[Quest Pipeline](../pipeline/index.md)) wraps the upload path used by
+the quest pipeline.

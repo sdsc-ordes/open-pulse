@@ -30,10 +30,9 @@ Use this checklist for stable releases created from semver tags (`vX.Y.Z`).
   - `git push origin vX.Y.Z`
 - Verify the `Release` workflow starts and passes.
 - Confirm expected artifacts are attached to the draft release:
-  - `analysis-vX.Y.Z.tar`
+  - `open-pulse-vX.Y.Z.tar` (docker image archive)
   - `devcontainer-vX.Y.Z.tar`
   - `SHA256SUMS.txt`
-  - `openpulse_analysis-*.whl`
 
 ## Release finalization
 

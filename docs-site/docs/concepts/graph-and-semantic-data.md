@@ -26,7 +26,7 @@ flowchart LR
   M -->|JSON-LD| Q[Quest step:<br/>sparql_upload]
   Q --> S[(SPARQL store<br/>sparql_store)]
   N -. fast traversal .-> A1[Network analysis<br/>centrality, communities]
-  S -. semantic query .-> A2[Metadata queries<br/>license, discipline, FAIR]
+  S -. semantic query .-> A2[Metadata queries<br/>license, language, discipline]
 ```
 
 ## Neo4j: the community network
@@ -36,19 +36,32 @@ flowchart LR
 ```mermaid
 graph LR
   U((User)) -- CONTRIBUTES_TO --> R((Repo))
+  U -- STARRED / WATCHES --> R
+  U -- OPENED_ISSUE / OPENED_PR --> R
   O((Org)) -- OWNS --> R
   U -- MEMBER_OF --> O
-  R -- FORK_OF --> R2((Repo))
+  U -- FOLLOWS --> U2((User))
+  U -- AFFILIATED_WITH --> RO((RorOrg))
+  R -- DEPENDS_ON --> R2((Repo))
+  R -- FORK_OF --> R2
 ```
 
-Three node labels and four relationship types. Property keys on the
-nodes:
+Four node labels and thirteen relationship types. The core four
+relationships are `OWNS`, `CONTRIBUTES_TO`, `MEMBER_OF` and `FORK_OF`;
+the crawler can additionally materialise `DEPENDS_ON`, `STARRED`,
+`WATCHES`, `FOLLOWS`, `OPENED_ISSUE`, `OPENED_PR`, `COMMENTED_ON` and
+`REVIEWED_PR` (issue/PR edges are opt-in via the quest's
+`crawl_issues` / `crawl_prs` flags), and the enrichment backfill links
+people to ROR-registered institutions via `AFFILIATED_WITH`.
 
-| Label  | Properties                                                                   |
-| ------ | ---------------------------------------------------------------------------- |
-| `Repo` | `id`, `name`, `full_name`, `owner`, `is_explored`, `exploration_timestamp`   |
-| `User` | `id`, `login`, `name`, `type`, `is_explored`, `exploration_timestamp`        |
-| `Org`  | `id`, `login`, `name`, `type`, `is_explored`, `exploration_timestamp`        |
+Property keys on the nodes:
+
+| Label    | Properties                                                                   |
+| -------- | ---------------------------------------------------------------------------- |
+| `Repo`   | `id`, `name`, `full_name`, `owner`, `is_explored`, `exploration_timestamp`   |
+| `User`   | `id`, `login`, `name`, `type`, `is_explored`, `exploration_timestamp`        |
+| `Org`    | `id`, `login`, `name`, `type`, `is_explored`, `exploration_timestamp`        |
+| `RorOrg` | `name`, `org_type`, `url` (the ROR IRI)                                      |
 
 ### Cypher examples
 
@@ -135,7 +148,7 @@ resource in the SPARQL store (identified by
 ## Cross-layer joins from Python
 
 Pipeline steps and notebooks talk to both layers through the
-[Services](../services/index.md) container. Outside the pipeline, the
+[service container](../pipeline/index.md). Outside the pipeline, the
 two endpoints can be queried side-by-side from a notebook:
 
 ```python
@@ -175,5 +188,7 @@ rows = sparql.query().convert()["results"]["bindings"]
 | Neo4j Browser  | `http://neo4j:7474`                     | `http://localhost:7503`            |
 | SPARQL endpoint| `http://sparql-proxy:7878/query`        | `http://localhost:7502/query`      |
 
-Host ports can shift if you customise `infra/.env` — `op deploy ps`
-shows the live mapping.
+SPARQL **reads are auth-gated by default** (`SPARQL_READ_AUTH_PATHS`
+in `infra/.env`; HTTP Basic with the `SPARQL_AUTH` credentials) —
+set it to `__off__` for a public read endpoint. Host ports can shift if
+you customise `infra/.env` — `op deploy ps` shows the live mapping.
