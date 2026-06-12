@@ -87,20 +87,19 @@ Every box in that diagram is a real container shipped by
 | `valkey`              | Queue between SortingHat and its worker.                                                      | (internal)                                 |
 | `projects-applier`    | Receives a fresh `projects.json` over HTTP and atomically swaps it into Mordred.              | `http://localhost:1235`                    |
 
-### Today's data
+### The indices
 
-A live deployment after a few crawl cycles typically contains:
+What lands in OpenSearch (document volumes depend entirely on each
+node's tracked repositories — `GET /_cat/indices?v` shows yours):
 
-| Index                         | Docs       | What it holds                                  |
-| ----------------------------- | ---------:| ---------------------------------------------- |
-| `git_demo_raw`                | 1.7M      | Raw git log events from every tracked repo     |
-| `git_demo_enriched`           | 44K+      | Per-commit enriched docs with 181 CHAOSS fields|
-| `git-aoc_demo_enriched`       | 572K      | Areas of code (touched-file aggregation)       |
-| `git-onion_demo_enriched_*`   | 15K       | "Onion model" tiers (core / regular / casual)  |
-
-The enriched index covers ~193 distinct repositories across 9
-GrimoireLab projects (one per organisation in
-[the graph](graph-and-semantic-data.md)).
+| Index                         | What it holds                                  |
+| ----------------------------- | ---------------------------------------------- |
+| `git_demo_raw`                | Raw git log events from every tracked repo     |
+| `git_demo_enriched`           | Per-commit enriched docs with 181 CHAOSS fields|
+| `git-aoc_demo_enriched`       | Areas of code (touched-file aggregation)       |
+| `git-onion_demo_enriched_*`   | "Onion model" tiers (core / regular / casual)  |
+| `github_demo_*`               | GitHub issue/PR activity                       |
+| `github-pull_*`               | PR review/merge events (feeds the `cr_*` metrics; requires a `github:pull` backend in `projects.json`) |
 
 ## Feeding the pipeline
 
@@ -146,6 +145,16 @@ Authoritative names worth knowing when writing queries or notebooks:
   `lines_changed`, file-level child docs.
 
 ## Accessing metrics
+
+### The Hub's CHAOSS dashboard and API
+
+The [Hub](../hub/index.md) computes **35 CHAOSS metrics** per
+repository and per GrimoireLab project, drawing on all three stores
+(Neo4j, SPARQL, OpenSearch) and grouped into three buckets —
+Community, Popularity and Quality. Every metric ships the exact
+upstream queries it ran, so results are fully auditable. The same
+computations are exposed as a JSON REST API — see the
+[CHAOSS Metrics API reference](../reference/chaoss-api.md).
 
 ### Project-metric caching & weekly warm
 
@@ -262,5 +271,5 @@ Some CHAOSS-style questions naturally cross layers:
 | "Rank repos by activity normalised by repo age"            | OpenSearch + SPARQL (`schema:dateCreated`) |
 
 Pipeline steps use the
-[Services](../services/index.md) container to call the relevant clients;
+[service container](../pipeline/index.md) to call the relevant clients;
 notebooks can compose queries directly as shown above.

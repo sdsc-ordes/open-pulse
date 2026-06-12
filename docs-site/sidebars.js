@@ -4,28 +4,27 @@ const sidebars = {
     "index",
     "getting-started/index",
     "architecture/index",
-    "services/index",
-    "analysis/index",
     {
       type: "category",
       label: "Concepts",
       items: [
-        "concepts/metadata-and-ontology",
         "concepts/graph-and-semantic-data",
+        "concepts/metadata-and-ontology",
         "concepts/metrics-and-chaoss"
       ]
     },
+    "hub/index",
+    "pipeline/index",
+    "reference/chaoss-api",
     "use-cases/index",
     {
       type: "category",
       label: "Operations",
       items: [
-        "operations/index",
         "operations/deployment",
-        "operations/branch-model",
         "operations/register-a-node",
         "operations/release-checklist",
-        "operations/migration-from-static-docs"
+        "operations/branch-model"
       ]
     },
     "contributing/index",
