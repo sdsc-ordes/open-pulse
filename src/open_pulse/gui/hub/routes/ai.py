@@ -22,10 +22,10 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..auth import get_settings, require_auth
@@ -51,11 +51,29 @@ _SCHEMA_CACHE_TTL = 600.0  # 10 min — store schema changes on quest runs, not 
 _SCHEMA_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
-def _headers() -> dict[str, str]:
+def _resolve_key(override: str | None = None) -> str:
+    """The API key to send upstream, in precedence order:
+
+    1. ``override`` — a per-request "bring your own key" supplied by the
+       browser (never logged, never persisted server-side).
+    2. ``agent_llm_api_key`` — an env key dedicated to the agent / hub
+       assistants (``HUB_AGENT_LLM_API_KEY``), so the interactive agent can
+       run on a separate / rate-limited key from the rest of the hub.
+    3. ``llm_api_key`` — the hub's shared key (HUB_LLM_API_KEY / RCP_TOKEN).
+    """
     settings = get_settings()
+    return (
+        (override or "").strip()
+        or settings.agent_llm_api_key
+        or settings.llm_api_key
+    )
+
+
+def _headers(override_key: str | None = None) -> dict[str, str]:
     h = {"Content-Type": "application/json"}
-    if settings.llm_api_key:
-        h["Authorization"] = f"Bearer {settings.llm_api_key}"
+    key = _resolve_key(override_key)
+    if key:
+        h["Authorization"] = f"Bearer {key}"
     return h
 
 
@@ -74,18 +92,21 @@ def _base_url() -> str:
 
 
 @router.get("/models", dependencies=[Depends(require_auth)])
-def list_models() -> dict[str, Any]:
+def list_models(
+    x_op_llm_key: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
     """Return the model catalog from the configured LLM endpoint.
 
     Some endpoints (RCP, OpenAI) gate the model list behind auth; others
-    (Ollama, vLLM unauthenticated) don't. We pass our configured key
-    when present and fall through to ``{"data": []}`` on any failure
+    (Ollama, vLLM unauthenticated) don't. We pass the resolved key (a
+    browser-supplied ``X-OP-LLM-Key`` wins, so the picker reflects that
+    key's allowlist) and fall through to ``{"data": []}`` on any failure
     so the UI can still render a "no models" hint.
     """
     base = _base_url()
     url = f"{base}/models"
     try:
-        resp = httpx.get(url, headers=_headers(), timeout=_MODELS_TIMEOUT)
+        resp = httpx.get(url, headers=_headers(x_op_llm_key), timeout=_MODELS_TIMEOUT)
     except httpx.HTTPError as exc:
         log.info("models proxy: %s", exc)
         return {"data": [], "error": str(exc)}
@@ -523,6 +544,7 @@ def _format_schema_block(schema: dict[str, Any]) -> str:
 @router.post("/chat", dependencies=[Depends(require_auth)])
 async def chat(
     payload: dict[str, Any] = Body(default_factory=dict),
+    x_op_llm_key: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
     """Stream a chat completion via SSE.
 
@@ -600,7 +622,7 @@ async def chat(
                     async with client.stream(
                         "POST",
                         f"{base}/chat/completions",
-                        headers=_headers(),
+                        headers=_headers(x_op_llm_key),
                         json=body,
                     ) as resp:
                         if resp.status_code != 200:
