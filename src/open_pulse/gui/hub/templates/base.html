@@ -42,6 +42,16 @@
         clear: () => { localStorage.removeItem(KEY); window.dispatchEvent(new Event('op-secrets-changed')); },
       };
     })();
+
+    // Shared LLM/agent preferences (set in Settings, used by every assistant:
+    // the agent chat + the Databases assistant). The key is sent as a header
+    // so the hub uses it upstream instead of its shared key; the model is the
+    // browser's preferred default. Both live in op:hub:secrets:v1.
+    window.opLlm = {
+      key:   () => window.opSecrets.get('rcp_api_key'),
+      model: () => window.opSecrets.get('llm_model'),
+      headers: () => { const k = window.opSecrets.get('rcp_api_key'); return k ? { 'X-OP-LLM-Key': k } : {}; },
+    };
     </script>
   </head>
   <body class="antialiased min-h-screen flex flex-col">

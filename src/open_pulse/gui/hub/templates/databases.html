@@ -2328,7 +2328,7 @@ function dbConsole() {
     },
     async loadAiModels() {
       try {
-        const r = await fetch('/api/ai/models');
+        const r = await fetch('/api/ai/models', { headers: window.opLlm.headers() });
         if (!r.ok) return;
         const j = await r.json();
         // OpenAI shape: ``{"data":[{"id":…}, …]}``; some self-hosted
@@ -2340,7 +2340,9 @@ function dbConsole() {
           .sort((a, b) => a.id.localeCompare(b.id));
         // Prefer a sane default: previously-selected model from
         // localStorage > the GME's gpt-oss-120b > whatever's first.
-        const saved = localStorage.getItem(this.AI_STORAGE_KEY + ':model');
+        // Prefer the shared Settings preference, then the page-local memory.
+        const saved = window.opSecrets.get('llm_model')
+          || localStorage.getItem(this.AI_STORAGE_KEY + ':model');
         if (saved && this.aiModels.some(m => m.id === saved)) {
           this.aiModel = saved;
         } else {
@@ -2448,11 +2450,12 @@ function dbConsole() {
       this.aiPartial = '';
       try {
         if (this.aiModel) {
-          localStorage.setItem(this.AI_STORAGE_KEY + ':model', this.aiModel);
+          // Shared preference — also used by the agent chat + Settings.
+          window.opSecrets.set('llm_model', this.aiModel);
         }
         const resp = await fetch('/api/ai/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...window.opLlm.headers() },
           body: JSON.stringify({
             // ``aiMessages`` carries display-friendly tool / tool_calls
             // payloads (dicts, separate name/arguments fields). The
