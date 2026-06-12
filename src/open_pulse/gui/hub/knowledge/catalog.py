@@ -58,14 +58,17 @@ _SOURCES: list[dict[str, Any]] = [
      "date": "last_modified"},
     {"collection": "zenodo_records", "type": "dataset", "title": "title",
      "subtitle": "description", "ref": ["{zenodo_id}", "{doi}"],
+     "hosts": ["zenodo.org", "doi.org"],
      "stars": "downloads", "metric2": "views", "cat": "resource_type",
      "license": "license_id", "date": "publication_date"},
     {"collection": "works", "type": "paper", "title": "title",
      "subtitle": "abstract", "sub_const": "Scholarly work",
-     "ref": ["{doi}", "{openalex_id}"], "date": "publication_year"},
+     "ref": ["{doi}", "{openalex_id}"], "hosts": ["doi.org", "openalex.org"],
+     "date": "publication_year"},
     {"collection": "infoscience_articles", "type": "paper", "title": "title",
      "subtitle": "journal", "sub_const": "EPFL Infoscience",
      "ref": ["{infoscience_url}", "doi.org/{doi}"],
+     "hosts": ["infoscience.epfl.ch", "doi.org"],
      "cat": "publication_type", "lang": "language", "date": "publication_year"},
     {"collection": "dockerhub", "type": "image", "title": "name",
      "subtitle": "description", "ref": ["hub.docker.com/r/{namespace}/{name}"],
@@ -76,13 +79,15 @@ _SOURCES: list[dict[str, Any]] = [
      "metric2": "public_repos", "place": "location", "date": "updated_at"},
     {"collection": "institutions", "type": "org", "title": "display_name",
      "subtitle": "", "sub_const": "Research institution",
-     "ref": ["{ror}", "{openalex_id}"], "place": "country_code"},
+     "ref": ["{ror}", "{openalex_id}"], "hosts": ["ror.org", "openalex.org"],
+     "place": "country_code"},
     {"collection": "github_users", "type": "person", "title": "name",
      "subtitle": "bio", "sub_const": "GitHub user", "ref": ["github.com/{login}"],
      "stars": "followers", "metric2": "public_repos", "cat": "company",
      "place": "location", "date": "updated_at"},
     {"collection": "authors", "type": "person", "title": "display_name",
-     "subtitle": "", "sub_const": "Researcher", "ref": ["{orcid}", "{openalex_id}"]},
+     "subtitle": "", "sub_const": "Researcher", "ref": ["{orcid}", "{openalex_id}"],
+     "hosts": ["orcid.org", "openalex.org"]},
 ]
 
 # Heuristic fallbacks for any field a source doesn't declare.
@@ -309,6 +314,107 @@ def _featured_repo_section(
             "badges": [{"icon": icon, "label": _num(r.get("value"))}], "featured": True,
         })
     return {"title": title, "subtitle": subtitle, "items": items}
+
+
+# ── DuckDB fallback entity (for items no resolver knows) ───────────────────
+# Catalog ``type`` → a human "kind" label for the entity-page hero.
+_KIND_LABELS = {
+    "repo": "Repository", "model": "Model", "dataset": "Dataset",
+    "space": "Space", "paper": "Publication", "image": "Container image",
+    "org": "Organisation", "person": "Person",
+}
+# Columns never worth showing as a fact on the fallback page.
+_FACT_SKIP_COLS = frozenset({
+    "raw", "ingested_at", "card_data", "dataset_info", "languages_json",
+    "keywords_json", "node_id", "sha", "readme_path",
+})
+
+
+def _candidate_sources(host: str) -> list[dict[str, Any]]:
+    """Sources that could own an entity on ``host`` — by a static template
+    prefix, a ``{host}`` placeholder, or an explicit ``hosts`` hint."""
+    host = (host or "").lower()
+    out: list[dict[str, Any]] = []
+    for s in _SOURCES:
+        if not ddb.is_browsable(s["collection"]):
+            continue
+        if host in {h.lower() for h in s.get("hosts", [])}:
+            out.append(s)
+            continue
+        for tmpl in s.get("ref") or []:
+            if tmpl.startswith("{"):
+                if "{host}" in tmpl:  # dynamic host (gitlab) — verify by row
+                    out.append(s)
+                    break
+            elif tmpl.split("/", 1)[0].lower() == host:
+                out.append(s)
+                break
+    return out
+
+
+def entity_from_ref(host: str, path: str) -> Any | None:
+    """Best-effort fallback entity built straight from a DuckDB row.
+
+    When no resolver knows a URL (Docker images, GitLab projects on a custom
+    host, HF datasets not yet in SPARQL/Qdrant, …) but the catalog *does* have
+    the row, render a basic page from that row instead of the wanted-list
+    placeholder. Returns an ``Entity`` or ``None`` if nothing matches."""
+    target = f"{host}/{path}".strip("/").lower()
+    # Each store searches a different column (HF on author, Docker on name,
+    # …), so try several path segments as the search token, most-distinctive
+    # first, until a rebuilt ref matches exactly.
+    skip = {"datasets", "spaces", "records", "r", "items", "server", "api", "core"}
+    tokens: list[str] = []
+    for seg in re.split(r"/", path):
+        if seg and seg.lower() not in skip and seg not in tokens:
+            tokens.append(seg)
+    if not tokens:
+        tokens = [host]
+    for s in _candidate_sources(host):
+        for token in tokens[:4]:
+            res = ddb.list_rows(s["collection"], page=1, size=50, q=token[:64]) or {}
+            cols = res.get("columns", [])
+            for row in res.get("rows", []):
+                ref = _build_ref(s.get("ref"), row)
+                if ref and _strip_scheme(ref).lower() == target:
+                    return _entity_from_row(s, row, cols, host)
+    return None
+
+
+def _entity_from_row(
+    source: dict[str, Any], row: dict[str, Any], columns: list[str], host: str
+) -> Any:
+    from .entity import Entity, Fact  # local import — avoid an import cycle
+
+    item = _item(source, row, columns)
+    ext = item["url"]
+    canonical = ext if ext.startswith("http") else "https://" + ext.lstrip("/")
+    if ext.startswith("/hub/"):
+        canonical = "https://" + ext[len("/hub/"):]
+
+    facts: list[Fact] = []
+    cols = {c.lower(): c for c in columns}
+    for col in columns:
+        if col.lower() in _FACT_SKIP_COLS or col.startswith("_"):
+            continue
+        v = _val(row, cols.get(col.lower()))
+        if v is None:
+            continue
+        sval = str(v)
+        if not sval or len(sval) > 400:
+            continue
+        href = sval if sval.startswith("http") else ""
+        facts.append(Fact(label=col, value=sval[:400], href=href, source="index"))
+
+    return Entity(
+        ref_url=canonical,
+        host=host,
+        title=item["title"],
+        subtitle=item["subtitle"],
+        kind=_KIND_LABELS.get(source["type"], source["type"].title()),
+        facts=facts,
+        enriched=True,
+    )
 
 
 # ── normalisation ─────────────────────────────────────────────────────────
