@@ -36,10 +36,10 @@ Add `-f infra/open-pulse-stack/docker-compose.grimoirelab.yml` (or pass
 GrimoireLab stack (mariadb, valkey, opensearch, mordred, sortinghat,
 nginx, and the projects-applier sidecar).
 
-Then open [http://localhost:7507](http://localhost:7507) (the default on EPFL hosts; older
-installs and `infra/.env.example` still ship 9090 — set `HUB_PORT` in
-`infra/.env` to override). Log in with `openpulse` / `$HUB_AUTH` (the
-username is free-form; only the password is checked).
+Then open [http://localhost:9090](http://localhost:9090) (the default;
+set `HUB_PORT` in `infra/.env` to change it). Log in with
+`openpulse` / `$HUB_AUTH` (the username is free-form; only the password
+is checked).
 
 ## Configuration
 
@@ -57,13 +57,13 @@ Default credentials: `openpulse` / `replace-me`. OpenSearch (in the
 
 ### `.env` wizard
 
-Don't want to hand-edit the file? The static `.env` wizard linked from
-the [project landing](https://sdsc-ordes.github.io/open-pulse/) walks
-through the questions, generates strong tokens locally with the Web
-Crypto API (nothing leaves the browser), and outputs a complete
+As an alternative to hand-editing the file, the `.env` wizard linked
+from the [project landing](https://sdsc-ordes.github.io/open-pulse/)
+walks through the questions, generates strong tokens locally with the
+Web Crypto API (nothing leaves the browser), and outputs a complete
 `infra/.env` you can paste or download.
 
-## Hack on the package
+## Develop the package
 
 ```bash
 uv sync --group dev --group test
@@ -75,8 +75,7 @@ uv run pytest -q
 
 A quest declares a `services:` block listing every endpoint the pipeline
 talks to, plus a `steps:` block enabling pipeline stages. Service
-endpoints live ONLY under `quest.services.*` — step-level `endpoint`
-fields are no longer supported.
+endpoints live exclusively under `quest.services.*`.
 
 ```yaml
 quest:
@@ -112,5 +111,5 @@ Endpoint defaults adapt to where the CLI runs (compose-network names
 inside the stack, `localhost` from the host) — quests written for in-stack
 execution can omit the entire `services:` block.
 
-See [Services](../services/index.md) for the client API surface and
-[Analysis](../analysis/index.md) for the step semantics.
+See the [Quest Pipeline](../pipeline/index.md) page for the full step
+list, the execution model, and the service-client contract.

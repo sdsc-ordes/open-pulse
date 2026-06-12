@@ -177,22 +177,23 @@ The chain above is the same pattern the
 [Quest pipeline](../architecture/index.md) automates inside the cluster
 — the only difference is that here you compose it from a notebook.
 
-## What this dataset is not
+## Scope and limitations
 
-A few things the legacy documentation suggested that simply are not in
-the data today, so do not write queries around them:
+A few things the data model does not currently include, so do not
+write queries around them:
 
 - **No FAIR scores.** The store does not carry FAIR maturity indicators.
 - **No `isEPFL` or similar institutional flags.** Membership is
   inferred via the graph's `:Org` nodes and `:OWNS` / `:MEMBER_OF`
-  edges.
-- **Only one discipline value.** The `op:discipline` field exists but
-  currently classifies every repository as Wikidata's
-  `Q428691` ("open-source software"); finer-grained discipline mapping
-  is future work.
-- **No metrics REST API.** Read OpenSearch directly (`opensearchpy`) or
-  via OpenSearch Dashboards; there is no public `api.openpulse.epfl.ch`
-  endpoint.
+  edges (and `AFFILIATED_WITH` links to ROR-registered institutions).
+- **Discipline is coarse.** `op:discipline` holds Wikidata Q-codes and
+  now spans many disciplines, but the majority of repositories still
+  carry the generic `Q428691` ("open-source software") — treat
+  discipline aggregates as indicative, not exhaustive.
+
+For ready-made community-health numbers, you do not have to query the
+stores yourself: the [CHAOSS Metrics API](../reference/chaoss-api.md)
+serves 35 computed metrics per repository or project as JSON.
 
 ## Where to go next
 

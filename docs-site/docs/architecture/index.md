@@ -63,8 +63,9 @@ plays three roles:
   inside the container). The `OPEN_PULSE_RUNNING_IN_CLI_CONTAINER=1`
   marker tells the deploy CLI to auto-include the cli overlay.
 - **`open-pulse-hub` dashboard.** `command: ["gui","hub","serve",…]`.
-  FastAPI control plane: services, stack, pipeline, projects, databases,
-  logs. Mounts `/var/run/docker.sock` to talk to the daemon.
+  FastAPI control plane: query consoles, CHAOSS metrics, knowledge
+  graph, quests, stack control — see [The Hub](../hub/index.md).
+  Mounts `/var/run/docker.sock` to talk to the daemon.
 
 ## CLI command groups
 
@@ -73,8 +74,8 @@ plays three roles:
 - `deploy` — Docker Compose orchestration (auto-detects when running
   inside the cli container; supports `--with-cli` and `--with-grimoire`
   overlay flags).
-- `quest` — Quest pipeline execution (`start`, `run <yaml>`,
-  `run-step`, `list-steps`).
+- `quest` — Quest pipeline execution (`start`, `run-step`,
+  `list-steps`).
 - `services` — Service-oriented commands, including the
   `services grimoire {prepare-config,apply,install-watcher}` family.
 - `gui` — Interactive UIs: Streamlit (`gui grimoire`) and the FastAPI
@@ -90,17 +91,19 @@ endpoints, and health probes. Each quest run builds a run-scoped
 injected into step context as `context["services"]` and disposed via
 `close_all()` (or the `__exit__` of a `with` block) on completion.
 
-This keeps connection logic centralized — see [Services](../services/index.md)
-for the module list and configuration contract.
+This keeps connection logic centralized — see the
+[Quest Pipeline](../pipeline/index.md) page for the module list and
+configuration contract.
 
 ## Quest pipeline execution flow
 
 1. Load and validate quest config (`pipeline/config.py`, Pydantic).
 2. Build run-scoped `ServiceContainer` from `quest.services`.
 3. Wrap enabled steps with `quest.retry` policy.
-4. Run sequentially in order: `crawler` → `neo4j_upload` →
-   `metadata_extractor` → `sparql_upload` → `apply_grimoire_projects`
-   (the last is off by default).
+4. Run sequentially in order: `crawler` → `frontier_extend` →
+   `neo4j_upload` → `metadata_extractor` → `sparql_upload` →
+   `apply_grimoire_projects` → `archive_outputs`
+   (`frontier_extend` and the last two are off by default).
 5. Pass shared context to each step, including `context["services"]`.
 6. Persist progress to `.quest-checkpoints/<quest-name>.json` for
    checkpoint/resume.
