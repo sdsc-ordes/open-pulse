@@ -678,6 +678,48 @@ def _autocomplete_one(
     return list((payload.get("result") or {}).get("points") or [])
 
 
+def _emoji_for(collection: str) -> str:
+    """Type emoji for an autocomplete row — keyed on the collection name so
+    it's robust to the qdrant/duckdb naming differences (hf_models vs
+    huggingface_models, ror_* vs institutions, …)."""
+    c = (collection or "").lower()
+    if "repo" in c or "renku" in c:
+        return "📦"
+    if "model" in c:
+        return "🤖"
+    if "dataset" in c:
+        return "🗂️"
+    if "space" in c:
+        return "🚀"
+    if "article" in c or "work" in c or "publication" in c or "infoscience_art" in c:
+        return "📄"
+    if "zenodo" in c or "record" in c:
+        return "🗂️"
+    if "org" in c or "institution" in c or "ror" in c or "group" in c:
+        return "🏛️"
+    if "person" in c or "author" in c or "user" in c:
+        return "👤"
+    if "docker" in c or "image" in c:
+        return "🐳"
+    return "🔗"
+
+
+_SUBTITLE_FIELDS = (
+    "description", "summary", "abstract", "headline", "bio", "tagline",
+    "journal", "author", "owner", "company", "location", "country",
+)
+
+
+def _subtitle_for_point(payload: dict[str, Any]) -> str:
+    """A one-line context snippet under the suggestion title."""
+    for f in _SUBTITLE_FIELDS:
+        v = payload.get(f)
+        if isinstance(v, str) and v.strip():
+            s = " ".join(v.split())
+            return s[:110] + ("…" if len(s) > 110 else "")
+    return ""
+
+
 def autocomplete(q: str, *, limit: int = 10) -> list[dict[str, str]]:
     """Suggest hub entities matching the user's typed query.
 
@@ -723,6 +765,9 @@ def autocomplete(q: str, *, limit: int = 10) -> list[dict[str, str]]:
                 {
                     "title": label,
                     "kind": collection,
+                    "kind_label": _BACKLINK_LABELS.get(collection, collection.replace("_", " ")),
+                    "emoji": _emoji_for(collection),
+                    "subtitle": _subtitle_for_point(payload),
                     "source_type": _source_type_for(collection),
                     "hub_url": hub_url,
                     "external_url": canonical,
