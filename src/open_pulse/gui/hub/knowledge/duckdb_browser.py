@@ -231,8 +231,15 @@ _BACKING: dict[str, Backing] = {
         # to records affiliated with that community. ILIKE on a list
         # column casts to text and matches the stringified array, which
         # is exactly the substring the user expects.
-        search_cols=("zenodo_id", "doi", "concept_doi", "title",
-                     "description", "version", "community"),
+        search_cols=(
+            "zenodo_id",
+            "doi",
+            "concept_doi",
+            "title",
+            "description",
+            "version",
+            "community",
+        ),
         search_examples=("dataset", "epfl", "10.5281", "machine learning"),
     ),
     # New in GME 2.1.0rc1 — the cross-platform communities registry.
@@ -261,7 +268,11 @@ _BACKING: dict[str, Backing] = {
             ),
         ),
         search_cols=(
-            "community_id", "source_slug", "parent_org", "title", "description",
+            "community_id",
+            "source_slug",
+            "parent_org",
+            "title",
+            "description",
         ),
         search_examples=("epfl", "cern", "ethz", "openlab"),
     ),
@@ -605,9 +616,24 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     ),
     "ethz_research_collection_organizations": ("Department", "Institute", "Laboratory"),
     "ethz_research_collection_persons": ("Müller", "Schmidt", "Anna", "Wolfgang"),
-    "ethz_research_collection_article_persons": ("first", "corresponding", "co-author", "second"),
-    "ethz_research_collection_article_orgs": ("Department", "Institute", "ETH", "Zurich"),
-    "ethz_research_collection_article_links": ("doi.org", "github.com", "arxiv", "zenodo"),
+    "ethz_research_collection_article_persons": (
+        "first",
+        "corresponding",
+        "co-author",
+        "second",
+    ),
+    "ethz_research_collection_article_orgs": (
+        "Department",
+        "Institute",
+        "ETH",
+        "Zurich",
+    ),
+    "ethz_research_collection_article_links": (
+        "doi.org",
+        "github.com",
+        "arxiv",
+        "zenodo",
+    ),
     # Hugging Face
     "hf_datasets": ("imagenet", "translation", "audio", "code"),
     "hf_models": ("llama", "bert", "diffusion", "whisper"),
@@ -642,25 +668,40 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "snsf_switzerland": ("Swiss", "professor", "biology", "chemistry"),
     "snsf_persons": ("Patrick", "Müller", "EPFL", "ETH"),
     "snsf_output_publications": (
-        "machine learning", "quantum", "nature", "epfl",
+        "machine learning",
+        "quantum",
+        "nature",
+        "epfl",
     ),
     "snsf_output_datasets": ("dataset", "zenodo", "10.5281", "swiss"),
     "snsf_output_academic_events": ("conference", "workshop", "ICML", "NeurIPS"),
     "snsf_output_knowledge_transfers": (
-        "patent", "spin-off", "industry", "transfer",
+        "patent",
+        "spin-off",
+        "industry",
+        "transfer",
     ),
     "snsf_output_public_communications": (
-        "media", "talk", "press", "interview",
+        "media",
+        "talk",
+        "press",
+        "interview",
     ),
     "snsf_output_collaborations": (
-        "Switzerland", "Germany", "United States", "industry",
+        "Switzerland",
+        "Germany",
+        "United States",
+        "industry",
     ),
     "snsf_output_use_inspired": ("application", "industry", "use", "EPFL"),
     # SwissUBase
     "swissubase_entities": ("survey", "FORS", "Switzerland", "households"),
     "swissubase_persons": ("Müller", "Schmidt", "Patrick", "Anna"),
     "swissubase_institutions": (
-        "FORS", "Lausanne", "Bern", "Switzerland",
+        "FORS",
+        "Lausanne",
+        "Bern",
+        "Switzerland",
     ),
     # Zenodo
     "zenodo_records": ("dataset", "epfl", "10.5281", "machine learning"),
@@ -807,8 +848,7 @@ _AUTO_FILTERS: dict[str, str] = {
     # column where the values look like ``"Laboratory of … EPFL - …"``
     # or ``"Institut für … ETH Zürich"``.
     "snsf_epfl": (
-        "institute ILIKE '%EPFL%' "
-        "OR institute ILIKE '%polytechnique%lausanne%'"
+        "institute ILIKE '%EPFL%' OR institute ILIKE '%polytechnique%lausanne%'"
     ),
     "snsf_ethz": (
         "institute ILIKE '%ETH%Zürich%' "
@@ -854,9 +894,13 @@ def _build_auto_backing(collection: str) -> Backing | None:
     _searchable = {
         n.lower(): n
         for n, t in cols
-        if not (t.startswith("JSON") or t.startswith("STRUCT")
-                or t.startswith("LIST") or t.startswith("MAP")
-                or t.startswith("UNION"))
+        if not (
+            t.startswith("JSON")
+            or t.startswith("STRUCT")
+            or t.startswith("LIST")
+            or t.startswith("MAP")
+            or t.startswith("UNION")
+        )
     }
     lowered = {c.lower(): c for c in names}
 

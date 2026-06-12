@@ -20,8 +20,9 @@ def list_all() -> dict[str, object]:
     return {"services": list_services()}
 
 
-@router.post("/{name}/action",
-             dependencies=[Depends(require_auth), Depends(require_writable)])
+@router.post(
+    "/{name}/action", dependencies=[Depends(require_auth), Depends(require_writable)]
+)
 def perform_action(name: str, body: ActionRequest) -> dict[str, object]:
     if body.action not in {"start", "stop", "restart"}:
         raise HTTPException(status_code=400, detail="invalid action")

@@ -195,9 +195,16 @@ async def crawler_v1_proxy(path: str, request: Request) -> Response:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     excluded = {
-        "content-encoding", "content-length", "transfer-encoding",
-        "connection", "keep-alive", "proxy-authenticate",
-        "proxy-authorization", "te", "trailers", "upgrade",
+        "content-encoding",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "upgrade",
     }
     out_headers = {
         k: v for k, v in upstream.headers.items() if k.lower() not in excluded
@@ -220,21 +227,32 @@ def get_job(job_id: str) -> dict[str, Any]:
     return _passthrough("GET", f"/api/v1/crawl/{job_id}")
 
 
-@router.post("/jobs/{job_id}/pause", dependencies=[Depends(require_auth), Depends(require_writable)])
+@router.post(
+    "/jobs/{job_id}/pause",
+    dependencies=[Depends(require_auth), Depends(require_writable)],
+)
 def pause_job(job_id: str) -> dict[str, Any]:
     return _passthrough("POST", f"/api/v1/crawl/{job_id}/pause")
 
 
-@router.post("/jobs/{job_id}/resume", dependencies=[Depends(require_auth), Depends(require_writable)])
+@router.post(
+    "/jobs/{job_id}/resume",
+    dependencies=[Depends(require_auth), Depends(require_writable)],
+)
 def resume_job(job_id: str) -> dict[str, Any]:
     return _passthrough("POST", f"/api/v1/crawl/{job_id}/resume")
 
 
-@router.post("/jobs/{job_id}/cancel", dependencies=[Depends(require_auth), Depends(require_writable)])
+@router.post(
+    "/jobs/{job_id}/cancel",
+    dependencies=[Depends(require_auth), Depends(require_writable)],
+)
 def cancel_job(job_id: str) -> dict[str, Any]:
     return _passthrough("POST", f"/api/v1/crawl/{job_id}/cancel")
 
 
-@router.delete("/jobs/{job_id}", dependencies=[Depends(require_auth), Depends(require_writable)])
+@router.delete(
+    "/jobs/{job_id}", dependencies=[Depends(require_auth), Depends(require_writable)]
+)
 def delete_job(job_id: str) -> dict[str, Any]:
     return _passthrough("DELETE", f"/api/v1/crawl/{job_id}")

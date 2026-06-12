@@ -54,9 +54,7 @@ def _match_role(password: str) -> Role | None:
     """
     if _const_eq(password, _SETTINGS.auth_token):
         return "admin"
-    if _SETTINGS.auth_token_reader and _const_eq(
-        password, _SETTINGS.auth_token_reader
-    ):
+    if _SETTINGS.auth_token_reader and _const_eq(password, _SETTINGS.auth_token_reader):
         return "reader"
     return None
 

@@ -178,6 +178,7 @@ async def _login_redirect_for_browsers(request: Request, exc):
         if request.url.query:
             next_url += f"?{request.url.query}"
         from urllib.parse import quote
+
         return RedirectResponse(
             f"/login?next={quote(next_url, safe='/?=&')}",
             status_code=303,
@@ -185,6 +186,7 @@ async def _login_redirect_for_browsers(request: Request, exc):
     # Default JSON 401 (re-raises through FastAPI's default handler).
     from fastapi.exception_handlers import http_exception_handler
     from fastapi import HTTPException
+
     if isinstance(exc, HTTPException):
         return await http_exception_handler(request, exc)
     return Response(

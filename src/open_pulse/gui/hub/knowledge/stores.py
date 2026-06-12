@@ -58,7 +58,7 @@ def _from_gh_url(value: str | None) -> str:
     if not value:
         return ""
     if value.startswith(_GH_URL_PREFIX):
-        return value[len(_GH_URL_PREFIX):]
+        return value[len(_GH_URL_PREFIX) :]
     return value
 
 

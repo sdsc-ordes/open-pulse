@@ -957,7 +957,9 @@ def create_quest(
     }
 
 
-@router.delete("/quest", dependencies=[Depends(require_auth), Depends(require_writable)])
+@router.delete(
+    "/quest", dependencies=[Depends(require_auth), Depends(require_writable)]
+)
 def delete_quest(
     path: str = Query(..., description="Absolute path of the quest YAML to delete."),
 ) -> dict[str, Any]:
@@ -983,7 +985,9 @@ def delete_quest(
     return {"path": path, "deleted": True}
 
 
-@router.post("/run-stop", dependencies=[Depends(require_auth), Depends(require_writable)])
+@router.post(
+    "/run-stop", dependencies=[Depends(require_auth), Depends(require_writable)]
+)
 def run_stop(
     run_id: str = Query(
         ..., description="Run ID returned by POST /run with detach=true."
@@ -1119,7 +1123,9 @@ def download_archive(name: str) -> FileResponse:
     )
 
 
-@router.delete("/archives/{name}", dependencies=[Depends(require_auth), Depends(require_writable)])
+@router.delete(
+    "/archives/{name}", dependencies=[Depends(require_auth), Depends(require_writable)]
+)
 def delete_archive(name: str) -> dict[str, Any]:
     """Remove an archive from the archives directory.
 

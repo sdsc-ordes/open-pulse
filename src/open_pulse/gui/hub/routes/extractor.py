@@ -168,9 +168,16 @@ async def extractor_v2_proxy(path: str, request: Request) -> Response:
     # connection-specific headers — uvicorn handles those itself and
     # passing them through can confuse downstream proxies.
     excluded = {
-        "content-encoding", "content-length", "transfer-encoding",
-        "connection", "keep-alive", "proxy-authenticate",
-        "proxy-authorization", "te", "trailers", "upgrade",
+        "content-encoding",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "upgrade",
     }
     out_headers = {
         k: v for k, v in upstream.headers.items() if k.lower() not in excluded

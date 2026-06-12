@@ -38,7 +38,8 @@ from ..auth import _match_role, clear_session, issue_session
 # Templates live next to the routes package; same directory as base.html.
 _TEMPLATES = Jinja2Templates(
     directory=os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "templates",
+        os.path.dirname(os.path.dirname(__file__)),
+        "templates",
     ),
 )
 
@@ -97,7 +98,8 @@ def login_submit(
         # Bounce back to the form with ?error=1 and the original ?next=
         # preserved so a second attempt still lands where the user wanted.
         return RedirectResponse(
-            f"/login?error=1&next={target}", status_code=303,
+            f"/login?error=1&next={target}",
+            status_code=303,
         )
     # Issue the cookie + stamp the role. 303 converts the POST into a GET
     # so the browser re-renders the destination page cleanly. Readers who
