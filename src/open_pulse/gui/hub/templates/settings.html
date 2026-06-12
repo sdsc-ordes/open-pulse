@@ -52,6 +52,36 @@
     <p class="card-meta" style="margin-top: 8px;" x-text="status"></p>
   </div>
 
+  <!-- Agent / assistant model preference -->
+  <div class="card" x-data="agentModelPanel()" x-init="init()">
+    <div class="flex items-baseline">
+      <div class="card-title">Agent model</div>
+      <span class="ml-auto card-meta" x-text="status"></span>
+    </div>
+    <p class="card-meta mt-1">
+      The default model the agent chat and the Databases assistant use. Leave on
+      <em>Hub default</em> to follow the server. Click <em>Load available models</em>
+      to list what your RCP key (above) can access, then pick one.
+    </p>
+    <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap;">
+      <select class="mono" x-model="model" @change="save()"
+              style="flex: 1; min-width: 220px; padding: 6px 10px; background: var(--surface-sunk); border: 1px solid var(--border); border-radius: 6px; color: var(--fg);">
+        <option value="">Hub default</option>
+        <template x-if="model && !models.includes(model)">
+          <option :value="model" x-text="model + ' (saved)'"></option>
+        </template>
+        <template x-for="m in models" :key="m">
+          <option :value="m" x-text="m"></option>
+        </template>
+      </select>
+      <button class="btn" @click="loadModels()" :disabled="loading">
+        <span x-show="!loading">Load available models</span>
+        <span x-show="loading" x-cloak>loading…</span>
+      </button>
+    </div>
+    <p class="card-meta" style="margin-top: 8px;" x-show="models.length" x-text="models.length + ' models available with this key'"></p>
+  </div>
+
   <!-- Export / import / wipe everything browser-local -->
   <div class="card tone-info" x-data="localSync()" x-init="refresh()">
     <div class="flex items-baseline">
@@ -130,6 +160,9 @@ function settingsPanel() {
       { id: 'crawler_api_token', label: 'Crawler API token',
         help: 'Bearer for the open-pulse-crawler API when running an instance with auth enabled.',
         placeholder: 'matches CRAWLER_API_TOKEN' },
+      { id: 'rcp_api_key', label: 'RCP / LLM API key (agent + assistants)',
+        help: 'Bring your own EPFL RCP key. When set, the agent chat and the Databases assistant use it instead of the hub\'s shared key, and the model picker below reflects your key\'s allowlist. Stored only in this browser; sent per-request, never saved on the server.',
+        placeholder: 'sk-… / RCP token' },
     ],
     values: {},
     show: false,
@@ -175,6 +208,45 @@ function settingsPanel() {
     get meta() {
       const n = Object.keys(this.values).filter(k => this.values[k]).length;
       return n + ' key' + (n === 1 ? '' : 's') + ' set';
+    },
+  };
+}
+
+/* ── Agent / assistant model preference. Stores the chosen model in the
+   shared op:hub:secrets:v1 store (key "llm_model") so both the agent chat
+   and the Databases assistant pick it up. "Load available models" hits
+   /api/ai/models with the saved RCP key so the list matches that key. */
+function agentModelPanel() {
+  return {
+    model: '',
+    models: [],
+    loading: false,
+    status: '',
+    init() {
+      this.model = window.opSecrets.get('llm_model') || '';
+      // Reflect a key/model changed elsewhere (e.g. the Keys card save).
+      window.addEventListener('op-secrets-changed', () => {
+        this.model = window.opSecrets.get('llm_model') || '';
+      });
+    },
+    save() {
+      window.opSecrets.set('llm_model', this.model || '');
+      this.status = this.model ? ('preferred: ' + this.model) : 'using hub default.';
+    },
+    async loadModels() {
+      this.loading = true; this.status = '';
+      try {
+        const r = await fetch('/api/ai/models', { credentials: 'include', headers: window.opLlm.headers() });
+        const j = await r.json();
+        const all = (j.data || []).map((m) => m.id).filter(Boolean);
+        if (!all.length && j.error) { this.status = '⚠ ' + String(j.error).slice(0, 80); }
+        this.models = all
+          .filter((id) => !/embed|rerank|gte-|bge-|^BAAI\//i.test(id))
+          .filter((id) => !/-(float32|bfloat16|fp8)$/i.test(id))
+          .sort();
+        if (this.models.length && !this.status) this.status = '';
+      } catch (e) { this.status = '⚠ ' + e.message; }
+      finally { this.loading = false; }
     },
   };
 }
