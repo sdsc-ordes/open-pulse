@@ -33,6 +33,14 @@
   .cat-chip-logo { width: 13px; height: 13px; border-radius: 3px; }
 
   /* ── featured ── */
+  .cat-featured { display: flex; flex-direction: column; gap: 18px; }
+  .cat-feat-section { display: flex; flex-direction: column; gap: 8px; }
+  .cat-feat-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .cat-feat-kicker { font-size: 9px; text-transform: uppercase; letter-spacing: .1em;
+    font-weight: 700; color: #fff; padding: 2px 8px; border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 80%, transparent); }
+  .cat-feat-title { font-weight: 650; font-size: 14.5px; color: var(--fg); }
+  .cat-feat-sub { font-size: 12px; color: var(--fg-faint); }
   .cat-featured-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr);
     gap: 12px; overflow-x: auto; padding-bottom: 6px; }
   .cat-feat-card { height: 132px; }
@@ -118,14 +126,22 @@
     </div>
   </div>
 
-  {# ── featured ── #}
-  <div x-show="featured.length" x-cloak>
-    <div class="card-title" style="margin-bottom: 8px;">Featured · EPFL research software</div>
-    <div class="cat-featured-row">
-      <template x-for="it in featured" :key="it.id">
-        <a class="cat-card cat-feat-card" :href="it.url" x-html="cardInner(it)"></a>
-      </template>
-    </div>
+  {# ── featured (themed strips) ── #}
+  <div x-show="sections.length" x-cloak class="cat-featured">
+    <template x-for="(sec, si) in sections" :key="'sec' + si">
+      <div class="cat-feat-section">
+        <div class="cat-feat-head">
+          <span class="cat-feat-kicker">Featured</span>
+          <span class="cat-feat-title" x-text="sec.title"></span>
+          <span class="cat-feat-sub" x-text="sec.subtitle"></span>
+        </div>
+        <div class="cat-featured-row">
+          <template x-for="it in sec.items" :key="it.id">
+            <a class="cat-card cat-feat-card" :href="it.url" x-html="cardInner(it)"></a>
+          </template>
+        </div>
+      </div>
+    </template>
   </div>
 
   {# ── browse grid ── #}
@@ -151,7 +167,7 @@
 function catalogPage() {
   return {
     q: '', type: '', source: '',
-    items: [], featured: [],
+    items: [], sections: [],
     page: 1, hasMore: false, total: 0, loading: false,
 
     init() { this.loadFeatured(); this.resetAndLoad(); },
@@ -160,8 +176,8 @@ function catalogPage() {
       try {
         const r = await fetch('/api/hub/catalog/featured');
         const j = await r.json();
-        this.featured = j.items || [];
-      } catch (_) { this.featured = []; }
+        this.sections = (j.sections || []).filter(s => s.items && s.items.length);
+      } catch (_) { this.sections = []; }
     },
 
     _qs() {
