@@ -143,6 +143,22 @@
                style="color: var(--warn, #b6700b); margin-top: 4px;" x-text="modelNotice"></div>
         </div>
 
+        <div class="agent-set-block agent-set-wide">
+          <div class="agent-set-label">Your RCP API key <span class="card-meta">(optional)</span></div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <input class="agent-model" type="password" autocomplete="off" x-model="apiKey"
+                   @change="saveApiKey()" placeholder="sk-… — leave blank to use the hub key"
+                   style="flex: 1; max-width: none;" />
+            <button type="button" class="btn btn-ghost" x-show="apiKey" x-cloak
+                    @click="apiKey = ''; saveApiKey()" title="Clear your key">Clear</button>
+          </div>
+          <div class="card-meta">
+            Bring your own EPFL RCP key — used for this agent's chat + model list instead of the
+            hub's shared key. Stored only in <span class="kbd">this browser</span> (localStorage),
+            sent over the request, never saved on the server.
+          </div>
+        </div>
+
         <div class="agent-set-block">
           <div class="agent-set-label">Tools</div>
           <div class="agent-tool-toggles">
