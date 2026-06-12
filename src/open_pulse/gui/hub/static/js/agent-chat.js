@@ -31,6 +31,7 @@
       model: '',
       modelNotice: '',
       defaultModel: '',
+      apiKey: '',   // optional bring-your-own RCP key (browser localStorage)
       toolsEnabled: true,
       _markedReady: false,
       // agent + tool selection ("checkpoints")
@@ -67,6 +68,7 @@
       init() {
         this.defaultModel = (window.OP_AGENT_DEFAULT_MODEL || '').trim();
         this.model = localStorage.getItem(STORAGE + ':model') || this.defaultModel;
+        this.apiKey = localStorage.getItem(STORAGE + ':apikey') || '';
         try {
           const t = JSON.parse(localStorage.getItem(STORAGE + ':tools') || 'null');
           if (Array.isArray(t)) {
@@ -236,7 +238,7 @@
         try {
           const resp = await fetch('/api/ai/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...this._keyHeader() },
             body: JSON.stringify({
               messages: this._messagesForUpstream(),
               model: this.model || undefined,
@@ -745,7 +747,7 @@
       },
       async loadModels() {
         try {
-          const r = await fetch('/api/ai/models', { credentials: 'include' });
+          const r = await fetch('/api/ai/models', { credentials: 'include', headers: this._keyHeader() });
           const j = await r.json();
           const all = (j.data || []).map((m) => m.id).filter(Boolean);
           // The endpoint's model list rotates over time. A model saved in this
@@ -773,6 +775,19 @@
         // '' means "use the hub default" — clear the override.
         if (this.model) localStorage.setItem(STORAGE + ':model', this.model);
         else localStorage.removeItem(STORAGE + ':model');
+      },
+      // Bring-your-own RCP key: sent as a header so the hub uses it upstream
+      // instead of its shared key. Never goes in the request body / logs.
+      _keyHeader() {
+        const k = (this.apiKey || '').trim();
+        return k ? { 'X-OP-LLM-Key': k } : {};
+      },
+      saveApiKey() {
+        const k = (this.apiKey || '').trim();
+        if (k) localStorage.setItem(STORAGE + ':apikey', k);
+        else localStorage.removeItem(STORAGE + ':apikey');
+        // Re-fetch models so the picker reflects this key's allowlist.
+        this.loadModels();
       },
 
       // ── context note ─────────────────────────────────────────────────
