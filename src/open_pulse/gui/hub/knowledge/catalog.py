@@ -167,23 +167,61 @@ def browse(
 
 
 def featured(limit: int = 8) -> list[dict[str, Any]]:
-    """Curated highlights — most-starred EPFL-affiliated repos, from the graph.
-    Returns [] if Neo4j is unreachable (page degrades to the browse grid)."""
-    cypher = (
-        "MATCH (o:Org)-[:OWNS]->(r:Repo) WHERE toLower(o.login) CONTAINS 'epfl' "
-        "OPTIONAL MATCH (r)<-[:STARRED]-(u:User) "
-        "WITH o, r, count(DISTINCT u) AS stars WHERE stars > 0 "
-        "RETURN o.name AS org, r.full_name AS repo, stars "
-        f"ORDER BY stars DESC, repo LIMIT {int(limit)}"
-    )
+    """Curated highlight strips, sourced from the knowledge graph.
+
+    Returns ``[{title, subtitle, items}, ...]`` — one themed section per
+    angle (EPFL research software, most-starred overall, most-reused).
+    Sections that come back empty are dropped; an unreachable Neo4j yields
+    ``[]`` and the page degrades gracefully to the browse grid."""
+    sections = [
+        _featured_repo_section(
+            "EPFL research software",
+            "Most-starred repositories owned by EPFL organisations",
+            "MATCH (o:Org)-[:OWNS]->(r:Repo) WHERE toLower(o.login) CONTAINS 'epfl' "
+            "OPTIONAL MATCH (r)<-[:STARRED]-(u:User) "
+            "WITH o, r, count(DISTINCT u) AS stars WHERE stars > 0 "
+            "RETURN o.name AS org, r.full_name AS repo, stars AS value "
+            f"ORDER BY stars DESC, repo LIMIT {int(limit)}",
+            icon="★",
+        ),
+        _featured_repo_section(
+            "Most-starred overall",
+            "The repositories the community stars the most",
+            "MATCH (r:Repo)<-[:STARRED]-(u:User) "
+            "WITH r, count(DISTINCT u) AS stars WHERE stars > 0 "
+            "RETURN r.full_name AS repo, stars AS value "
+            f"ORDER BY stars DESC, repo LIMIT {int(limit)}",
+            icon="★",
+        ),
+        _featured_repo_section(
+            "Most reused",
+            "Repositories other projects depend on the most",
+            "MATCH (r:Repo)<-[:DEPENDS_ON]-(d:Repo) "
+            "WITH r, count(DISTINCT d) AS dependents WHERE dependents > 0 "
+            "RETURN r.full_name AS repo, dependents AS value "
+            f"ORDER BY dependents DESC, repo LIMIT {int(limit)}",
+            icon="⤳",
+        ),
+    ]
+    return [s for s in sections if s["items"]]
+
+
+def _featured_repo_section(
+    title: str, subtitle: str, cypher: str, icon: str
+) -> dict[str, Any]:
+    """Run a repo-ranking Cypher query and shape it into a featured section.
+
+    The query must yield ``repo`` (full_name) and ``value`` columns, and may
+    optionally yield ``org`` (used as the card subtitle). Best-effort: any
+    Neo4j failure yields an empty ``items`` list so the caller can drop it."""
     try:
         from ..routes.ai_tools import run_tool  # lazy: avoid import cycle
 
         res = run_tool("run_cypher", {"query": cypher})
         rows = res.get("rows", []) if isinstance(res, dict) else []
     except Exception as exc:  # noqa: BLE001 — featured is best-effort
-        log.info("catalog featured query failed: %s", exc)
-        return []
+        log.info("catalog featured query failed (%s): %s", title, exc)
+        rows = []
 
     items: list[dict[str, Any]] = []
     for r in rows:
@@ -191,12 +229,13 @@ def featured(limit: int = 8) -> list[dict[str, Any]]:
         if not full:
             continue
         items.append({
-            "id": full, "title": full.rsplit("/", 1)[-1], "subtitle": str(r.get("org") or ""),
+            "id": full, "title": full.rsplit("/", 1)[-1],
+            "subtitle": str(r.get("org") or full.split("/", 1)[0]),
             "type": "repo", "source": "github_repos", "source_label": "GitHub",
             "logo_url": _logo_for("github.com"), "url": "/hub/github.com/" + full,
-            "badges": [{"icon": "★", "label": _num(r.get("stars"))}], "featured": True,
+            "badges": [{"icon": icon, "label": _num(r.get("value"))}], "featured": True,
         })
-    return items
+    return {"title": title, "subtitle": subtitle, "items": items}
 
 
 # ── normalisation ─────────────────────────────────────────────────────────

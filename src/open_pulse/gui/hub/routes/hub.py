@@ -552,8 +552,8 @@ def api_catalog(
 
 @router.get("/api/hub/catalog/featured", dependencies=[Depends(maybe_require_auth)])
 def api_catalog_featured() -> dict[str, Any]:
-    """Curated research highlights for the featured row."""
-    return {"items": catalog_mod.featured()}
+    """Curated research highlights, grouped into themed featured strips."""
+    return {"sections": catalog_mod.featured()}
 
 
 @router.get(
