@@ -183,15 +183,38 @@ def facets() -> dict[str, Any]:
     }
 
 
+# UI sort key → which declared source column to order by, and direction.
+_SORT_FIELDS = {
+    "stars": ("stars", "desc"),
+    "recent": ("date", "desc"),
+    "name": ("title", "asc"),
+}
+
+
+def _sort_clause(source: dict[str, Any], sort: str) -> str:
+    """Map a UI sort key to a ``list_rows`` ``"col[:desc]"`` clause for this
+    source, using its declared stars / date / title column. Returns ``""`` for
+    the default order or when the source can't honour the key."""
+    field, direction = _SORT_FIELDS.get(sort, ("", ""))
+    if not field:
+        return ""
+    col = source.get(field)
+    if not col:
+        return ""
+    return f"{col}:desc" if direction == "desc" else str(col)
+
+
 def browse(
-    *, type: str = "", source: str = "", q: str = "", page: int = 1, page_size: int = 24
+    *, type: str = "", source: str = "", q: str = "", sort: str = "",
+    page: int = 1, page_size: int = 24,
 ) -> dict[str, Any]:
     """A page of normalised catalog items across the in-scope stores.
 
     ``source`` pins to one collection; ``type`` narrows the source set; ``q`` is
-    the per-store substring search. With no ``source`` the page pages each store
-    independently and interleaves — approximate (not a single global sort),
-    fine for a browse catalog and keeps every store reachable.
+    the per-store substring search; ``sort`` reorders by stars / recency / name
+    (mapped to each store's own column). With no ``source`` the page pages each
+    store independently and interleaves — approximate (not a single global
+    sort), fine for a browse catalog and keeps every store reachable.
     """
     page = max(1, int(page or 1))
     page_size = max(1, min(60, int(page_size or 24)))
@@ -206,7 +229,10 @@ def browse(
 
     if len(scope) == 1:
         s = scope[0]
-        res = ddb.list_rows(s["collection"], page=page, size=page_size, q=q) or {}
+        res = ddb.list_rows(
+            s["collection"], page=page, size=page_size, q=q,
+            sort=_sort_clause(s, sort),
+        ) or {}
         items = [_item(s, r, res.get("columns", [])) for r in res.get("rows", [])]
         return {"items": items, "page": page,
                 "has_more": page < (res.get("pages") or 1),
@@ -216,7 +242,9 @@ def browse(
     buckets: list[list[dict[str, Any]]] = []
     total, has_more = 0, False
     for s in scope:
-        res = ddb.list_rows(s["collection"], page=page, size=per, q=q) or {}
+        res = ddb.list_rows(
+            s["collection"], page=page, size=per, q=q, sort=_sort_clause(s, sort)
+        ) or {}
         cols = res.get("columns", [])
         buckets.append([_item(s, r, cols) for r in res.get("rows", [])])
         total += res.get("matched", res.get("total", 0)) or 0
