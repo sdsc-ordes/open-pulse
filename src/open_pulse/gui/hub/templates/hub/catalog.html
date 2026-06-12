@@ -92,6 +92,34 @@
     animation: cat-pulse 1.2s ease-in-out infinite; }
   @keyframes cat-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
   .cat-more { display: flex; justify-content: center; padding: 6px 0 20px; }
+
+  /* ── featured panel — set apart from the browse grid ── */
+  .cat-featured-panel { background: var(--surface-sunk); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px 16px 18px; }
+
+  /* ── browse header (sort + view controls) ── */
+  .cat-browse-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-top: 18px; border-top: 1px solid var(--border); }
+  .cat-browse-title { font-weight: 650; font-size: 15px; color: var(--fg); }
+  .cat-browse-spacer { flex: 1; }
+  .cat-tool { display: inline-flex; align-items: center; gap: 6px; }
+  .cat-tool-label { font-size: 11px; color: var(--fg-faint); text-transform: uppercase; letter-spacing: .06em; }
+  .cat-select { font-size: 12.5px; padding: 6px 10px; border-radius: 8px;
+    background: var(--surface-sunk); border: 1px solid var(--border); color: var(--fg); cursor: pointer; }
+  .cat-viewtoggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .cat-viewbtn { display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 30px; background: var(--surface); border: 0; cursor: pointer; color: var(--fg-muted); }
+  .cat-viewbtn:hover { color: var(--fg); }
+  .cat-viewbtn.is-active { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--fg); }
+  .cat-viewbtn svg { width: 15px; height: 15px; }
+
+  /* ── list view — the same card laid out as a horizontal row ── */
+  .cat-list { display: flex; flex-direction: column; gap: 8px; }
+  .cat-list .cat-card { flex-direction: row; align-items: stretch; }
+  .cat-list .cat-cover { width: 108px; height: auto; flex: 0 0 108px; }
+  .cat-list .cat-body { padding: 10px 14px; gap: 3px; }
+  .cat-list .cat-sub { -webkit-line-clamp: 1; }
+  .cat-list .cat-src { margin-top: 4px; }
 </style>
 
 <div class="cat-wrap" x-data="catalogPage()" x-init="init()">
@@ -100,7 +128,6 @@
   <div class="cat-search">
     <input type="text" x-model="q" @input.debounce.400ms="resetAndLoad()"
            placeholder="Search the catalog…  (title / description)" />
-    <span class="cat-count" x-text="countLabel()"></span>
   </div>
 
   {# ── facets (server-rendered options) ── #}
@@ -126,27 +153,57 @@
     </div>
   </div>
 
-  {# ── featured (themed strips) ── #}
-  <div x-show="sections.length" x-cloak class="cat-featured">
-    <template x-for="(sec, si) in sections" :key="'sec' + si">
-      <div class="cat-feat-section">
-        <div class="cat-feat-head">
-          <span class="cat-feat-kicker">Featured</span>
-          <span class="cat-feat-title" x-text="sec.title"></span>
-          <span class="cat-feat-sub" x-text="sec.subtitle"></span>
+  {# ── featured (themed strips) — sits in its own panel, set apart from
+       the browse grid below. #}
+  <div x-show="sections.length" x-cloak class="cat-featured-panel">
+    <div class="cat-featured">
+      <template x-for="(sec, si) in sections" :key="'sec' + si">
+        <div class="cat-feat-section">
+          <div class="cat-feat-head">
+            <span class="cat-feat-kicker">Featured</span>
+            <span class="cat-feat-title" x-text="sec.title"></span>
+            <span class="cat-feat-sub" x-text="sec.subtitle"></span>
+          </div>
+          <div class="cat-featured-row">
+            <template x-for="it in sec.items" :key="it.id">
+              <a class="cat-card cat-feat-card" :href="it.url" x-html="cardInner(it)"></a>
+            </template>
+          </div>
         </div>
-        <div class="cat-featured-row">
-          <template x-for="it in sec.items" :key="it.id">
-            <a class="cat-card cat-feat-card" :href="it.url" x-html="cardInner(it)"></a>
-          </template>
-        </div>
-      </div>
-    </template>
+      </template>
+    </div>
   </div>
 
-  {# ── browse grid ── #}
+  {# ── browse ── header (sort + view toggle) then the grid/list ── #}
   <div>
-    <div class="cat-grid">
+    <div class="cat-browse-head">
+      <span class="cat-browse-title">Browse</span>
+      <span class="cat-count" x-text="countLabel()"></span>
+      <span class="cat-browse-spacer"></span>
+
+      <span class="cat-tool">
+        <span class="cat-tool-label">Sort</span>
+        <select class="cat-select" x-model="sort" @change="resetAndLoad()">
+          <option value="">Default</option>
+          <option value="stars">Most popular</option>
+          <option value="recent">Recently updated</option>
+          <option value="name">Name (A–Z)</option>
+        </select>
+      </span>
+
+      <span class="cat-viewtoggle" role="group" aria-label="View mode">
+        <button class="cat-viewbtn" :class="view === 'grid' ? 'is-active' : ''"
+                @click="setView('grid')" title="Grid view" aria-label="Grid view">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        </button>
+        <button class="cat-viewbtn" :class="view === 'list' ? 'is-active' : ''"
+                @click="setView('list')" title="List view" aria-label="List view">
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>
+        </button>
+      </span>
+    </div>
+
+    <div :class="view === 'list' ? 'cat-list' : 'cat-grid'" style="margin-top: 14px;">
       <template x-for="(it, i) in items" :key="it.source + ':' + it.id + ':' + i">
         <a class="cat-card" :href="it.url" x-html="cardInner(it)"></a>
       </template>
@@ -166,11 +223,21 @@
 <script>
 function catalogPage() {
   return {
-    q: '', type: '', source: '',
+    q: '', type: '', source: '', sort: '',
+    view: 'grid',
     items: [], sections: [],
     page: 1, hasMore: false, total: 0, loading: false,
 
-    init() { this.loadFeatured(); this.resetAndLoad(); },
+    init() {
+      try { this.view = localStorage.getItem('op:catalog:view') || 'grid'; } catch (_) {}
+      this.loadFeatured();
+      this.resetAndLoad();
+    },
+
+    setView(v) {
+      this.view = v;
+      try { localStorage.setItem('op:catalog:view', v); } catch (_) {}
+    },
 
     async loadFeatured() {
       try {
@@ -185,6 +252,7 @@ function catalogPage() {
       if (this.q) p.set('q', this.q);
       if (this.type) p.set('type', this.type);
       if (this.source) p.set('source', this.source);
+      if (this.sort) p.set('sort', this.sort);
       p.set('page', String(this.page));
       return p.toString();
     },

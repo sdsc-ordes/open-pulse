@@ -544,10 +544,10 @@ def hub_catalog(request: Request) -> HTMLResponse:
 
 @router.get("/api/hub/catalog", dependencies=[Depends(maybe_require_auth)])
 def api_catalog(
-    type: str = "", source: str = "", q: str = "", page: int = 1
+    type: str = "", source: str = "", q: str = "", sort: str = "", page: int = 1
 ) -> dict[str, Any]:
     """A page of normalised catalog items across the in-scope stores."""
-    return catalog_mod.browse(type=type, source=source, q=q, page=page)
+    return catalog_mod.browse(type=type, source=source, q=q, sort=sort, page=page)
 
 
 @router.get("/api/hub/catalog/featured", dependencies=[Depends(maybe_require_auth)])
