@@ -232,7 +232,7 @@ function catalogPage() {
       return `
         <div class="cat-cover" style="background:${this.cover(it.id)}">
           <div class="cat-cover-pat ${pat}"></div>
-          <span class="cat-cover-type">${this._esc(it.type)}</span>
+          <span class="cat-cover-type">${it.emoji ? it.emoji + ' ' : ''}${this._esc(it.type)}</span>
           ${logo}
         </div>
         <div class="cat-body">
