@@ -262,58 +262,55 @@ def browse(
     return {"items": items[:page_size], "page": page, "has_more": has_more, "total": total}
 
 
-def featured(limit: int = 8) -> list[dict[str, Any]]:
-    """One curated highlight strip, sourced from the knowledge graph.
+# SDSC featured plan: (collection, search term, sort clause, how many to take).
+# Mixes entity types so the strip shows SDSC's software, datasets and models
+# — not only repositories. Repos are filtered to SDSC-owned (see below).
+_SDSC_FEATURED_PLAN: list[tuple[str, str, str, int]] = [
+    ("github_repos", "sdsc", "stargazers_count:desc", 6),
+    ("huggingface_datasets", "SDSC", "", 2),
+    ("huggingface_models", "SDSC", "", 2),
+    ("zenodo_records", "sdsc", "downloads:desc", 2),
+]
 
-    Returns ``[{title, subtitle, items}]`` — the EPFL research-software row.
-    Comes back empty when Neo4j is unreachable, so the page degrades
-    gracefully to the browse grid."""
-    sections = [
-        _featured_repo_section(
-            "EPFL research software",
-            "Most-starred repositories owned by EPFL organisations",
-            "MATCH (o:Org)-[:OWNS]->(r:Repo) WHERE toLower(o.login) CONTAINS 'epfl' "
-            "OPTIONAL MATCH (r)<-[:STARRED]-(u:User) "
-            "WITH o, r, count(DISTINCT u) AS stars WHERE stars > 0 "
-            "RETURN o.name AS org, r.full_name AS repo, stars AS value "
-            f"ORDER BY stars DESC, repo LIMIT {int(limit)}",
-            icon="★",
-        ),
-    ]
-    return [s for s in sections if s["items"]]
+_SOURCE_BY_COLLECTION = {s["collection"]: s for s in _SOURCES}
 
 
-def _featured_repo_section(
-    title: str, subtitle: str, cypher: str, icon: str
-) -> dict[str, Any]:
-    """Run a repo-ranking Cypher query and shape it into a featured section.
+def featured(limit: int = 10) -> list[dict[str, Any]]:
+    """One curated highlight strip showcasing SDSC output across entity types.
 
-    The query must yield ``repo`` (full_name) and ``value`` columns, and may
-    optionally yield ``org`` (used as the card subtitle). Best-effort: any
-    Neo4j failure yields an empty ``items`` list so the caller can drop it."""
-    try:
-        from ..routes.ai_tools import run_tool  # lazy: avoid import cycle
-
-        res = run_tool("run_cypher", {"query": cypher})
-        rows = res.get("rows", []) if isinstance(res, dict) else []
-    except Exception as exc:  # noqa: BLE001 — featured is best-effort
-        log.info("catalog featured query failed (%s): %s", title, exc)
-        rows = []
-
-    items: list[dict[str, Any]] = []
-    for r in rows:
-        full = str(r.get("repo") or "").replace("https://github.com/", "")
-        if not full:
+    Pulls SDSC-affiliated software, datasets and models straight from the
+    index and interleaves them so the row reads as a mix of types rather than
+    a wall of repositories. Returns ``[]`` (page degrades to the browse grid)
+    when nothing matches."""
+    buckets: list[list[dict[str, Any]]] = []
+    for coll, q, sort, take in _SDSC_FEATURED_PLAN:
+        s = _SOURCE_BY_COLLECTION.get(coll)
+        if not s or not ddb.is_browsable(coll):
             continue
-        items.append({
-            "id": full, "title": full.rsplit("/", 1)[-1],
-            "subtitle": str(r.get("org") or full.split("/", 1)[0]),
-            "type": "repo", "emoji": _TYPE_EMOJI["repo"],
-            "source": "github_repos", "source_label": "GitHub",
-            "logo_url": _logo_for("github.com"), "url": "/hub/github.com/" + full,
-            "badges": [{"icon": icon, "label": _num(r.get("value"))}], "featured": True,
-        })
-    return {"title": title, "subtitle": subtitle, "items": items}
+        res = ddb.list_rows(coll, page=1, size=max(take * 4, take), q=q, sort=sort) or {}
+        cols = res.get("columns", [])
+        items = [_item(s, r, cols) for r in res.get("rows", [])]
+        if coll == "github_repos":
+            # ``q=sdsc`` also matches the description — keep only SDSC-*owned*
+            # repos so the strip stays on-brand.
+            items = [it for it in items if "sdsc" in it.get("url", "").lower()]
+        for it in items[:take]:
+            it["featured"] = True
+        buckets.append(items[:take])
+
+    merged: list[dict[str, Any]] = []
+    for i in range(max((len(b) for b in buckets), default=0)):
+        for b in buckets:
+            if i < len(b):
+                merged.append(b[i])
+    merged = merged[:limit]
+    if not merged:
+        return []
+    return [{
+        "title": "From the Swiss Data Science Center",
+        "subtitle": "Software, datasets and models from SDSC",
+        "items": merged,
+    }]
 
 
 # ── DuckDB fallback entity (for items no resolver knows) ───────────────────
