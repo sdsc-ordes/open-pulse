@@ -32,6 +32,10 @@ class Fact:
     href: str = ""
     value_list: tuple[str, ...] = ()
     value_links: tuple[tuple[str, str], ...] = ()
+    source: str = ""
+    """Provenance tag driving a small source chip in the UI:
+    ``"rdf"`` (SPARQL / Oxigraph), ``"index"`` (GME payload via Qdrant),
+    ``"graph"`` (Neo4j). Empty for synthetic / audit facts."""
 
 
 @dataclass(frozen=True)

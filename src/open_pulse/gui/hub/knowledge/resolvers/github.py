@@ -104,24 +104,25 @@ def _enrich_user_or_org(login: str, entity: Entity | None) -> Entity | None:
 
     extra: list[Fact] = []
     # Order matches the headline list in _entity_body.html so the
-    # tiles show up at the top of the page.
+    # tiles show up at the top of the page. All sourced from Neo4j.
     if profile["kind"] == "Org":
         if profile["owned_repos"]:
-            extra.append(Fact(label="owned_repos", value=str(profile["owned_repos"])))
+            extra.append(Fact(label="owned_repos", value=str(profile["owned_repos"]), source="graph"))
         if profile["members"]:
-            extra.append(Fact(label="members", value=str(profile["members"])))
+            extra.append(Fact(label="members", value=str(profile["members"]), source="graph"))
     else:  # User
         if profile["contributed_to"]:
             extra.append(
-                Fact(label="contributed_to", value=str(profile["contributed_to"]))
+                Fact(label="contributed_to", value=str(profile["contributed_to"]), source="graph")
             )
         if profile["owned_repos"]:
-            extra.append(Fact(label="owned_repos", value=str(profile["owned_repos"])))
+            extra.append(Fact(label="owned_repos", value=str(profile["owned_repos"]), source="graph"))
         if profile["org_memberships"]:
             extra.append(
                 Fact(
                     label="org_memberships",
                     value=str(profile["org_memberships"]),
+                    source="graph",
                 )
             )
     # Add login as a fact too if the title is the name (otherwise the
@@ -132,6 +133,7 @@ def _enrich_user_or_org(login: str, entity: Entity | None) -> Entity | None:
                 label="login",
                 value=profile["login"],
                 href=f"https://github.com/{profile['login']}",
+                source="graph",
             )
         )
 
