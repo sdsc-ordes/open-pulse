@@ -36,46 +36,58 @@ log = logging.getLogger(__name__)
 _SOURCES: list[dict[str, Any]] = [
     {"collection": "github_repos", "type": "repo", "title": "name",
      "subtitle": "description", "ref": ["github.com/{owner}/{name}"],
-     "stars": "stargazers_count", "lang": "primary_language",
-     "license": "license_spdx", "date": "pushed_at"},
+     "stars": "stargazers_count", "metric2": "forks_count",
+     "lang": "primary_language", "license": "license_spdx", "date": "pushed_at"},
     {"collection": "gitlab_epfl_projects", "type": "repo", "title": "name",
      "subtitle": "description", "ref": ["{host}/{full_path}"],
-     "stars": "star_count", "date": "last_activity_at"},
+     "stars": "star_count", "metric2": "forks_count", "date": "last_activity_at"},
     {"collection": "gitlab_ethz_projects", "type": "repo", "title": "name",
      "subtitle": "description", "ref": ["{host}/{full_path}"],
-     "stars": "star_count", "date": "last_activity_at"},
+     "stars": "star_count", "metric2": "forks_count", "date": "last_activity_at"},
     {"collection": "huggingface_models", "type": "model", "title": "repo_id",
      "subtitle": "author", "ref": ["huggingface.co/{repo_id}"],
-     "stars": "likes", "lang": "pipeline_tag", "license": "license",
-     "date": "last_modified"},
+     "stars": "likes", "metric2": "downloads", "lang": "pipeline_tag",
+     "cat": "library_name", "license": "license", "date": "last_modified"},
     {"collection": "huggingface_datasets", "type": "dataset", "title": "repo_id",
      "subtitle": "author", "ref": ["huggingface.co/datasets/{repo_id}"],
-     "stars": "likes", "license": "license", "date": "last_modified"},
+     "stars": "likes", "metric2": "downloads", "license": "license",
+     "date": "last_modified"},
     {"collection": "huggingface_spaces", "type": "space", "title": "repo_id",
      "subtitle": "author", "ref": ["huggingface.co/spaces/{repo_id}"],
-     "stars": "likes", "lang": "sdk", "license": "license", "date": "last_modified"},
+     "stars": "likes", "lang": "sdk", "cat": "hardware", "license": "license",
+     "date": "last_modified"},
     {"collection": "zenodo_records", "type": "dataset", "title": "title",
      "subtitle": "description", "ref": ["{zenodo_id}", "{doi}"],
-     "stars": "downloads", "license": "license_id", "date": "publication_date"},
+     "hosts": ["zenodo.org", "doi.org"],
+     "stars": "downloads", "metric2": "views", "cat": "resource_type",
+     "license": "license_id", "date": "publication_date"},
     {"collection": "works", "type": "paper", "title": "title",
-     "subtitle": "abstract", "ref": ["{doi}", "{openalex_id}"],
+     "subtitle": "abstract", "sub_const": "Scholarly work",
+     "ref": ["{doi}", "{openalex_id}"], "hosts": ["doi.org", "openalex.org"],
      "date": "publication_year"},
     {"collection": "infoscience_articles", "type": "paper", "title": "title",
-     "subtitle": "journal", "ref": ["{infoscience_url}", "doi.org/{doi}"],
-     "lang": "language", "date": "publication_year"},
+     "subtitle": "journal", "sub_const": "EPFL Infoscience",
+     "ref": ["{infoscience_url}", "doi.org/{doi}"],
+     "hosts": ["infoscience.epfl.ch", "doi.org"],
+     "cat": "publication_type", "lang": "language", "date": "publication_year"},
     {"collection": "dockerhub", "type": "image", "title": "name",
      "subtitle": "description", "ref": ["hub.docker.com/r/{namespace}/{name}"],
-     "stars": "star_count", "date": "last_updated"},
+     "stars": "star_count", "metric2": "pull_count", "date": "last_updated"},
     {"collection": "github_organizations", "type": "org", "title": "name",
-     "subtitle": "description", "ref": ["github.com/{login}"],
-     "stars": "followers", "date": "updated_at"},
+     "subtitle": "description", "sub_const": "GitHub organisation",
+     "ref": ["github.com/{login}"], "stars": "followers",
+     "metric2": "public_repos", "place": "location", "date": "updated_at"},
     {"collection": "institutions", "type": "org", "title": "display_name",
-     "subtitle": "country_code", "ref": ["{ror}", "{openalex_id}"]},
+     "subtitle": "", "sub_const": "Research institution",
+     "ref": ["{ror}", "{openalex_id}"], "hosts": ["ror.org", "openalex.org"],
+     "place": "country_code"},
     {"collection": "github_users", "type": "person", "title": "name",
-     "subtitle": "bio", "ref": ["github.com/{login}"],
-     "stars": "followers", "date": "updated_at"},
+     "subtitle": "bio", "sub_const": "GitHub user", "ref": ["github.com/{login}"],
+     "stars": "followers", "metric2": "public_repos", "cat": "company",
+     "place": "location", "date": "updated_at"},
     {"collection": "authors", "type": "person", "title": "display_name",
-     "subtitle": "openalex_id", "ref": ["{orcid}", "{openalex_id}"]},
+     "subtitle": "", "sub_const": "Researcher", "ref": ["{orcid}", "{openalex_id}"],
+     "hosts": ["orcid.org", "openalex.org"]},
 ]
 
 # Heuristic fallbacks for any field a source doesn't declare.
@@ -89,6 +101,62 @@ _DATE_COLS = ("pushed_at", "last_modified", "updated_at", "last_activity_at",
               "publication_date", "publication_year", "last_updated", "created_at")
 
 _STAR_ICON = {"repo": "★", "model": "♥", "dataset": "↓", "image": "↓", "paper": "❝"}
+
+# Emoji shown in the card's type pill (and the entity-page hero).
+_TYPE_EMOJI = {
+    "repo": "📦", "model": "🤖", "dataset": "🗂️", "space": "🚀",
+    "paper": "📄", "image": "🐳", "org": "🏛️", "person": "👤",
+}
+
+# Icon for a secondary count metric, keyed by the source column it came from.
+_COUNT_ICONS = {
+    "forks_count": "⑂", "forks": "⑂",
+    "downloads": "↓", "downloads_all_time": "↓",
+    "views": "👁", "version_views": "👁",
+    "public_repos": "📦", "works_count": "📄",
+    "contributors": "🧑", "watchers_count": "👀", "open_issues_count": "◍",
+}
+
+
+def type_emoji(entity_type: str) -> str:
+    """Public accessor — the emoji for a catalog ``type`` (or a neutral dot)."""
+    return _TYPE_EMOJI.get((entity_type or "").lower(), "◆")
+
+
+def kind_emoji(kind: str) -> str:
+    """Emoji for an entity-page ``kind`` label (free text like "GitHub repo").
+
+    Used by the entity-detail hero, which only has the resolver's prose label
+    to go on — so we keyword-match rather than look up a catalog ``type``."""
+    k = (kind or "").lower()
+    rules = (
+        (("repo", "gitlab", "project"), "📦"),
+        (("model",), "🤖"),
+        (("dataset",), "🗂️"),
+        (("space",), "🚀"),
+        (("paper", "article", "publication", "work"), "📄"),
+        (("record", "deposit", "zenodo"), "🗂️"),
+        (("organization", "organisation", "institution", " org"), "🏛️"),
+        (("user", "person", "author", "researcher"), "👤"),
+        (("image", "container", "docker"), "🐳"),
+    )
+    for needles, emoji in rules:
+        if any(n in k for n in needles):
+            return emoji
+    return "🔗"
+
+
+def cover_gradient(seed: str) -> str:
+    """Deterministic 2-tone gradient for ``seed`` — mirrors the JS ``cover()``
+    in catalog.html so an entity's hero matches its catalog card."""
+    h = 2166136261
+    for ch in seed or "":
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF
+    a = h % 360
+    b = (a + 35 + ((h >> 9) % 90)) % 360
+    ang = (h >> 4) % 360
+    return f"linear-gradient({ang}deg, hsl({a} 62% 52%), hsl({b} 58% 38%))"
 
 
 # ── public API ─────────────────────────────────────────────────────────────
@@ -120,15 +188,38 @@ def facets() -> dict[str, Any]:
     }
 
 
+# UI sort key → which declared source column to order by, and direction.
+_SORT_FIELDS = {
+    "stars": ("stars", "desc"),
+    "recent": ("date", "desc"),
+    "name": ("title", "asc"),
+}
+
+
+def _sort_clause(source: dict[str, Any], sort: str) -> str:
+    """Map a UI sort key to a ``list_rows`` ``"col[:desc]"`` clause for this
+    source, using its declared stars / date / title column. Returns ``""`` for
+    the default order or when the source can't honour the key."""
+    field, direction = _SORT_FIELDS.get(sort, ("", ""))
+    if not field:
+        return ""
+    col = source.get(field)
+    if not col:
+        return ""
+    return f"{col}:desc" if direction == "desc" else str(col)
+
+
 def browse(
-    *, type: str = "", source: str = "", q: str = "", page: int = 1, page_size: int = 24
+    *, type: str = "", source: str = "", q: str = "", sort: str = "",
+    page: int = 1, page_size: int = 24,
 ) -> dict[str, Any]:
     """A page of normalised catalog items across the in-scope stores.
 
     ``source`` pins to one collection; ``type`` narrows the source set; ``q`` is
-    the per-store substring search. With no ``source`` the page pages each store
-    independently and interleaves — approximate (not a single global sort),
-    fine for a browse catalog and keeps every store reachable.
+    the per-store substring search; ``sort`` reorders by stars / recency / name
+    (mapped to each store's own column). With no ``source`` the page pages each
+    store independently and interleaves — approximate (not a single global
+    sort), fine for a browse catalog and keeps every store reachable.
     """
     page = max(1, int(page or 1))
     page_size = max(1, min(60, int(page_size or 24)))
@@ -143,7 +234,10 @@ def browse(
 
     if len(scope) == 1:
         s = scope[0]
-        res = ddb.list_rows(s["collection"], page=page, size=page_size, q=q) or {}
+        res = ddb.list_rows(
+            s["collection"], page=page, size=page_size, q=q,
+            sort=_sort_clause(s, sort),
+        ) or {}
         items = [_item(s, r, res.get("columns", [])) for r in res.get("rows", [])]
         return {"items": items, "page": page,
                 "has_more": page < (res.get("pages") or 1),
@@ -153,7 +247,9 @@ def browse(
     buckets: list[list[dict[str, Any]]] = []
     total, has_more = 0, False
     for s in scope:
-        res = ddb.list_rows(s["collection"], page=page, size=per, q=q) or {}
+        res = ddb.list_rows(
+            s["collection"], page=page, size=per, q=q, sort=_sort_clause(s, sort)
+        ) or {}
         cols = res.get("columns", [])
         buckets.append([_item(s, r, cols) for r in res.get("rows", [])])
         total += res.get("matched", res.get("total", 0)) or 0
@@ -166,37 +262,156 @@ def browse(
     return {"items": items[:page_size], "page": page, "has_more": has_more, "total": total}
 
 
-def featured(limit: int = 8) -> list[dict[str, Any]]:
-    """Curated highlights — most-starred EPFL-affiliated repos, from the graph.
-    Returns [] if Neo4j is unreachable (page degrades to the browse grid)."""
-    cypher = (
-        "MATCH (o:Org)-[:OWNS]->(r:Repo) WHERE toLower(o.login) CONTAINS 'epfl' "
-        "OPTIONAL MATCH (r)<-[:STARRED]-(u:User) "
-        "WITH o, r, count(DISTINCT u) AS stars WHERE stars > 0 "
-        "RETURN o.name AS org, r.full_name AS repo, stars "
-        f"ORDER BY stars DESC, repo LIMIT {int(limit)}"
-    )
-    try:
-        from ..routes.ai_tools import run_tool  # lazy: avoid import cycle
+# SDSC featured plan: (collection, search term, sort clause, how many to take).
+# Mixes entity types so the strip shows SDSC's software, datasets and models
+# — not only repositories. Repos are filtered to SDSC-owned (see below).
+_SDSC_FEATURED_PLAN: list[tuple[str, str, str, int]] = [
+    ("github_repos", "sdsc", "stargazers_count:desc", 6),
+    ("huggingface_datasets", "SDSC", "", 2),
+    ("huggingface_models", "SDSC", "", 2),
+    ("zenodo_records", "sdsc", "downloads:desc", 2),
+]
 
-        res = run_tool("run_cypher", {"query": cypher})
-        rows = res.get("rows", []) if isinstance(res, dict) else []
-    except Exception as exc:  # noqa: BLE001 — featured is best-effort
-        log.info("catalog featured query failed: %s", exc)
-        return []
+_SOURCE_BY_COLLECTION = {s["collection"]: s for s in _SOURCES}
 
-    items: list[dict[str, Any]] = []
-    for r in rows:
-        full = str(r.get("repo") or "").replace("https://github.com/", "")
-        if not full:
+
+def featured(limit: int = 10) -> list[dict[str, Any]]:
+    """One curated highlight strip showcasing SDSC output across entity types.
+
+    Pulls SDSC-affiliated software, datasets and models straight from the
+    index and interleaves them so the row reads as a mix of types rather than
+    a wall of repositories. Returns ``[]`` (page degrades to the browse grid)
+    when nothing matches."""
+    buckets: list[list[dict[str, Any]]] = []
+    for coll, q, sort, take in _SDSC_FEATURED_PLAN:
+        s = _SOURCE_BY_COLLECTION.get(coll)
+        if not s or not ddb.is_browsable(coll):
             continue
-        items.append({
-            "id": full, "title": full.rsplit("/", 1)[-1], "subtitle": str(r.get("org") or ""),
-            "type": "repo", "source": "github_repos", "source_label": "GitHub",
-            "logo_url": _logo_for("github.com"), "url": "/hub/github.com/" + full,
-            "badges": [{"icon": "★", "label": _num(r.get("stars"))}], "featured": True,
-        })
-    return items
+        res = ddb.list_rows(coll, page=1, size=max(take * 4, take), q=q, sort=sort) or {}
+        cols = res.get("columns", [])
+        items = [_item(s, r, cols) for r in res.get("rows", [])]
+        if coll == "github_repos":
+            # ``q=sdsc`` also matches the description — keep only SDSC-*owned*
+            # repos so the strip stays on-brand.
+            items = [it for it in items if "sdsc" in it.get("url", "").lower()]
+        for it in items[:take]:
+            it["featured"] = True
+        buckets.append(items[:take])
+
+    merged: list[dict[str, Any]] = []
+    for i in range(max((len(b) for b in buckets), default=0)):
+        for b in buckets:
+            if i < len(b):
+                merged.append(b[i])
+    merged = merged[:limit]
+    if not merged:
+        return []
+    return [{
+        "title": "From the Swiss Data Science Center",
+        "subtitle": "Software, datasets and models from SDSC",
+        "items": merged,
+    }]
+
+
+# ── DuckDB fallback entity (for items no resolver knows) ───────────────────
+# Catalog ``type`` → a human "kind" label for the entity-page hero.
+_KIND_LABELS = {
+    "repo": "Repository", "model": "Model", "dataset": "Dataset",
+    "space": "Space", "paper": "Publication", "image": "Container image",
+    "org": "Organisation", "person": "Person",
+}
+# Columns never worth showing as a fact on the fallback page.
+_FACT_SKIP_COLS = frozenset({
+    "raw", "ingested_at", "card_data", "dataset_info", "languages_json",
+    "keywords_json", "node_id", "sha", "readme_path",
+})
+
+
+def _candidate_sources(host: str) -> list[dict[str, Any]]:
+    """Sources that could own an entity on ``host`` — by a static template
+    prefix, a ``{host}`` placeholder, or an explicit ``hosts`` hint."""
+    host = (host or "").lower()
+    out: list[dict[str, Any]] = []
+    for s in _SOURCES:
+        if not ddb.is_browsable(s["collection"]):
+            continue
+        if host in {h.lower() for h in s.get("hosts", [])}:
+            out.append(s)
+            continue
+        for tmpl in s.get("ref") or []:
+            if tmpl.startswith("{"):
+                if "{host}" in tmpl:  # dynamic host (gitlab) — verify by row
+                    out.append(s)
+                    break
+            elif tmpl.split("/", 1)[0].lower() == host:
+                out.append(s)
+                break
+    return out
+
+
+def entity_from_ref(host: str, path: str) -> Any | None:
+    """Best-effort fallback entity built straight from a DuckDB row.
+
+    When no resolver knows a URL (Docker images, GitLab projects on a custom
+    host, HF datasets not yet in SPARQL/Qdrant, …) but the catalog *does* have
+    the row, render a basic page from that row instead of the wanted-list
+    placeholder. Returns an ``Entity`` or ``None`` if nothing matches."""
+    target = f"{host}/{path}".strip("/").lower()
+    # Each store searches a different column (HF on author, Docker on name,
+    # …), so try several path segments as the search token, most-distinctive
+    # first, until a rebuilt ref matches exactly.
+    skip = {"datasets", "spaces", "records", "r", "items", "server", "api", "core"}
+    tokens: list[str] = []
+    for seg in re.split(r"/", path):
+        if seg and seg.lower() not in skip and seg not in tokens:
+            tokens.append(seg)
+    if not tokens:
+        tokens = [host]
+    for s in _candidate_sources(host):
+        for token in tokens[:4]:
+            res = ddb.list_rows(s["collection"], page=1, size=50, q=token[:64]) or {}
+            cols = res.get("columns", [])
+            for row in res.get("rows", []):
+                ref = _build_ref(s.get("ref"), row)
+                if ref and _strip_scheme(ref).lower() == target:
+                    return _entity_from_row(s, row, cols, host)
+    return None
+
+
+def _entity_from_row(
+    source: dict[str, Any], row: dict[str, Any], columns: list[str], host: str
+) -> Any:
+    from .entity import Entity, Fact  # local import — avoid an import cycle
+
+    item = _item(source, row, columns)
+    ext = item["url"]
+    canonical = ext if ext.startswith("http") else "https://" + ext.lstrip("/")
+    if ext.startswith("/hub/"):
+        canonical = "https://" + ext[len("/hub/"):]
+
+    facts: list[Fact] = []
+    cols = {c.lower(): c for c in columns}
+    for col in columns:
+        if col.lower() in _FACT_SKIP_COLS or col.startswith("_"):
+            continue
+        v = _val(row, cols.get(col.lower()))
+        if v is None:
+            continue
+        sval = str(v)
+        if not sval or len(sval) > 400:
+            continue
+        href = sval if sval.startswith("http") else ""
+        facts.append(Fact(label=col, value=sval[:400], href=href, source="index"))
+
+    return Entity(
+        ref_url=canonical,
+        host=host,
+        title=item["title"],
+        subtitle=item["subtitle"],
+        kind=_KIND_LABELS.get(source["type"], source["type"].title()),
+        facts=facts,
+        enriched=True,
+    )
 
 
 # ── normalisation ─────────────────────────────────────────────────────────
@@ -210,11 +425,14 @@ def _item(source: dict[str, Any], row: dict[str, Any], columns: list[str]) -> di
         generic = _field(source, "url", row, cols, _URL_COLS)
         ref = _strip_scheme(generic) if generic else None
     url = "/hub/" + ref if ref else f"/hub/c/{source['collection']}?q={title}"
+    subtitle = _field(source, "subtitle", row, cols, _SUBTITLE_COLS)
+    subtitle = str(subtitle)[:160] if subtitle else source.get("sub_const", "")
     return {
         "id": str(ref or title)[:200],
         "title": str(title)[:140],
-        "subtitle": str(_field(source, "subtitle", row, cols, _SUBTITLE_COLS) or "")[:160],
+        "subtitle": subtitle,
         "type": source["type"],
+        "emoji": _TYPE_EMOJI.get(source["type"], "◆"),
         "source": source["collection"],
         "source_label": label,
         "logo_url": logo,
@@ -238,19 +456,50 @@ def _field(source: dict, key: str, row: dict, cols: dict, fallback: tuple[str, .
 
 def _badges(source: dict, row: dict, cols: dict) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
+
+    # Primary metric (stars / likes / followers / downloads).
     stars = _field(source, "stars", row, cols, _STAR_COLS)
     if isinstance(stars, (int, float)) and stars > 0:
         out.append({"icon": _STAR_ICON.get(source["type"], "★"), "label": _num(stars)})
+
+    # Secondary count metric (forks, downloads, public repos, views, …).
+    m2col = source.get("metric2")
+    m2 = _val(row, cols.get(str(m2col).lower())) if m2col else None
+    if isinstance(m2, (int, float)) and m2 > 0:
+        out.append({"icon": _COUNT_ICONS.get(m2col, "#"), "label": _num(m2)})
+
+    # Language / framework / SDK.
     lang = _field(source, "lang", row, cols, _LANG_COLS)
     if lang:
         out.append({"icon": "", "label": str(lang)[:18], "kind": "lang"})
+
+    # Category — resource type, publication type, library, hardware, company.
+    catcol = source.get("cat")
+    cat = _val(row, cols.get(str(catcol).lower())) if catcol else None
+    if cat and str(cat).lower() not in {"none", "null", "other", "unknown"}:
+        out.append({"icon": "", "label": str(cat)[:20], "kind": "cat"})
+
+    # License.
     lic = _field(source, "license", row, cols, _LICENSE_COLS)
     if lic and str(lic).lower() not in {"none", "null", "other", "unknown"}:
         out.append({"icon": "", "label": str(lic)[:16], "kind": "license"})
+
+    # Place — a location string or a country code.
+    placecol = source.get("place")
+    place = _val(row, cols.get(str(placecol).lower())) if placecol else None
+    if place:
+        is_country = "country" in str(placecol).lower()
+        out.append({
+            "icon": "🌍" if is_country else "📍",
+            "label": (str(place).upper() if is_country else str(place))[:22],
+        })
+
+    # Last-updated / publication date.
     dt = _field(source, "date", row, cols, _DATE_COLS)
     if dt:
         out.append({"icon": "⏱", "label": str(dt)[:10]})
-    return out[:4]
+
+    return out[:5]
 
 
 def _build_ref(templates: list[str] | None, row: dict) -> str | None:

@@ -544,16 +544,16 @@ def hub_catalog(request: Request) -> HTMLResponse:
 
 @router.get("/api/hub/catalog", dependencies=[Depends(maybe_require_auth)])
 def api_catalog(
-    type: str = "", source: str = "", q: str = "", page: int = 1
+    type: str = "", source: str = "", q: str = "", sort: str = "", page: int = 1
 ) -> dict[str, Any]:
     """A page of normalised catalog items across the in-scope stores."""
-    return catalog_mod.browse(type=type, source=source, q=q, page=page)
+    return catalog_mod.browse(type=type, source=source, q=q, sort=sort, page=page)
 
 
 @router.get("/api/hub/catalog/featured", dependencies=[Depends(maybe_require_auth)])
 def api_catalog_featured() -> dict[str, Any]:
-    """Curated research highlights for the featured row."""
-    return {"items": catalog_mod.featured()}
+    """Curated research highlights, grouped into themed featured strips."""
+    return {"sections": catalog_mod.featured()}
 
 
 @router.get(
@@ -774,6 +774,14 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
     async def run_resolver() -> None:
         try:
             entity = await asyncio.to_thread(registry.resolve, parsed, on_status)
+            if entity is None:
+                # No resolver knew this URL — fall back to a basic page
+                # built straight from the catalog's DuckDB row, if any
+                # (Docker images, GitLab projects, datasets, …).
+                on_status("No resolver match — checking the catalog index")
+                entity = await asyncio.to_thread(
+                    catalog_mod.entity_from_ref, parsed.host, parsed.path
+                )
         except Exception as exc:  # noqa: BLE001
             log.exception("resolve stream failed for %s", parsed.canonical_url)
             loop.call_soon_threadsafe(
@@ -825,7 +833,12 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
                     yield _sse_event("status", "No matches — queued in the wanted list")
                 else:
                     html = templates.get_template("hub/_entity_body.html").render(
-                        entity=entity, ref=parsed
+                        entity=entity,
+                        ref=parsed,
+                        hero_emoji=catalog_mod.kind_emoji(entity.kind),
+                        hero_gradient=catalog_mod.cover_gradient(
+                            entity.ref_url or entity.title
+                        ),
                     )
                     found = True
                     title = entity.title or parsed.display
