@@ -378,6 +378,38 @@ def entity_from_ref(host: str, path: str) -> Any | None:
     return None
 
 
+def _ref_tokens(path: str) -> list[str]:
+    """Distinctive path segments to use as DuckDB search tokens (stores
+    index different columns), most-specific first."""
+    skip = {"datasets", "spaces", "records", "r", "items", "server", "api", "core"}
+    tokens: list[str] = []
+    for seg in re.split(r"/", path):
+        if seg and seg.lower() not in skip and seg not in tokens:
+            tokens.append(seg)
+    return tokens
+
+
+def duckdb_collections_for_ref(host: str, path: str) -> list[str]:
+    """Which catalog (DuckDB) collections hold a row for this URL — the
+    presence-panel counterpart of :func:`entity_from_ref`."""
+    target = f"{host}/{path}".strip("/").lower()
+    tokens = _ref_tokens(path) or [host]
+    found: list[str] = []
+    for s in _candidate_sources(host):
+        matched = False
+        for token in tokens[:4]:
+            res = ddb.list_rows(s["collection"], page=1, size=50, q=token[:64]) or {}
+            for row in res.get("rows", []):
+                ref = _build_ref(s.get("ref"), row)
+                if ref and _strip_scheme(ref).lower() == target:
+                    found.append(s["collection"])
+                    matched = True
+                    break
+            if matched:
+                break
+    return found
+
+
 def _entity_from_row(
     source: dict[str, Any], row: dict[str, Any], columns: list[str], host: str
 ) -> Any:
