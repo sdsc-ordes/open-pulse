@@ -509,7 +509,7 @@ def hub_collection(request: Request, name: str, q: str = "") -> HTMLResponse:
         request,
         "hub/collection.html",
         {
-            "page": "hub",
+            "page": "sources",
             "collection_name": name,
             "initial_q": q,
             "label": label,
@@ -525,21 +525,26 @@ def hub_collection(request: Request, name: str, q: str = "") -> HTMLResponse:
     )
 
 
-# ── Catalog — visual, browsable view over the entities ─────────────────────
-# Declared before the catch-all ``/hub/{ref:path}`` so ``/hub/catalog`` is
+# ── Sources — per-store index cards + network leaderboards ─────────────────
+# Declared before the catch-all ``/hub/{ref:path}`` so ``/hub/sources`` is
 # reserved for this page.
 @router.get(
-    "/hub/catalog",
+    "/hub/sources",
     response_class=HTMLResponse,
     dependencies=[Depends(maybe_require_auth)],
 )
-def hub_catalog(request: Request) -> HTMLResponse:
-    """Catalog landing — featured highlights + a filterable browse grid."""
-    return templates.TemplateResponse(
-        request,
-        "hub/catalog.html",
-        {"page": "catalog", "facets": catalog_mod.facets()},
-    )
+def hub_sources(request: Request) -> HTMLResponse:
+    """Sources landing — the per-collection index cards (lazy
+    ``/api/hub/collections``) and the "Top across the network"
+    leaderboards. Collection detail lives at ``/hub/c/<name>``."""
+    return templates.TemplateResponse(request, "hub/sources.html", {"page": "sources"})
+
+
+# The catalog now lives on the Hub home (under the search). Keep the old
+# URL working for bookmarks / deep links — redirect to /hub.
+@router.get("/hub/catalog", include_in_schema=False)
+def hub_catalog() -> RedirectResponse:
+    return RedirectResponse(url="/hub", status_code=307)
 
 
 @router.get("/api/hub/catalog", dependencies=[Depends(maybe_require_auth)])
@@ -647,13 +652,12 @@ def hub_collection_stats(name: str) -> dict[str, Any]:
     dependencies=[Depends(maybe_require_auth)],
 )
 def hub_home(request: Request) -> HTMLResponse:
-    """Front-door for the knowledge surface — search + examples + stats.
+    """Front-door for the knowledge surface — search + the visual catalog.
 
-    The shell (search box + examples + lazy stat panels) renders
-    immediately. The Sources grid — whose per-collection counts can be
-    multi-second DuckDB ``COUNT(*)`` scans on a cold cache — is fetched
-    afterwards from :func:`hub_collections` so the page paints without
-    blocking on the count gather.
+    The search box + examples render immediately; the catalog section
+    (featured strips + browse grid) lazy-loads its cards client-side. The
+    per-source index cards and network leaderboards live on the Sources
+    page (see :func:`hub_sources`).
     """
     return templates.TemplateResponse(
         request,
@@ -661,6 +665,7 @@ def hub_home(request: Request) -> HTMLResponse:
         {
             "page": "hub",
             "examples": _HOME_EXAMPLES,
+            "facets": catalog_mod.facets(),
         },
     )
 
