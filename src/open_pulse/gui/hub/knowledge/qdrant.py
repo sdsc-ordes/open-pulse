@@ -361,6 +361,43 @@ def lookup_for_ref(
     return mentions, facts
 
 
+def label_for_collection(collection: str) -> str:
+    """Friendly display label for a collection name (for the presence panel)."""
+    return _BACKLINK_LABELS.get(collection, collection.replace("_", " "))
+
+
+def collections_for_ref(ref: HubRef, *, budget: float = 4.0) -> list[str]:
+    """Which Qdrant collections hold a point for this entity's URL / ids.
+
+    Scrolls the high-value collections in parallel with the same payload
+    candidate-key filter the resolver uses, keeping only those that return
+    at least one matching point. Bounded by ``budget`` seconds so the
+    "Present in" panel stays snappy."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    candidates = _candidate_keys(ref)
+    if not candidates:
+        return []
+    payload_filter = {"should": [{"key": f, "match": {"value": v}} for f, v in candidates]}
+    targets = [c for c, _ in _AUTOCOMPLETE_COLLECTIONS]
+    deadline = time.monotonic() + budget
+    present: list[str] = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_scroll, c, payload_filter, 1): c for c in targets}
+        for fut in as_completed(futures):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                points = fut.result(timeout=remaining)
+            except Exception:  # noqa: BLE001
+                continue
+            if points:
+                present.append(futures[fut])
+    return sorted(present)
+
+
 def _mention_from_payload(payload: dict[str, Any], collection: str) -> Mention:
     text = ""
     for f in _TEXT_FIELDS:
