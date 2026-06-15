@@ -102,18 +102,17 @@
   <div>
     <div class="card-title" style="margin-bottom: 8px;">Try one</div>
     <p class="card-meta" style="margin: 0 0 8px;">
-      High-activity GrimoireLab repositories that exercise the widest spread of
-      metrics — contributors, reviews, forks, stars, citations and more.
+      SDSC projects ingested in the data plane — contributors, reviews,
+      forks, stars and more.
     </p>
     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-      {# Picked by scoring the registry against the data plane: biopython lights
-         up every probed metric; the rest are the next-richest. #}
+      {# SDSC repos with the richest GrimoireLab git history in OpenSearch
+         (gimie has the most commits; the rest are the next-richest). #}
       {% for slug in [
-        'biopython/biopython',
-        'SwissDataScienceCenter/renku',
-        'SwissDataScienceCenter/renku-python',
-        'IQSS/dataverse',
-        'scikit-learn/scikit-learn',
+        'sdsc-ordes/gimie',
+        'sdsc-ordes/quitsh',
+        'sdsc-ordes/kg-llm-interface',
+        'sdsc-ordes/rdfpipe-rs',
       ] %}
         <a class="btn" href="/chaoss/github.com/{{ slug }}?window={{ default_window }}">{{ slug }}</a>
       {% endfor %}
