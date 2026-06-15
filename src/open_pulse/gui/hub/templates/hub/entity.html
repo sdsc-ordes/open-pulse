@@ -218,7 +218,12 @@ function hubStream(ref) {
     found: false,
     error: '',
     connect() {
-      const url = `/api/hub/resolve-stream/${ref.encoded_path}`;
+      let url = `/api/hub/resolve-stream/${ref.encoded_path}`;
+      // Pinned RDF graph (Settings → "RDF graph"). Sent as a query param
+      // because EventSource can't set custom headers. Empty → store default.
+      let graph = '';
+      try { graph = (window.opSecrets && window.opSecrets.get('rdf_graph')) || ''; } catch (_) {}
+      if (graph) url += (url.includes('?') ? '&' : '?') + 'graph=' + encodeURIComponent(graph);
       // `withCredentials` so the session cookie travels — otherwise
       // a non-public hub would 401 the EventSource.
       const es = new EventSource(url, { withCredentials: true });
