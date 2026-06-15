@@ -45,6 +45,7 @@ from ..knowledge import (
     manifest,
     normalize,
     opensearch,
+    presence,
     qdrant,
     registry,
     relations,
@@ -1371,6 +1372,26 @@ def hub_activity(request: Request, ref: str) -> HTMLResponse:
         request,
         "hub/_activity_body.html",
         {"stats": stats, "ref": parsed},
+    )
+
+
+@router.get(
+    "/api/hub/presence/{ref:path}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_presence(request: Request, ref: str) -> HTMLResponse:
+    """Render the "Present in" panel — which data-plane stores hold this
+    URL (RDF named graphs, Neo4j, OpenSearch, Qdrant). Mounts even when the
+    entity didn't resolve, so a not-yet-ingested URL gets a clear answer."""
+    parsed = normalize.parse_ref(ref)
+    if not parsed.is_known_host:
+        raise HTTPException(status_code=400, detail="hub URLs must include a host")
+    rows = qdrant.cached_panel(
+        "presence", parsed.canonical_url, lambda: presence.gather(parsed)
+    )
+    return templates.TemplateResponse(
+        request, "hub/_presence_body.html", {"rows": rows, "ref": parsed}
     )
 
 
