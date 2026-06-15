@@ -125,13 +125,15 @@
              is the trends view (charts over time); the live snapshot moved
              to Admin → Status. The Ontology link goes off-host to the
              open-pulse-ontology docs (configurable via HUB_ONTOLOGY_URL). #}
+          {# Canvas is intentionally hidden from the sidebar — the route is
+             still served at /canvas; re-add the tuple below to restore it:
+             ('/canvas', 'canvas', 'Canvas', 'M3 5h18v14H3z M7 9h2 M11 9h2 M15 9h2 M7 13h6 M7 17h10') #}
           {% set nav_explore = [
             ('/', 'overview', 'Overview', 'M3 17l4-6 5 4 4-7 5 9'),
             ('/hub', 'hub', 'Hub', 'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z'),
             ('/hub/sources', 'sources', 'Sources', 'M3 7l9-4 9 4-9 4-9-4z M3 12l9 4 9-4 M3 17l9 4 9-4'),
             ('/databases', 'databases', 'Query', 'M4 7c0-2 4-3 8-3s8 1 8 3v10c0 2-4 3-8 3s-8-1-8-3z M4 7c0 2 4 3 8 3s8-1 8-3 M4 12c0 2 4 3 8 3s8-1 8-3'),
             ('/agent', 'agent', 'Agent chat', 'M4 5h16v11H9l-5 4z M8 9.5h8 M8 12.5h5'),
-            ('/canvas', 'canvas', 'Canvas', 'M3 5h18v14H3z M7 9h2 M11 9h2 M15 9h2 M7 13h6 M7 17h10'),
             ('/chaoss', 'chaoss', 'CHAOSS metrics', 'M12 3v2 M12 19v2 M3 12h2 M19 12h2 M5.6 5.6l1.4 1.4 M17 17l1.4 1.4 M5.6 18.4l1.4-1.4 M17 7l1.4-1.4 M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z M12 11v3 M10.5 12.5h3'),
           ] %}
           {# Admin / operations — orchestration, observability, configuration.

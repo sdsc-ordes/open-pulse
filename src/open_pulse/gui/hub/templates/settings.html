@@ -82,6 +82,37 @@
     <p class="card-meta" style="margin-top: 8px;" x-show="models.length" x-text="models.length + ' models available with this key'"></p>
   </div>
 
+  <!-- RDF graph picker — scopes the hub's SPARQL probes on entity pages -->
+  <div class="card" x-data="graphPanel()" x-init="init()">
+    <div class="flex items-baseline">
+      <div class="card-title">RDF graph</div>
+      <span class="ml-auto card-meta" x-text="status"></span>
+    </div>
+    <p class="card-meta mt-1">
+      Which named graph the hub's RDF reads from on entity pages (facts, citations,
+      related-in-graph edges). Leave on <em>Store default</em> to keep current
+      behaviour. Click <em>Load graphs</em> to list the snapshots in the SPARQL
+      store, then pick one — it applies to your browser only.
+    </p>
+    <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap;">
+      <select class="mono" x-model="graph" @change="save()"
+              style="flex: 1; min-width: 260px; padding: 6px 10px; background: var(--surface-sunk); border: 1px solid var(--border); border-radius: 6px; color: var(--fg);">
+        <option value="">Store default</option>
+        <template x-if="graph && !graphs.some(g => g.iri === graph)">
+          <option :value="graph" x-text="graph + ' (saved)'"></option>
+        </template>
+        <template x-for="g in graphs" :key="g.iri">
+          <option :value="g.iri" x-text="g.label + ' — ' + (g.count || 0).toLocaleString() + ' triples'"></option>
+        </template>
+      </select>
+      <button class="btn" @click="loadGraphs()" :disabled="loading">
+        <span x-show="!loading">Load graphs</span>
+        <span x-show="loading" x-cloak>loading…</span>
+      </button>
+    </div>
+    <p class="card-meta" style="margin-top: 8px;" x-show="graphs.length" x-text="graphs.length + ' named graphs in the store'"></p>
+  </div>
+
   <!-- Export / import / wipe everything browser-local -->
   <div class="card tone-info" x-data="localSync()" x-init="refresh()">
     <div class="flex items-baseline">
@@ -245,6 +276,40 @@ function agentModelPanel() {
           .filter((id) => !/-(float32|bfloat16|fp8)$/i.test(id))
           .sort();
         if (this.models.length && !this.status) this.status = '';
+      } catch (e) { this.status = '⚠ ' + e.message; }
+      finally { this.loading = false; }
+    },
+  };
+}
+
+/* RDF graph picker. Stores the chosen named-graph IRI under
+   opSecrets['rdf_graph']; the entity page reads it and sends it as the
+   ?graph= param on the resolve stream so the SPARQL probes scope to it.
+   "Load graphs" hits /api/hub/graphs to list the store's named graphs. */
+function graphPanel() {
+  return {
+    graph: '',
+    graphs: [],
+    loading: false,
+    status: '',
+    init() {
+      this.graph = (window.opSecrets && window.opSecrets.get('rdf_graph')) || '';
+      window.addEventListener('op-secrets-changed', () => {
+        this.graph = (window.opSecrets && window.opSecrets.get('rdf_graph')) || '';
+      });
+    },
+    save() {
+      window.opSecrets.set('rdf_graph', this.graph || '');
+      this.status = this.graph ? 'pinned' : 'using store default';
+    },
+    async loadGraphs() {
+      this.loading = true; this.status = '';
+      try {
+        const r = await fetch('/api/hub/graphs', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        this.graphs = j.graphs || [];
+        if (!this.graphs.length) this.status = 'no named graphs found';
       } catch (e) { this.status = '⚠ ' + e.message; }
       finally { this.loading = false; }
     },
