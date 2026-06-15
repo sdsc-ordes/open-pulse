@@ -1,9 +1,6 @@
-{% extends "base.html" %}
-{% block title %}Catalog · Open Pulse{% endblock %}
-{% block heading %}Catalog{% endblock %}
-{% block subheading %}Browse the research entities across every store — software, datasets, papers, models, organisations and people — as a visual catalog. Each card opens its detail page.{% endblock %}
-
-{% block content %}
+{# Catalog section — featured strips + a filterable browse grid of cards
+   over every store. Included on the Hub home under the search; expects
+   ``facets`` in the render context (see catalog_mod.facets()). #}
 <style>
   .cat-wrap { display: flex; flex-direction: column; gap: 20px; }
 
@@ -127,7 +124,7 @@
   {# ── search ── #}
   <div class="cat-search">
     <input type="text" x-model="q" @input.debounce.400ms="resetAndLoad()"
-           placeholder="Search the catalog…  (title / description)" />
+           placeholder="Filter the catalog…  (title / description)" />
   </div>
 
   {# ── facets (server-rendered options) ── #}
@@ -313,4 +310,3 @@ function catalogPage() {
   };
 }
 </script>
-{% endblock %}
