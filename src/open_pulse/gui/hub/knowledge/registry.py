@@ -89,7 +89,14 @@ def resolve(ref: HubRef, on_status: StatusCallback | None = None) -> Entity | No
     if not ref.is_known_host:
         return None
 
-    cached = _cache_get(ref.canonical_url)
+    # The pinned RDF graph changes which facts come back, so it's part of
+    # the cache identity — otherwise switching graphs would serve the
+    # previously-cached entity.
+    from .stores import get_active_graph
+
+    cache_key = f"{get_active_graph()}\n{ref.canonical_url}"
+
+    cached = _cache_get(cache_key)
     if cached is not None:
         if on_status:
             on_status("Served from cache")
@@ -97,7 +104,7 @@ def resolve(ref: HubRef, on_status: StatusCallback | None = None) -> Entity | No
 
     entity = _resolve_uncached(ref, on_status)
     if entity is not None:
-        _cache_put(ref.canonical_url, entity)
+        _cache_put(cache_key, entity)
     return entity
 
 

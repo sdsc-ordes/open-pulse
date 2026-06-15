@@ -754,17 +754,31 @@ def hub_entity(request: Request, ref: str) -> HTMLResponse:
     "/api/hub/resolve-stream/{ref:path}",
     dependencies=[Depends(maybe_require_auth)],
 )
-async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
+async def resolve_stream(
+    request: Request, ref: str, graph: str = ""
+) -> StreamingResponse:
     """Stream resolution progress as Server-Sent Events.
 
     The resolver itself is synchronous (calls into SPARQL / Neo4j /
     Qdrant clients with their own blocking I/O), so we run it in a
     worker thread and bridge status callbacks back to the asyncio
     event loop via :func:`loop.call_soon_threadsafe`.
+
+    ``graph`` (query param) pins the RDF named graph the SPARQL probes
+    scope to — set per-browser from Settings. It travels as a query
+    param (not a header) because the client is an EventSource, which
+    can't send custom headers. Validated + applied via
+    :func:`stores.set_active_graph`; an empty / unknown value keeps the
+    store's default-graph behaviour.
     """
     parsed = normalize.parse_ref(ref)
     if not parsed.is_known_host:
         raise HTTPException(status_code=400, detail="hub URLs must include a host")
+
+    # Pin the graph in *this* async context so the copy that
+    # ``asyncio.to_thread`` hands the worker carries it into the
+    # SPARQL probes. Harmless no-op when unset / malformed.
+    stores.set_active_graph(graph)
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
@@ -1373,6 +1387,23 @@ def hub_activity(request: Request, ref: str) -> HTMLResponse:
         "hub/_activity_body.html",
         {"stats": stats, "ref": parsed},
     )
+
+
+@router.get("/api/hub/graphs", dependencies=[Depends(maybe_require_auth)])
+def hub_graphs() -> dict[str, Any]:
+    """List the SPARQL store's named graphs for the hub graph picker.
+
+    Each entry: ``{iri, count, label}`` where ``label`` is the compact
+    part after ``/graph/``. Cached briefly via the panel cache."""
+    def _gather() -> list[dict[str, Any]]:
+        out = []
+        for g in stores.list_named_graphs():
+            iri = g["iri"]
+            label = iri.split("/graph/", 1)[-1] if "/graph/" in iri else iri
+            out.append({"iri": iri, "count": g["count"], "label": label})
+        return out
+
+    return {"graphs": qdrant.cached_panel("graphs", "*", _gather)}
 
 
 @router.get(
