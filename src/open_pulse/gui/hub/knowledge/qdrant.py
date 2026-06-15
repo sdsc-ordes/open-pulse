@@ -366,13 +366,15 @@ def label_for_collection(collection: str) -> str:
     return _BACKLINK_LABELS.get(collection, collection.replace("_", " "))
 
 
-def collections_for_ref(ref: HubRef, *, budget: float = 4.0) -> list[str]:
+def collections_for_ref(ref: HubRef, *, budget: float = 9.0) -> list[str]:
     """Which Qdrant collections hold a point for this entity's URL / ids.
 
     Scrolls the high-value collections in parallel with the same payload
     candidate-key filter the resolver uses, keeping only those that return
-    at least one matching point. Bounded by ``budget`` seconds so the
-    "Present in" panel stays snappy."""
+    at least one matching point. The worker pool is sized to clear the
+    whole target set in ~two waves and the budget is generous, so a cold
+    Qdrant doesn't drop the entity's primary collection (the result is
+    cached by the caller, so a partial cold read would otherwise stick)."""
     import time
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -383,7 +385,7 @@ def collections_for_ref(ref: HubRef, *, budget: float = 4.0) -> list[str]:
     targets = [c for c, _ in _AUTOCOMPLETE_COLLECTIONS]
     deadline = time.monotonic() + budget
     present: list[str] = []
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=min(16, len(targets))) as pool:
         futures = {pool.submit(_scroll, c, payload_filter, 1): c for c in targets}
         for fut in as_completed(futures):
             remaining = deadline - time.monotonic()
