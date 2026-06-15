@@ -3,8 +3,8 @@
 {% block heading %}Hub{% endblock %}
 {% block subheading %}
   Every resource the data plane knows about, addressable by its URL.
-  Type the address after <span class="kbd">/hub/</span> and the page
-  will appear.
+  Look one up below, or browse the catalog of software, datasets, papers,
+  models, organisations and people.
 {% endblock %}
 {% block headeractions %}
   <a class="btn btn-ghost" href="/hub/wanted">Backlog →</a>
@@ -75,7 +75,8 @@
       Type to search across GitHub, HuggingFace, Zenodo, Infoscience, ROR,
       OpenAlex, ETHZ, and ORCID. Or paste a URL directly — scheme and
       <span class="kbd">www.</span> are stripped automatically. Unknown
-      URLs queue in the <a href="/hub/wanted">backlog</a>.
+      URLs queue in the <a href="/hub/wanted">backlog</a>. Browse every
+      source in <a href="/hub/sources">Sources</a>.
     </p>
   </div>
 
@@ -92,53 +93,15 @@
     </div>
   </div>
 
-  {# ── Collection grid — first per UX feedback. Each tile is the
-        primary click target into /hub/c/<name>; a secondary ↗ link
-        in the corner opens the upstream source homepage. #}
+  {# ── Catalog — featured strips + a filterable browse grid of cards.
+        The per-source index cards and network leaderboards now live in
+        the Sources section (sidebar). #}
   <div>
-    <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;">
-      <div class="card-title">Sources</div>
-      <span class="card-meta">point counts from gme-qdrant · refreshed every minute</span>
+    <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px;">
+      <div class="card-title">Catalog</div>
+      <span class="card-meta">every entity across the stores, as a visual catalog</span>
     </div>
-    {# Lazy-loaded so the per-collection DuckDB counts don't block the
-       first paint of the page. One fetch returns the whole ranked tile
-       set as a server-rendered fragment (the heat tiers need the global
-       max across all collections, so this can't be a per-tile fan-out).
-       Mirrors the hubTopPanel pattern used by the leaderboards below. #}
-    <div x-data="hubSources()" x-init="load()">
-      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 10px;">
-        <span class="hub-spinner"></span>
-        <span class="card-meta">counting entries across sources…</span>
-      </div>
-      <div x-show="!loading" x-html="html"></div>
-    </div>
-  </div>
-
-  {# ── Top across the network — leaderboards, after the source grid
-        per UX feedback. Lazy-loaded so they don't slow the first
-        paint of the sources. #}
-  <div>
-    <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;">
-      <div class="card-title">Top across the network</div>
-      <span class="card-meta">aggregated from Neo4j + Qdrant · cached for an hour in DuckDB</span>
-    </div>
-    <div class="grid-tiles" x-data>
-      {% for topic, msg in [
-        ('github_orgs', 'crunching org repo counts…'),
-        ('contributors', 'finding most-active contributors…'),
-        ('languages', 'sampling primary languages…'),
-        ('countries', 'sampling ROR countries…'),
-        ('repos_by_contributors', 'ranking repos by community…'),
-        ('publication_years', 'sampling Infoscience publication years…'),
-      ] %}
-        <div x-data="hubTopPanel('{{ topic }}')" x-init="load()">
-          <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 10px;">
-            <span class="hub-spinner"></span><span class="card-meta">{{ msg }}</span>
-          </div>
-          <div x-show="!loading" x-html="html"></div>
-        </div>
-      {% endfor %}
-    </div>
+    {% include "hub/_catalog_section.html" %}
   </div>
 
 </div>
@@ -266,56 +229,6 @@ function hubSearch() {
       const v = this.normalize(this.value);
       if (!v) return;
       window.location.href = '/hub/' + v;
-    },
-  };
-}
-
-// Lazy-loaded Sources grid. One fetch returns the whole ranked tile
-// set as a server-rendered fragment (the heat tiers need the global
-// max across all collections, so this is one call, not per-tile). The
-// fragment itself renders the 'Qdrant unreachable' warn card when the
-// gather came back empty; a failed fetch degrades to a retry hint.
-function hubSources() {
-  return {
-    loading: true,
-    html: '',
-    async load() {
-      try {
-        const r = await fetch('/api/hub/collections', { credentials: 'include' });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        this.html = (await r.text()).trim();
-      } catch (e) {
-        console.warn('hub sources failed:', e);
-        this.html =
-          '<div class="card tone-warn">' +
-          '<div class="card-title">Couldn’t load sources</div>' +
-          '<p style="margin: 6px 0 0;">The source counts failed to load. ' +
-          'Refresh to retry.</p></div>';
-      } finally {
-        this.loading = false;
-      }
-    },
-  };
-}
-
-// Lazy-loaded leaderboard panel for /api/hub/stats/<topic>. Each
-// instance fetches once on init and renders the returned HTML.
-function hubTopPanel(topic) {
-  return {
-    topic: topic,
-    loading: true,
-    html: '',
-    async load() {
-      try {
-        const r = await fetch(`/api/hub/stats/${this.topic}`, { credentials: 'include' });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        this.html = (await r.text()).trim();
-      } catch (e) {
-        console.warn(`top stats ${this.topic} failed:`, e);
-        this.html = '';
-      } finally {
-        this.loading = false;
-      }
     },
   };
 }
