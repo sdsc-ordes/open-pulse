@@ -60,18 +60,15 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
-# Featured / example URLs surfaced on the landing page. Picked so a
-# visitor can click straight into a working entity even before they
-# know what to search for.
+# Featured / example URLs surfaced on the landing page. A small, diverse
+# set of SDSC entities so a visitor can click straight into a working
+# entity — software, dataset, model, deposit — before they know what to
+# search for.
 _HOME_EXAMPLES: tuple[tuple[str, str], ...] = (
-    ("github.com/LuckySB/s6-overlay", "GitHub repository"),
-    ("zenodo.org/records/4905618", "Zenodo deposit"),
-    ("ror.org/02s6k3f65", "EPFL (ROR)"),
-    ("huggingface.co/bigscience/bloom", "HuggingFace model"),
-    (
-        "infoscience.epfl.ch/entities/publication/fced83fa-5977-4b2e-b7b1-dad4ee87a8e1",
-        "EPFL publication",
-    ),
+    ("github.com/sdsc-ordes/gimie", "Software"),
+    ("huggingface.co/datasets/SDSC/digiwild-dataset", "Dataset"),
+    ("huggingface.co/SDSC/open-pulse-graph-classifier", "Model"),
+    ("zenodo.org/records/17225715", "Zenodo deposit"),
 )
 
 # Per-source presentation: homepage link + short description used
