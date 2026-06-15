@@ -8,7 +8,9 @@ readable.
 
 from __future__ import annotations
 
+import contextvars
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -16,6 +18,28 @@ import httpx
 from ..auth import get_settings
 
 log = logging.getLogger(__name__)
+
+# Per-request RDF named graph the hub should scope its SPARQL probes to.
+# Empty → query the store's default graph (today's behaviour). Set per
+# request from the ``graph`` query param on the resolve stream; propagates
+# into the worker thread because ``asyncio.to_thread`` copies the context.
+_active_graph: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "op_active_graph", default=""
+)
+# An RDF graph IRI we'll splice into ``GRAPH <...>`` — keep it to safe IRI
+# characters so the value (which originates in the browser) can't break out
+# of the angle brackets and inject SPARQL.
+_GRAPH_IRI_RE = re.compile(r"^https?://[^\s<>{}\"'`]+$")
+
+
+def set_active_graph(iri: str) -> None:
+    """Pin the named graph for SPARQL probes in this context (or clear it)."""
+    iri = (iri or "").strip()
+    _active_graph.set(iri if _GRAPH_IRI_RE.match(iri) else "")
+
+
+def get_active_graph() -> str:
+    return _active_graph.get()
 
 # Neo4j 5.x emits a notification for every property name in a WHERE
 # clause that no node in the database carries. Our defensive OR-filter
@@ -100,6 +124,28 @@ def sparql_select(query: str) -> list[dict[str, Any]]:
     return list((body.get("results") or {}).get("bindings") or [])
 
 
+def list_named_graphs() -> list[dict[str, Any]]:
+    """Named graphs in the SPARQL store, with triple counts (largest first).
+
+    Powers the hub's graph picker. Returns ``[{"iri", "count"}, ...]`` or an
+    empty list when the store is unreachable."""
+    rows = sparql_select(
+        "SELECT ?g (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } } "
+        "GROUP BY ?g ORDER BY DESC(?n)"
+    )
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        iri = r.get("g", {}).get("value", "")
+        if not iri:
+            continue
+        try:
+            n = int(r.get("n", {}).get("value") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        out.append({"iri": iri, "count": n})
+    return out
+
+
 def neo4j_run(
     cypher: str, params: dict[str, Any] | None = None
 ) -> list[dict[str, Any]]:
@@ -153,7 +199,14 @@ def sparql_describe(subject_iri: str, limit: int = 200) -> list[dict[str, Any]]:
     Used by every resolver as the first probe — if the store has any
     statements about the canonical URL, the entity counts as known.
     """
-    query = f"SELECT ?p ?o WHERE {{ <{subject_iri}> ?p ?o }} LIMIT {int(limit)}"
+    graph = get_active_graph()
+    if graph:
+        query = (
+            f"SELECT ?p ?o WHERE {{ GRAPH <{graph}> "
+            f"{{ <{subject_iri}> ?p ?o }} }} LIMIT {int(limit)}"
+        )
+    else:
+        query = f"SELECT ?p ?o WHERE {{ <{subject_iri}> ?p ?o }} LIMIT {int(limit)}"
     return sparql_select(query)
 
 
