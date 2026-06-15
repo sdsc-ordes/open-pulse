@@ -13,7 +13,6 @@ import logging
 from typing import Any
 
 from . import opensearch as os_mod
-from . import qdrant
 from .normalize import HubRef
 from .stores import neo4j_run, sparql_select
 
@@ -105,20 +104,6 @@ def _opensearch(ref: HubRef) -> dict[str, Any]:
             "present": present, "summary": summary, "items": items}
 
 
-def _qdrant(ref: HubRef) -> dict[str, Any]:
-    present, summary, items = False, "not in any vector collection", []
-    try:
-        cols = qdrant.collections_for_ref(ref)
-        if cols:
-            present = True
-            items = [{"label": qdrant.label_for_collection(c), "detail": c} for c in cols]
-            summary = f"{len(cols)} collection" + ("" if len(cols) == 1 else "s")
-    except Exception as exc:  # noqa: BLE001
-        log.info("presence qdrant failed: %s", exc)
-    return {"key": "qdrant", "label": "Vector index (Qdrant)",
-            "present": present, "summary": summary, "items": items}
-
-
 def _duckdb(ref: HubRef) -> dict[str, Any]:
     present, summary, items = False, "not in the catalog index", []
     try:
@@ -136,12 +121,17 @@ def _duckdb(ref: HubRef) -> dict[str, Any]:
 
 
 def gather(ref: HubRef) -> list[dict[str, Any]]:
-    """A presence row per store: RDF, Neo4j, OpenSearch, Qdrant, DuckDB.
+    """A presence row per store: RDF, Neo4j, OpenSearch, DuckDB catalog.
 
     Each row is ``{key, label, present, summary, items}``. Returns ``[]``
-    only for an unknown host — otherwise always five rows, so the panel can
+    only for an unknown host — otherwise always four rows, so the panel can
     state plainly which stores do and don't hold the entity (e.g. a repo
-    that's only in the catalog index shows the other stores as absent)."""
+    that's only in the catalog index shows the other stores as absent).
+
+    Qdrant is intentionally omitted: filtering its large collections by a
+    non-indexed URL field scans server-side and times out intermittently,
+    which would surface a misleading "absent". The DuckDB catalog row
+    already answers "is this entity indexed at all"."""
     if not ref.is_known_host:
         return []
-    return [_rdf(ref), _neo4j(ref), _opensearch(ref), _qdrant(ref), _duckdb(ref)]
+    return [_rdf(ref), _neo4j(ref), _opensearch(ref), _duckdb(ref)]
