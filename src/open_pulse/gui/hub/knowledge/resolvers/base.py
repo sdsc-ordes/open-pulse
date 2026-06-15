@@ -148,13 +148,24 @@ _RELATION_PREDICATES: dict[str, tuple[str, str]] = {
     "publisher": ("published by", "Org"),
     "funder": ("funded by", "Org"),
     "isPartOf": ("part of", ""),
+    # Cited / referenced works — usually DOI IRIs that resolve to a
+    # publication entity, so surface them as graph edges rather than a
+    # wall of external DOI links in the Facts table.
+    "citation": ("cites", "Publication"),
+    "cites": ("cites", "Publication"),
+    "references": ("references", "Publication"),
+    "isBasedOn": ("based on", "Publication"),
 }
 
-# Hosts with a dedicated resolver — only these get an in-hub link from an RDF
-# object IRI; everything else stays an external link (still a graph edge).
+# Hosts that resolve to a hub entity page — these get an in-hub link from an
+# RDF object IRI; everything else stays an external link (still a graph edge).
+# doi.org / openalex.org / orcid.org resolve via the publication + author
+# stores (DuckDB ``works`` / ``infoscience_articles`` / ``authors`` are keyed
+# on the full DOI / OpenAlex / ORCID URL).
 _RESOLVABLE_HOSTS = frozenset({
     "github.com", "gitlab.com", "zenodo.org", "ror.org",
     "infoscience.epfl.ch", "huggingface.co",
+    "doi.org", "openalex.org", "orcid.org",
 })
 
 # Cap RDF-derived graph edges so an org that ``owns`` thousands of repos can't
