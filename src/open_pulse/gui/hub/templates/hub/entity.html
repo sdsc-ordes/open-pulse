@@ -54,6 +54,23 @@
 
   <div x-show="done" x-html="result"></div>
 
+  {# "Present in" — which stores hold this URL. Mounts on `done`
+     regardless of `found`, so an un-ingested URL still gets a clear
+     answer (every store shown absent) above the wanted-list form. #}
+  <template x-if="done">
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "presence", "Present in")' x-init="load()"
+         x-show="loading || html.length > 0">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
+        <span class="hub-spinner" aria-hidden="true"></span>
+        <div>
+          <div class="card-title" style="margin-bottom: 2px;">📍 Present in</div>
+          <div style="font-size: 14px;" class="card-meta">checking the stores…</div>
+        </div>
+      </div>
+      <div x-show="!loading && html.length > 0" x-html="html"></div>
+    </div>
+  </template>
+
   {# Three independent lazy panels — each fetches its own endpoint
      after the entity body lands. They only mount when the entity
      was actually found (otherwise the page shows the wanted-list
