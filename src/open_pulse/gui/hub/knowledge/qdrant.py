@@ -2081,20 +2081,21 @@ def _items_for_github_slugs(slugs: list[str], *, limit: int) -> list[RelatedItem
     return items
 
 
-def cached_panel(name: str, canonical_url: str, fn: callable) -> Any:
+def cached_panel(name: str, canonical_url: str, fn: callable, *, force: bool = False) -> Any:
     """Memoise a lazy-panel computation by (name, canonical_url).
 
     The cache lives in the hub process — fine since the data plane is
     visibly slow and these are read-only lookups. Entries expire after
     ``_PANEL_CACHE_TTL`` seconds so backlinks can pick up newly-added
-    references on the next refresh.
+    references on the next refresh. ``force=True`` skips the read and
+    recomputes, refreshing the cached value (used by on-demand refresh).
     """
     import time
 
     key = (name, canonical_url)
     now = time.monotonic()
     hit = _PANEL_CACHE.get(key)
-    if hit is not None and (now - hit[0]) < _PANEL_CACHE_TTL:
+    if not force and hit is not None and (now - hit[0]) < _PANEL_CACHE_TTL:
         return hit[1]
     value = fn()
     # Drop arbitrary entries when bounded.
