@@ -110,6 +110,19 @@
   .cat-viewbtn.is-active { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--fg); }
   .cat-viewbtn svg { width: 15px; height: 15px; }
 
+  /* ── filters button + modal ── */
+  .cat-filters-btn { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+  .chaoss-modal-header { display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .cat-facets-modal { max-width: 760px; }
+  .cat-facets-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .cat-facet-block { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-sunk); }
+  .cat-facet-blocktitle { font-weight: 650; font-size: 12.5px; margin-bottom: 8px; }
+  .cat-facet-vals { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cat-facet-vals .cat-chip { cursor: pointer; text-decoration: none; max-width: 100%; overflow: hidden; }
+  .cat-facet-vals a.cat-chip { color: var(--fg-muted); }
+  .cat-facet-vals a.cat-chip:hover { border-color: var(--accent); color: var(--fg); }
+
   /* ── list view — the same card laid out as a horizontal row ── */
   .cat-list { display: flex; flex-direction: column; gap: 8px; }
   .cat-list .cat-card { flex-direction: row; align-items: stretch; }
@@ -176,7 +189,17 @@
     <div class="cat-browse-head">
       <span class="cat-browse-title">Browse</span>
       <span class="cat-count" x-text="countLabel()"></span>
+      {# active language filter chip #}
+      <button x-show="lang" x-cloak class="cat-chip is-active" @click="clearLang()"
+              title="Clear language filter">
+        <span x-text="lang"></span> ✕
+      </button>
       <span class="cat-browse-spacer"></span>
+
+      <button class="cat-select cat-filters-btn" @click="openFilters()" title="Browse filters">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h18 M6 12h12 M10 19h4" stroke-linecap="round"/></svg>
+        Filters
+      </button>
 
       <span class="cat-tool">
         <span class="cat-tool-label">Sort</span>
@@ -215,15 +238,65 @@
       <button class="btn" @click="loadMore()">Load more</button>
     </div>
   </div>
+
+  {# ── Filters modal — cached top values of the main GME properties.
+       (Future: /license-style search-bar commands + multi-select per facet.) #}
+  <div x-show="facetsOpen" x-cloak class="chaoss-modal-backdrop" @click.self="facetsOpen=false"
+       @keydown.escape.window="facetsOpen=false">
+    <div class="chaoss-modal cat-facets-modal">
+      <div class="chaoss-modal-header">
+        <div class="card-title">Filters</div>
+        <button class="btn btn-ghost" @click="facetsOpen=false">Close ✕</button>
+      </div>
+      <div style="padding: 14px 18px; overflow-y: auto;">
+        <p class="card-meta" style="margin: 0 0 12px;">
+          The most common values for each property across the stores. Click a
+          <strong>Language</strong> to filter the catalog; other values open their
+          entity page. (Select-as-you-type <span class="mono">/filters</span> coming later.)
+        </p>
+        <div x-show="!facetsLoaded" class="card-meta">loading facets…</div>
+        <div class="cat-facets-grid">
+          <template x-for="f in facets" :key="f.key">
+            <div class="cat-facet-block">
+              <div class="cat-facet-blocktitle" x-text="f.label"></div>
+              <div class="cat-facet-vals">
+                <template x-for="v in f.values" :key="f.key + ':' + v.value">
+                  <span>
+                    <button x-show="f.kind === 'language'"
+                            class="cat-chip" :class="lang === v.value ? 'is-active' : ''"
+                            @click="applyLang(v.value)">
+                      <span x-text="v.label"></span>
+                      <span class="cat-chip-n" x-show="v.count != null" x-text="v.count.toLocaleString()"></span>
+                    </button>
+                    <a x-show="f.kind !== 'language' && v.url"
+                       :href="v.url" :target="v.external ? '_blank' : '_self'"
+                       class="cat-chip" :title="v.value">
+                      <span x-text="v.label"></span>
+                      <span class="cat-chip-n" x-show="v.count != null" x-text="v.count.toLocaleString()"></span>
+                    </a>
+                    <span x-show="f.kind !== 'language' && !v.url" class="cat-chip" :title="v.value">
+                      <span x-text="v.label"></span>
+                      <span class="cat-chip-n" x-show="v.count != null" x-text="v.count.toLocaleString()"></span>
+                    </span>
+                  </span>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
 function catalogPage() {
   return {
-    q: '', type: '', source: '', sort: '',
+    q: '', type: '', source: '', sort: '', lang: '',
     view: 'grid',
     items: [], sections: [],
     page: 1, hasMore: false, total: 0, loading: false,
+    facetsOpen: false, facets: [], facetsLoaded: false,
 
     init() {
       try { this.view = localStorage.getItem('op:catalog:view') || 'grid'; } catch (_) {}
@@ -250,6 +323,7 @@ function catalogPage() {
       if (this.type) p.set('type', this.type);
       if (this.source) p.set('source', this.source);
       if (this.sort) p.set('sort', this.sort);
+      if (this.lang) p.set('lang', this.lang);
       p.set('page', String(this.page));
       return p.toString();
     },
@@ -275,6 +349,18 @@ function catalogPage() {
     },
     setType(t) { this.type = t; this.resetAndLoad(); },
     setSource(s) { this.source = s; this.resetAndLoad(); },
+
+    // ── Filters modal (cached facet values from /api/hub/facets) ──
+    openFilters() {
+      this.facetsOpen = true;
+      if (this.facetsLoaded) return;
+      fetch('/api/hub/facets', { credentials: 'include' })
+        .then((r) => r.ok ? r.json() : { facets: [] })
+        .then((j) => { this.facets = j.facets || []; this.facetsLoaded = true; })
+        .catch(() => { this.facetsLoaded = true; });
+    },
+    applyLang(v) { this.lang = (this.lang === v) ? '' : v; this.facetsOpen = false; this.resetAndLoad(); },
+    clearLang() { this.lang = ''; this.resetAndLoad(); },
     countLabel() {
       if (this.loading && !this.items.length) return 'loading…';
       const n = this.total;
