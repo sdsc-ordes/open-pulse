@@ -119,3 +119,90 @@ def resolve_project_repos(project: str) -> list[str] | None:
     repos = {_to_full(u) for u in _git_urls(block)}
     repos.discard(None)
     return sorted(repos)
+
+
+# ── repo discovery: what the CHAOSS frontend should offer / compare ─────────
+# These power the landing's repo picker (only repos with data) and the
+# front-page comparison overview. Both lean on one cheap aggregation over the
+# GrimoireLab git-enriched indices.
+_GIT_INDEX = "/git_*_enriched/_search"
+
+
+def _indexed_origins(size: int = 1000) -> dict[str, int]:
+    """``{owner/repo: commit_count}`` for every github origin GrimoireLab has
+    ingested into OpenSearch. Empty when the store is unreachable."""
+    from ..knowledge import opensearch as os_mod  # lazy — avoid import weight
+
+    body = {"size": 0, "aggs": {"o": {"terms": {"field": "origin", "size": size}}}}
+    res = os_mod._post(_GIT_INDEX, body)
+    if not res:
+        return {}
+    out: dict[str, int] = {}
+    for b in ((res.get("aggregations") or {}).get("o") or {}).get("buckets") or []:
+        full = _to_full(str(b.get("key") or ""))
+        if full:
+            out[full] = int(b.get("doc_count") or 0)
+    return out
+
+
+def available_repos() -> list[str]:
+    """Repos the CHAOSS picker should suggest — those in the GrimoireLab git
+    index ∪ any project. Sorted by index activity (commits desc), then name,
+    so the most-data-rich repos surface first. Cached briefly."""
+    from ..knowledge import qdrant  # lazy
+
+    def _gather() -> list[str]:
+        indexed = _indexed_origins()
+        repos = set(indexed)
+        for p in list_projects():
+            repos.update(resolve_project_repos(p["project"]) or [])
+        return sorted(repos, key=lambda r: (-indexed.get(r, 0), r))
+
+    return qdrant.cached_panel("chaoss_repos", "*", _gather)
+
+
+def repo_overview(limit: int = 25) -> list[dict[str, Any]]:
+    """Top repos by commit volume for the front-page comparison — one OS
+    aggregation yielding commits + contributors + last-activity per repo."""
+    from ..knowledge import opensearch as os_mod, qdrant  # lazy
+
+    limit = max(1, min(100, int(limit or 25)))
+
+    def _gather() -> list[dict[str, Any]]:
+        body = {
+            "size": 0,
+            "aggs": {
+                "repos": {
+                    "terms": {
+                        "field": "origin",
+                        "size": limit,
+                        "order": {"_count": "desc"},
+                    },
+                    "aggs": {
+                        # author_uuid is GrimoireLab's identity-merged
+                        # contributor key; author_name has no .keyword
+                        # sub-field here (cardinality on it returns 0).
+                        "contributors": {"cardinality": {"field": "author_uuid"}},
+                        "last": {"max": {"field": "grimoire_creation_date"}},
+                    },
+                }
+            },
+        }
+        res = os_mod._post(_GIT_INDEX, body)
+        if not res:
+            return []
+        out: list[dict[str, Any]] = []
+        buckets = ((res.get("aggregations") or {}).get("repos") or {}).get("buckets") or []
+        for b in buckets:
+            full = _to_full(str(b.get("key") or ""))
+            if not full:
+                continue
+            out.append({
+                "full": full,
+                "commits": int(b.get("doc_count") or 0),
+                "contributors": int((b.get("contributors") or {}).get("value") or 0),
+                "last_activity": ((b.get("last") or {}).get("value_as_string") or "")[:10],
+            })
+        return out
+
+    return qdrant.cached_panel("chaoss_overview", str(limit), _gather)

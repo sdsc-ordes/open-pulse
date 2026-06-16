@@ -918,6 +918,26 @@ def chaoss_api_projects() -> dict[str, Any]:
 
 
 @router.get(
+    "/api/v1/metrics/chaoss/repos", dependencies=[Depends(maybe_require_auth)]
+)
+def chaoss_api_repos() -> dict[str, list[str]]:
+    """Repos the landing picker should suggest — those in the GrimoireLab git
+    index or any project (so the dashboard always has data)."""
+    return {"repos": projects_mod.available_repos()}
+
+
+@router.get(
+    "/api/v1/metrics/chaoss/overview", dependencies=[Depends(maybe_require_auth)]
+)
+def chaoss_api_overview(
+    limit: int = Query(25, ge=1, le=100),
+) -> dict[str, Any]:
+    """Most-active indexed repos for the front-page comparison — commits,
+    contributors and last activity per repo, from one git-index aggregation."""
+    return {"repos": projects_mod.repo_overview(limit)}
+
+
+@router.get(
     "/api/v1/metrics/chaoss/projects/{project}/metrics",
     dependencies=[Depends(maybe_require_auth)],
 )
