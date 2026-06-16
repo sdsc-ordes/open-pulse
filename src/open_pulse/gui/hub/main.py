@@ -50,7 +50,20 @@ async def _lifespan(app: FastAPI):
             log.exception("metrics history loop terminated abnormally")
 
 
-app = FastAPI(title="open-pulse-hub", docs_url=None, redoc_url=None, lifespan=_lifespan)
+# Swagger / OpenAPI for the hub's own API (metrics, catalog, knowledge
+# graph, …) served under /api so it sits alongside the other service
+# docs in the sidebar's "API docs" group.
+app = FastAPI(
+    title="OpenPulse API",
+    description=(
+        "The OpenPulse hub API — CHAOSS metrics, the entity catalog, "
+        "knowledge-graph resolution and the data-plane proxies."
+    ),
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+    lifespan=_lifespan,
+)
 
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
@@ -83,6 +96,11 @@ templates.env.globals["ontology_url"] = _settings.ontology_url
 # as their own compact sidebar group so users can poke the endpoints
 # directly without digging through Portainer.
 templates.env.globals["api_docs"] = [
+    {
+        "name": "OpenPulse API",
+        "tech": "Metrics + hub",
+        "url": "/api/docs",
+    },
     {
         "name": "Crawler",
         "tech": "FastAPI",
