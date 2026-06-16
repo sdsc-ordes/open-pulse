@@ -106,9 +106,10 @@ def _store_facet(collection: str, title_col: str, id_col: str) -> list[dict[str,
     return out
 
 
-def gather() -> list[dict[str, Any]]:
+def gather(refresh: bool = False) -> list[dict[str, Any]]:
     """All facets with their top values — ``[{key,label,kind,values:[…]}]``.
-    Empty facets are dropped. Cached; the data moves only on GME re-ingest."""
+    Empty facets are dropped. Cached; the data moves only on GME re-ingest.
+    ``refresh=True`` recomputes and refreshes the cache (on-demand refresh)."""
 
     def _build() -> list[dict[str, Any]]:
         facets: list[dict[str, Any]] = []
@@ -134,4 +135,4 @@ def gather() -> list[dict[str, Any]]:
                 facets.append({"key": key, "label": label, "kind": "iri", "values": values})
         return facets
 
-    return qdrant.cached_panel("facets", "*", _build)
+    return qdrant.cached_panel("facets", "*", _build, force=refresh)

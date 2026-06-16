@@ -116,9 +116,32 @@
     padding: 12px 18px; border-bottom: 1px solid var(--border); }
   .cat-facets-modal { max-width: 1040px; }
   .cat-facets-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-  .cat-facet-block { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-sunk); }
-  .cat-facet-blocktitle { font-weight: 650; font-size: 12.5px; margin-bottom: 8px; }
+  /* Per-facet accent colour (--fc), applied to the block edge, title dot
+     and chips so each facet reads as its own group. */
+  .cat-facet-block { --fc: var(--accent);
+    border: 1px solid var(--border); border-left: 3px solid var(--fc);
+    border-radius: 10px; padding: 10px 12px;
+    background: color-mix(in srgb, var(--fc) 6%, var(--surface-sunk)); }
+  .cat-facet-block[data-facet="license"]         { --fc: #f59e0b; }
+  .cat-facet-block[data-facet="language"]        { --fc: #3b82f6; }
+  .cat-facet-block[data-facet="repository_type"] { --fc: #22c55e; }
+  .cat-facet-block[data-facet="owner"]           { --fc: #a855f7; }
+  .cat-facet-block[data-facet="discipline"]      { --fc: #ec4899; }
+  .cat-facet-block[data-facet="citation"]        { --fc: #14b8a6; }
+  .cat-facet-block[data-facet="ror"]             { --fc: #ef4444; }
+  .cat-facet-block[data-facet="orcid"]           { --fc: #a6ce39; }
+  .cat-facet-blocktitle { font-weight: 650; font-size: 12.5px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px; color: var(--fc); }
+  .cat-facet-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fc);
+    flex-shrink: 0; }
   .cat-facet-vals { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cat-facet-vals .cat-chip { border-color: color-mix(in srgb, var(--fc) 30%, var(--border));
+    background: color-mix(in srgb, var(--fc) 8%, var(--surface)); }
+  .cat-facet-vals .cat-chip:hover { border-color: var(--fc);
+    background: color-mix(in srgb, var(--fc) 16%, var(--surface)); }
+  .cat-facet-vals .cat-chip .cat-chip-n { color: var(--fc); }
+  .cat-facet-vals .cat-chip.is-active { border-color: var(--fc);
+    background: color-mix(in srgb, var(--fc) 22%, var(--surface)); color: var(--fg); }
   /* Long values (licence / org names) wrap onto the next line inside the
      chip instead of overflowing — override the base chip's nowrap. */
   .cat-facet-vals .cat-chip { cursor: pointer; text-decoration: none; max-width: 100%;
@@ -250,7 +273,14 @@
     <div class="chaoss-modal cat-facets-modal">
       <div class="chaoss-modal-header">
         <div class="card-title">Filters</div>
-        <button class="btn btn-ghost" @click="facetsOpen=false">Close ✕</button>
+        <span style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+          <button class="btn btn-ghost" @click="loadFacets(true)" :disabled="facetsBusy"
+                  title="Recompute all facet values now">
+            <span x-show="!facetsBusy">↻ Refresh</span>
+            <span x-show="facetsBusy" x-cloak>refreshing…</span>
+          </button>
+          <button class="btn btn-ghost" @click="facetsOpen=false">Close ✕</button>
+        </span>
       </div>
       <div style="padding: 14px 18px; overflow-y: auto;">
         <p class="card-meta" style="margin: 0 0 12px;">
@@ -261,8 +291,8 @@
         <div x-show="!facetsLoaded" class="card-meta">loading facets…</div>
         <div class="cat-facets-grid">
           <template x-for="f in facets" :key="f.key">
-            <div class="cat-facet-block">
-              <div class="cat-facet-blocktitle" x-text="f.label"></div>
+            <div class="cat-facet-block" :data-facet="f.key">
+              <div class="cat-facet-blocktitle"><span class="cat-facet-dot"></span><span x-text="f.label"></span></div>
               <div class="cat-facet-vals">
                 <template x-for="v in f.values" :key="f.key + ':' + v.value">
                   <span>
@@ -300,7 +330,7 @@ function catalogPage() {
     view: 'grid',
     items: [], sections: [],
     page: 1, hasMore: false, total: 0, loading: false,
-    facetsOpen: false, facets: [], facetsLoaded: false,
+    facetsOpen: false, facets: [], facetsLoaded: false, facetsBusy: false,
 
     init() {
       try { this.view = localStorage.getItem('op:catalog:view') || 'grid'; } catch (_) {}
@@ -357,11 +387,19 @@ function catalogPage() {
     // ── Filters modal (cached facet values from /api/hub/facets) ──
     openFilters() {
       this.facetsOpen = true;
-      if (this.facetsLoaded) return;
-      fetch('/api/hub/facets', { credentials: 'include' })
-        .then((r) => r.ok ? r.json() : { facets: [] })
-        .then((j) => { this.facets = j.facets || []; this.facetsLoaded = true; })
-        .catch(() => { this.facetsLoaded = true; });
+      if (!this.facetsLoaded) this.loadFacets(false);
+    },
+    // force=true recomputes the cache on demand (the Refresh button).
+    async loadFacets(force) {
+      this.facetsBusy = true;
+      try {
+        const url = '/api/hub/facets' + (force ? '?refresh=1' : '');
+        const r = await fetch(url, { credentials: 'include' });
+        const j = r.ok ? await r.json() : { facets: [] };
+        this.facets = j.facets || [];
+        this.facetsLoaded = true;
+      } catch (_) { this.facetsLoaded = true; }
+      finally { this.facetsBusy = false; }
     },
     applyLang(v) { this.lang = (this.lang === v) ? '' : v; this.facetsOpen = false; this.resetAndLoad(); },
     clearLang() { this.lang = ''; this.resetAndLoad(); },

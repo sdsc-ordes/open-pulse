@@ -564,11 +564,11 @@ def api_catalog_featured() -> dict[str, Any]:
 
 
 @router.get("/api/hub/facets", dependencies=[Depends(maybe_require_auth)])
-def api_facets() -> dict[str, Any]:
+def api_facets(refresh: bool = False) -> dict[str, Any]:
     """Cached top values of the main GME properties — powers the catalog
     Filters modal (licenses, languages, repo types, owners, disciplines,
-    citations, ROR orgs, ORCID people)."""
-    return {"facets": facets_mod.gather()}
+    citations, ROR orgs, ORCID people). ``refresh=1`` recomputes on demand."""
+    return {"facets": facets_mod.gather(refresh=refresh)}
 
 
 @router.get(
