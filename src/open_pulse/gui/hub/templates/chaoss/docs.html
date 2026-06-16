@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Documentation · CHAOSS · Open Pulse{% endblock %}
+{% block heading %}CHAOSS metrics — documentation{% endblock %}
+{% block subheading %}
+  What each metric measures and which data source it can be computed from.
+  Most metrics cross-check several stores; the hub reconciles them.
+{% endblock %}
+{% block headeractions %}
+  <a class="btn btn-ghost" href="/chaoss">← Back to metrics</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .docs-sources { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .docs-src { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface); }
+  .docs-src .src-name { font-weight: 650; display: flex; align-items: center; gap: 7px; }
+  .docs-src .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .src-neo4j   { background: #4ade80; }
+  .src-sparql  { background: #c084fc; }
+  .src-grimoirelab { background: #60a5fa; }
+  .src-github-index { background: #fbbf24; }
+  .docs-matrix { width: 100%; }
+  .docs-matrix th, .docs-matrix td { padding: 8px 10px; }
+  .docs-matrix thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--fg-muted); }
+  .docs-matrix th.src-col, .docs-matrix td.cell { text-align: center; width: 64px; }
+  .docs-matrix td.cell.yes { color: var(--accent); font-weight: 700; }
+  .docs-matrix td.cell.no { color: var(--fg-faint); }
+  .docs-metric-q { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
+  .docs-cat { margin: 22px 0 8px; font-weight: 650; font-size: 15px; }
+  .docs-shots { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .docs-shot { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); }
+  .docs-shot img { width: 100%; display: block; border-bottom: 1px solid var(--border); }
+  .docs-shot .cap { padding: 8px 12px; font-size: 12.5px; color: var(--fg-muted); }
+</style>
+
+<div style="display: flex; flex-direction: column; gap: 22px;">
+
+  {# ── intro ── #}
+  <div class="card tone-info">
+    <div class="card-title">How the metrics are computed</div>
+    <p style="margin: 6px 0 0; line-height: 1.55;">
+      Each CHAOSS metric is computed from one or more of the data-plane stores
+      below. Where a metric can be answered by several, the hub runs each and
+      reconciles them (you can inspect every underlying query in the
+      <em>trace</em> expander on a metric card). The table further down lists,
+      per metric, which sources it draws from.
+    </p>
+  </div>
+
+  {# ── source legend ── #}
+  <div>
+    <div class="card-title" style="margin-bottom: 10px;">Data sources</div>
+    <div class="docs-sources">
+      {% for c in source_columns %}
+        <div class="docs-src">
+          <div class="src-name"><span class="dot src-{{ c|lower|replace(' ','-') }}"></span>{{ c }}</div>
+          <p class="docs-metric-q" style="margin: 6px 0 0;">{{ source_blurb[c] }}</p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── availability matrix ── #}
+  <div>
+    <div class="card-title">Metric × source availability</div>
+    <p class="card-meta" style="margin: 4px 0 0;">
+      ✓ = the metric can be computed from that source. Grouped by CHAOSS topic.
+    </p>
+    {% for g in groups %}
+      <div class="docs-cat">{{ g.name }}</div>
+      <div style="overflow-x: auto;">
+        <table class="data docs-matrix">
+          <thead>
+            <tr>
+              <th>Metric</th>
+              {% for c in source_columns %}<th class="src-col">{{ c }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in g.metrics %}
+              {% set ms = sources.get(m.slug, []) %}
+              <tr>
+                <td>
+                  <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener"><strong>{{ m.name }}</strong></a>
+                  <div class="docs-metric-q">{{ m.question }}</div>
+                </td>
+                {% for c in source_columns %}
+                  <td class="cell {{ 'yes' if c in ms else 'no' }}">{{ '✓' if c in ms else '·' }}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endfor %}
+  </div>
+
+  {# ── screenshots ── #}
+  <div>
+    <div class="card-title" style="margin-bottom: 10px;">What it looks like</div>
+    <div class="docs-shots">
+      <div class="docs-shot">
+        <img src="/static/img/docs/chaoss-landing.png" alt="CHAOSS landing — repo picker and the most-active-repositories comparison" loading="lazy">
+        <div class="cap">The landing: pick an indexed repository, or compare the most-active ones at a glance.</div>
+      </div>
+      <div class="docs-shot">
+        <img src="/static/img/docs/chaoss-dashboard.png" alt="A per-repository CHAOSS dashboard with metric cards" loading="lazy">
+        <div class="cap">A repository dashboard — each card is one CHAOSS metric over the selected window.</div>
+      </div>
+      <div class="docs-shot">
+        <img src="/static/img/docs/chaoss-trace.png" alt="A metric card's trace expander showing the per-source queries" loading="lazy">
+        <div class="cap">Every metric card opens a trace: the exact Neo4j / SPARQL / GrimoireLab queries behind the number.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
