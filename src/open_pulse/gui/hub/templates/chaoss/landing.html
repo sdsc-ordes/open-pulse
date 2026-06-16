@@ -52,17 +52,21 @@
 <div style="display: flex; flex-direction: column; gap: 24px;">
 
   {# ── Repo entry point ─────────────────────────────────────────── #}
-  <div class="card" x-data="chaossRepoForm()">
+  <div class="card" x-data="chaossRepoForm()" x-init="init()">
     <div class="card-title">Pick a repository</div>
     <form @submit.prevent="open()" style="display: flex; gap: 8px; margin-top: 10px;">
       <input
         type="text"
         x-model="value"
-        placeholder="owner/name  ·  github.com/owner/name  ·  https://github.com/owner/name"
+        list="chaoss-repos"
+        placeholder="Start typing — suggestions are repos with data; or paste any owner/name"
         autofocus
         autocomplete="off"
         style="flex: 1; padding: 8px 12px; font-size: 14px; background: var(--surface-sunk); border: 1px solid var(--border); border-radius: 6px; color: var(--fg); font-family: ui-monospace, 'SF Mono', Consolas, monospace;"
       />
+      <datalist id="chaoss-repos">
+        <template x-for="r in repos" :key="r"><option :value="r"></option></template>
+      </datalist>
       <select x-model.number="window" class="btn" style="padding: 6px 10px;">
         {% for w in window_choices %}
           <option value="{{ w }}" {% if w == default_window %}selected{% endif %}>{{ w|window_label }}</option>
@@ -71,11 +75,11 @@
       <button class="btn btn-primary" type="submit" :disabled="!value.trim()">Open</button>
     </form>
     <p class="card-meta" style="margin: 10px 0 0;">
-      Time-based metrics use the selected window. Snapshot metrics
-      (forks, licenses) ignore it. The catalogue below groups every
-      metric into three plain-language buckets — Community, Popularity
-      and Quality — each drawn from the
-      <a href="https://chaoss.community/" target="_blank" rel="noopener">CHAOSS catalogue</a>.
+      Suggestions are the <span x-text="repos.length ? repos.length.toLocaleString() : ''"></span>
+      repositories GrimoireLab has indexed or that belong to a project — those have
+      metrics. You can still paste any <span class="mono">owner/name</span>.
+      Time-based metrics use the selected window; snapshot metrics (forks,
+      licenses) ignore it.
     </p>
   </div>
 
@@ -96,6 +100,47 @@
     </div>
   </div>
   {% endif %}
+
+  {# ── Comparison overview — most-active indexed repos side by side ── #}
+  <div class="card" x-data="chaossOverview()" x-init="load()">
+    <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+      <div class="card-title">Most active repositories</div>
+      <span class="card-meta">commits · contributors · last activity, from the GrimoireLab git index · click a column to sort</span>
+    </div>
+    <div x-show="loading" style="display: flex; align-items: center; gap: 10px; margin-top: 12px;">
+      <span class="hub-spinner"></span><span class="card-meta">comparing repositories…</span>
+    </div>
+    <div x-show="!loading && rows.length" x-cloak style="overflow-x: auto; margin-top: 10px;">
+      <table class="data chaoss-cmp">
+        <thead>
+          <tr>
+            <th style="cursor: pointer;" @click="sortBy('full')">Repository</th>
+            <th style="cursor: pointer; text-align: right;" @click="sortBy('commits')">Commits</th>
+            <th style="cursor: pointer; text-align: right;" @click="sortBy('contributors')">Contributors</th>
+            <th style="cursor: pointer; text-align: right;" @click="sortBy('last_activity')">Last activity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="r in sorted()" :key="r.full">
+            <tr>
+              <td>
+                <a :href="`/chaoss/github.com/${r.full}?window={{ default_window }}`" class="mono" x-text="r.full"></a>
+              </td>
+              <td style="text-align: right; position: relative;">
+                <span class="cmp-bar" :style="`width:${pct(r.commits)}%`"></span>
+                <span class="mono" style="position: relative;" x-text="r.commits.toLocaleString()"></span>
+              </td>
+              <td style="text-align: right;" class="mono" x-text="r.contributors.toLocaleString()"></td>
+              <td style="text-align: right;" class="card-meta" x-text="r.last_activity"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <p x-show="!loading && !rows.length" x-cloak class="card-meta" style="margin-top: 10px;">
+      No indexed repositories found.
+    </p>
+  </div>
 
   {# ── Try it (sits right below the selector so visitors get a
        1-click way in before having to read the catalogue) ───────── #}
@@ -186,11 +231,30 @@ function chaossFilter(initialCategories) {
 }
 </script>
 
+<style>
+  .hub-spinner { width: 14px; height: 14px; border: 2px solid var(--border-strong);
+    border-top-color: var(--accent); border-radius: 50%; display: inline-block;
+    animation: hub-spin 0.8s linear infinite; flex-shrink: 0; }
+  @keyframes hub-spin { to { transform: rotate(360deg); } }
+  .chaoss-cmp td { vertical-align: middle; }
+  .chaoss-cmp .cmp-bar { position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    height: 60%; border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent);
+    z-index: 0; }
+</style>
 <script>
 function chaossRepoForm() {
   return {
     value: '',
     window: {{ default_window }},
+    repos: [],
+    init() {
+      // Populate the datalist with repos that actually have data
+      // (GrimoireLab index ∪ projects). Free-text still works.
+      fetch('/api/v1/metrics/chaoss/repos', { credentials: 'include' })
+        .then((r) => r.ok ? r.json() : { repos: [] })
+        .then((j) => { this.repos = j.repos || []; })
+        .catch(() => { this.repos = []; });
+    },
     open() {
       // Accept owner/name, github.com/owner/name, or a full https URL.
       let v = this.value.trim()
@@ -201,6 +265,39 @@ function chaossRepoForm() {
       if (!v || !v.includes('/')) return;
       window.location.href = `/chaoss/github.com/${v}?window=${this.window}`;
     },
+  };
+}
+
+function chaossOverview() {
+  return {
+    rows: [],
+    loading: true,
+    sortKey: 'commits',
+    sortDir: -1,        // -1 desc, 1 asc
+    max: 1,
+    async load() {
+      try {
+        const r = await fetch('/api/v1/metrics/chaoss/overview?limit=25', { credentials: 'include' });
+        const j = await r.json();
+        this.rows = j.repos || [];
+        this.max = Math.max(1, ...this.rows.map((x) => x.commits || 0));
+      } catch (_) { this.rows = []; }
+      finally { this.loading = false; }
+    },
+    sortBy(key) {
+      if (this.sortKey === key) { this.sortDir *= -1; }
+      else { this.sortKey = key; this.sortDir = (key === 'full') ? 1 : -1; }
+    },
+    sorted() {
+      const k = this.sortKey, d = this.sortDir;
+      return [...this.rows].sort((a, b) => {
+        const x = a[k], y = b[k];
+        if (x < y) return -1 * d;
+        if (x > y) return 1 * d;
+        return 0;
+      });
+    },
+    pct(n) { return Math.round((n / this.max) * 100); },
   };
 }
 </script>
