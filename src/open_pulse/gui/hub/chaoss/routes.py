@@ -292,6 +292,28 @@ def chaoss_landing(request: Request) -> HTMLResponse:
 
 
 @router.get(
+    "/chaoss/docs",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_docs(request: Request) -> HTMLResponse:
+    """Documentation — what each metric measures and which data sources
+    (Neo4j / SPARQL / GrimoireLab / GitHub index) it can be computed from."""
+    return templates.TemplateResponse(
+        request,
+        "chaoss/docs.html",
+        {
+            "page": "chaoss",
+            "groups": _grouped(metrics_mod.REGISTRY),
+            "sources": metrics_mod.metric_sources(),
+            "source_columns": metrics_mod.METRIC_SOURCE_COLUMNS,
+            "source_blurb": metrics_mod.METRIC_SOURCE_BLURB,
+            "default_window": DEFAULT_WINDOW_DAYS,
+        },
+    )
+
+
+@router.get(
     "/chaoss/github.com/{owner}/{repo}",
     response_class=HTMLResponse,
     dependencies=[Depends(maybe_require_auth)],

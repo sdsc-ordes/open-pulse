@@ -33,6 +33,7 @@ The metrics implemented here are the first five from the SDSC
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import re
@@ -5652,3 +5653,57 @@ REGISTRY: list[MetricSpec] = [
 def spec_for(slug: str) -> MetricSpec | None:
     """Look up a registered metric by its URL slug."""
     return next((m for m in REGISTRY if m.slug == slug), None)
+
+
+# ── Per-metric data-source matrix (for the documentation page) ─────────────
+# Which back-ends each metric can draw from. Engine literals map: cypher →
+# Neo4j, sparql → SPARQL, opensearch → GrimoireLab; metrics that read the
+# crawler's github_repos DuckDB index are tagged "GitHub index".
+_ENGINE_SOURCE = {"cypher": "Neo4j", "sparql": "SPARQL", "opensearch": "GrimoireLab"}
+METRIC_SOURCE_COLUMNS: tuple[str, ...] = ("Neo4j", "SPARQL", "GrimoireLab", "GitHub index")
+METRIC_SOURCE_BLURB: dict[str, str] = {
+    "Neo4j": "Property-graph queries (Cypher) over the crawler's repo / user / org graph.",
+    "SPARQL": "RDF queries against the Oxigraph triple store (schema.org + the OpenPulse ontology).",
+    "GrimoireLab": "Aggregations over the GrimoireLab git / GitHub enriched indices in OpenSearch.",
+    "GitHub index": "Repository metadata from the crawler's GitHub index (DuckDB).",
+}
+_metric_sources_cache: dict[str, list[str]] | None = None
+
+
+def metric_sources() -> dict[str, list[str]]:
+    """``{slug: [sources]}`` — derived by introspecting each metric's
+    ``compute`` (and the helpers it calls) for the ``engine=`` literals it
+    emits, plus a tag for metrics that read the GitHub DuckDB index. Computed
+    once and cached; powers the documentation availability table."""
+    global _metric_sources_cache
+    if _metric_sources_cache is not None:
+        return _metric_sources_cache
+
+    try:
+        module_src = inspect.getsource(inspect.getmodule(MetricSpec))
+    except Exception:  # noqa: BLE001
+        module_src = ""
+
+    def _helper_src(name: str) -> str:
+        m = re.search(rf"\ndef {re.escape(name)}\(.*?(?=\ndef )", module_src, re.S)
+        return m.group(0) if m else ""
+
+    out: dict[str, list[str]] = {}
+    for spec in REGISTRY:
+        try:
+            src = inspect.getsource(spec.compute)
+        except Exception:  # noqa: BLE001
+            src = ""
+        helpers = set(re.findall(r"(\b_[a-z_][a-z0-9_]*)\(", src))
+        full = src + "\n" + "\n".join(_helper_src(h) for h in helpers)
+        found = {
+            _ENGINE_SOURCE[e]
+            for e in re.findall(r'engine=["\'](\w+)["\']', full)
+            if e in _ENGINE_SOURCE
+        }
+        if "_gh_repos_index_row" in helpers or "github_repos" in full:
+            found.add("GitHub index")
+        out[spec.slug] = [c for c in METRIC_SOURCE_COLUMNS if c in found]
+
+    _metric_sources_cache = out
+    return out
