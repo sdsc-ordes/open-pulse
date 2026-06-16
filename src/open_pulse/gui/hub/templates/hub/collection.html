@@ -7,12 +7,12 @@
   {% if count is not none %} · <strong>{{ '{:,}'.format(count) }}</strong> entries{% endif %}
 {% endblock %}
 {% block headeractions %}
-  <a class="btn btn-ghost" href="/hub">← Back to Hub</a>
+  <a class="btn btn-ghost" href="/hub/sources">← Back to Sources</a>
 {% endblock %}
 
 {% block breadcrumb %}
 <nav class="hub-breadcrumb" aria-label="breadcrumb">
-  <a href="/hub">Hub</a>
+  <a href="/hub/sources">Sources</a>
   <span class="sep">›</span>
   <span class="current">{{ label }}</span>
 </nav>
@@ -242,36 +242,50 @@
       </div>
     {% else %}
       <div class="card">
-        <div class="card-title">Entry points</div>
+        <div class="card-title">Entries</div>
         <div class="card-meta" style="margin: 4px 0 12px;">
-          A sample of {{ samples|length }} entries from the collection. Click any
-          to land on its hub page.
+          A sample of {{ samples|length }} entries from the collection — this
+          source has no tabular store (it's a vector/chunk index), so the full
+          row browser isn't available. Click any entry to open its hub page;
+          everything is searchable in the <a href="/databases">Query</a> console.
         </div>
-        <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px;">
-          {% for s in samples %}
-            <li>
-              <span class="hub-hover" data-preview-ref="{{ s.hub_url[5:] }}">
+        <table class="data" style="margin-top: 4px;">
+          <thead>
+            <tr>
+              {% if source_type %}<th style="width: 1%; white-space: nowrap;">Source</th>{% endif %}
+              <th>Entry</th>
+              <th>Detail</th>
+              <th style="width: 1%;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in samples %}
+              <tr>
                 {% if source_type %}
-                  <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ source_type }}</span>
+                  <td><span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ source_type }}</span></td>
                 {% endif %}
-                <a href="{{ s.hub_url }}" class="mono" style="word-break: break-all;">{{ s.title }}</a>
-                {% if s.external_url %}
-                  <a href="{{ s.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>
-                {% endif %}
-                {% if s.badge %}
-                  <span class="card-meta" style="font-size: 11px;">· {{ s.badge }}</span>
-                {% endif %}
-                <span class="hub-preview" aria-hidden="true">
-                  <p class="hub-preview-title">{{ s.title }}</p>
-                  {% if source_type %}<div class="hub-preview-meta">{{ source_type }} · {{ collection_name }}</div>{% endif %}
-                  <div class="hub-preview-description"></div>
-                  {% if s.badge %}<div class="hub-preview-badge">{{ s.badge }}</div>{% endif %}
-                  <div class="hub-preview-hint">Click to open the hub page →</div>
-                </span>
-              </span>
-            </li>
-          {% endfor %}
-        </ul>
+                <td>
+                  <span class="hub-hover" data-preview-ref="{{ s.hub_url[5:] }}">
+                    <a href="{{ s.hub_url }}" class="mono" style="word-break: break-all;">{{ s.title }}</a>
+                    <span class="hub-preview" aria-hidden="true">
+                      <p class="hub-preview-title">{{ s.title }}</p>
+                      {% if source_type %}<div class="hub-preview-meta">{{ source_type }} · {{ collection_name }}</div>{% endif %}
+                      <div class="hub-preview-description"></div>
+                      {% if s.badge %}<div class="hub-preview-badge">{{ s.badge }}</div>{% endif %}
+                      <div class="hub-preview-hint">Click to open the hub page →</div>
+                    </span>
+                  </span>
+                </td>
+                <td class="card-meta" style="font-size: 11px;">{{ s.badge or '' }}</td>
+                <td>
+                  {% if s.external_url %}
+                    <a href="{{ s.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     {% endif %}
   {% endif %}
@@ -570,7 +584,7 @@
   {% endif %}
 
   <div>
-    <a class="btn btn-ghost" href="/hub">← Back to the hub home</a>
+    <a class="btn btn-ghost" href="/hub/sources">← Back to Sources</a>
   </div>
 
 </div>
