@@ -209,17 +209,29 @@ def _sort_clause(source: dict[str, Any], sort: str) -> str:
     return f"{col}:desc" if direction == "desc" else str(col)
 
 
+def _lang_filter(source: dict[str, Any], lang: str) -> dict[str, str] | None:
+    """``{lang_column: value}`` for a source that declares a language column,
+    else ``None`` (caller should then exclude the source from a lang-filtered
+    page — a language filter only makes sense for code sources)."""
+    if not lang:
+        return {}
+    col = source.get("lang")
+    return {col: lang} if col else None
+
+
 def browse(
-    *, type: str = "", source: str = "", q: str = "", sort: str = "",
+    *, type: str = "", source: str = "", q: str = "", sort: str = "", lang: str = "",
     page: int = 1, page_size: int = 24,
 ) -> dict[str, Any]:
     """A page of normalised catalog items across the in-scope stores.
 
     ``source`` pins to one collection; ``type`` narrows the source set; ``q`` is
     the per-store substring search; ``sort`` reorders by stars / recency / name
-    (mapped to each store's own column). With no ``source`` the page pages each
-    store independently and interleaves — approximate (not a single global
-    sort), fine for a browse catalog and keeps every store reachable.
+    (mapped to each store's own column); ``lang`` filters to a language (exact
+    match on each store's declared language column — sources without one are
+    dropped). With no ``source`` the page pages each store independently and
+    interleaves — approximate (not a single global sort), fine for a browse
+    catalog and keeps every store reachable.
     """
     page = max(1, int(page or 1))
     page_size = max(1, min(60, int(page_size or 24)))
@@ -228,6 +240,8 @@ def browse(
         if ddb.is_browsable(s["collection"])
         and (not source or s["collection"] == source)
         and (not type or s["type"] == type)
+        # A language filter only applies to sources that carry a language col.
+        and (not lang or s.get("lang"))
     ]
     if not scope:
         return {"items": [], "page": page, "has_more": False, "total": 0}
@@ -236,7 +250,7 @@ def browse(
         s = scope[0]
         res = ddb.list_rows(
             s["collection"], page=page, size=page_size, q=q,
-            sort=_sort_clause(s, sort),
+            sort=_sort_clause(s, sort), filters=_lang_filter(s, lang),
         ) or {}
         items = [_item(s, r, res.get("columns", [])) for r in res.get("rows", [])]
         return {"items": items, "page": page,
@@ -248,7 +262,8 @@ def browse(
     total, has_more = 0, False
     for s in scope:
         res = ddb.list_rows(
-            s["collection"], page=page, size=per, q=q, sort=_sort_clause(s, sort)
+            s["collection"], page=page, size=per, q=q,
+            sort=_sort_clause(s, sort), filters=_lang_filter(s, lang),
         ) or {}
         cols = res.get("columns", [])
         buckets.append([_item(s, r, cols) for r in res.get("rows", [])])

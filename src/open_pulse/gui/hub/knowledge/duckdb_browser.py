@@ -1344,6 +1344,7 @@ def list_rows(
     size: int = DEFAULT_PAGE_SIZE,
     q: str = "",
     sort: str = "",
+    filters: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     """Return a paginated slice of the DuckDB table behind ``collection``.
 
@@ -1357,6 +1358,11 @@ def list_rows(
 
     ``sort`` is ``"col"`` (asc) or ``"col:desc"``. Invalid columns are
     silently ignored.
+
+    ``filters`` is an optional ``{column: value}`` map of exact (case-
+    insensitive) equality constraints, AND-combined with ``q``. Columns
+    not present in the table are silently ignored (validated against the
+    real schema, so the column name never reaches SQL unchecked).
     """
     b = _BACKING.get(collection)
     if b is None:
@@ -1366,12 +1372,26 @@ def list_rows(
     size = max(1, min(MAX_PAGE_SIZE, int(size or DEFAULT_PAGE_SIZE)))
     q = (q or "").strip()
     sort = (sort or "").strip()
-
-    where_sql, params_filter = _build_filter(b, q)
+    filters = filters or {}
     offset = (page - 1) * size
 
     src = _source_expr(b)
     with _connect(b.db_path) as con:
+        all_cols, visible_cols = _resolve_visible_cols(con, b)
+
+        where_sql, params_filter = _build_filter(b, q)
+        # AND-combine exact-match filters on validated columns.
+        extra_clauses: list[str] = []
+        extra_params: list[Any] = []
+        for col, val in filters.items():
+            if col in all_cols and str(val).strip():
+                extra_clauses.append(f'CAST("{col}" AS VARCHAR) ILIKE ?')
+                extra_params.append(str(val).strip())
+        if extra_clauses:
+            joiner = " AND " if where_sql else "WHERE "
+            where_sql = (where_sql or "") + joiner + " AND ".join(extra_clauses)
+            params_filter = [*params_filter, *extra_params]
+
         if where_sql:
             matched = int(
                 con.execute(
@@ -1383,7 +1403,6 @@ def list_rows(
         total = _row_count(b)
         pages = max(1, (matched + size - 1) // size)
 
-        all_cols, visible_cols = _resolve_visible_cols(con, b)
         col_list = ", ".join(f'"{c}"' for c in visible_cols)
         order_sql = _build_order(sort, visible_cols)
 

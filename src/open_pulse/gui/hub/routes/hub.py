@@ -39,6 +39,7 @@ from fastapi.templating import Jinja2Templates
 
 from ..auth import get_settings, maybe_require_auth
 from ..knowledge import catalog as catalog_mod
+from ..knowledge import facets as facets_mod
 from ..knowledge import duckdb_browser
 from ..knowledge import enrich as enrich_mod
 from ..knowledge import (
@@ -547,16 +548,27 @@ def hub_catalog() -> RedirectResponse:
 
 @router.get("/api/hub/catalog", dependencies=[Depends(maybe_require_auth)])
 def api_catalog(
-    type: str = "", source: str = "", q: str = "", sort: str = "", page: int = 1
+    type: str = "", source: str = "", q: str = "", sort: str = "",
+    lang: str = "", page: int = 1,
 ) -> dict[str, Any]:
     """A page of normalised catalog items across the in-scope stores."""
-    return catalog_mod.browse(type=type, source=source, q=q, sort=sort, page=page)
+    return catalog_mod.browse(
+        type=type, source=source, q=q, sort=sort, lang=lang, page=page
+    )
 
 
 @router.get("/api/hub/catalog/featured", dependencies=[Depends(maybe_require_auth)])
 def api_catalog_featured() -> dict[str, Any]:
     """Curated research highlights, grouped into themed featured strips."""
     return {"sections": catalog_mod.featured()}
+
+
+@router.get("/api/hub/facets", dependencies=[Depends(maybe_require_auth)])
+def api_facets() -> dict[str, Any]:
+    """Cached top values of the main GME properties — powers the catalog
+    Filters modal (licenses, languages, repo types, owners, disciplines,
+    citations, ROR orgs, ORCID people)."""
+    return {"facets": facets_mod.gather()}
 
 
 @router.get(
