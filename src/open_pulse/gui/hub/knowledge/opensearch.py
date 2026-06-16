@@ -109,7 +109,9 @@ def repo_activity(canonical_url: str) -> ActivityStats | None:
         "size": 0,
         "query": {"term": {"origin": canonical_url}},
         "aggs": {
-            "contributors": {"cardinality": {"field": "author_name.keyword"}},
+            # author_uuid is GrimoireLab's identity-merged contributor key;
+            # author_name.keyword doesn't exist here (cardinality → 0).
+            "contributors": {"cardinality": {"field": "author_uuid"}},
             "first": {"min": {"field": "grimoire_creation_date"}},
             "last": {"max": {"field": "grimoire_creation_date"}},
             "by_month": {
