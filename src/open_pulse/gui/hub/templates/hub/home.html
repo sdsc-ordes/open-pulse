@@ -80,15 +80,20 @@
     </p>
   </div>
 
-  {# ── Pinned examples ──────────────────────────────────────────── #}
-  <div>
-    <div class="card-title" style="margin-bottom: 8px;">Try one</div>
-    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+  {# ── Counts + a single-line "Try" row ─────────────────────────── #}
+  {% set _emoji = {'repo':'📦','model':'🤖','dataset':'🗂️','space':'🚀','paper':'📄','image':'🐳','org':'🏛️','person':'👤'} %}
+  {% set _total = facets.types | sum(attribute='count') %}
+  <div class="hub-band">
+    <div class="hub-counts">
+      <span class="hub-total">{{ '{:,}'.format(_total) }}</span> entities indexed
+      {% for t in facets.types %}
+        <span class="hub-count" title="{{ t.type }}">{{ _emoji.get(t.type, '◆') }} {{ '{:,}'.format(t.count) }}</span>
+      {% endfor %}
+    </div>
+    <div class="hub-try">
+      <span class="card-meta">Try:</span>
       {% for url, label in examples %}
-        <a class="btn btn-ghost" href="/hub/{{ url }}" style="text-decoration: none;">
-          <span style="color: var(--fg-muted); margin-right: 6px;">{{ label }}:</span>
-          <span class="mono">{{ url }}</span>
-        </a>
+        <a class="btn btn-ghost" href="/hub/{{ url }}" title="{{ label }} · {{ url }}">{{ url.split('/')[-1] }}</a>
       {% endfor %}
     </div>
   </div>
@@ -107,6 +112,20 @@
 </div>
 
 <style>
+  /* counts strip + one-line examples */
+  .hub-band { display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; }
+  .hub-counts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: 12.5px; color: var(--fg-muted); }
+  .hub-total { font-size: 16px; font-weight: 700; color: var(--fg); }
+  .hub-count { display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 10px; background: var(--surface-sunk);
+    border: 1px solid var(--border); white-space: nowrap; }
+  .hub-try { display: flex; align-items: center; gap: 6px; min-width: 0;
+    overflow-x: auto; white-space: nowrap; }
+  .hub-try .card-meta { flex-shrink: 0; }
+  .hub-try .btn { flex-shrink: 0; }
+
   .hub-spinner {
     width: 14px; height: 14px;
     border: 2px solid var(--border-strong);
