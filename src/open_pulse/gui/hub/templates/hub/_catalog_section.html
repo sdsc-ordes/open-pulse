@@ -188,27 +188,6 @@
     </div>
   </div>
 
-  {# ── featured (themed strips) — sits in its own panel, set apart from
-       the browse grid below. #}
-  <div x-show="sections.length" x-cloak class="cat-featured-panel">
-    <div class="cat-featured">
-      <template x-for="(sec, si) in sections" :key="'sec' + si">
-        <div class="cat-feat-section">
-          <div class="cat-feat-head">
-            <span class="cat-feat-kicker">Featured</span>
-            <span class="cat-feat-title" x-text="sec.title"></span>
-            <span class="cat-feat-sub" x-text="sec.subtitle"></span>
-          </div>
-          <div class="cat-featured-row">
-            <template x-for="it in sec.items" :key="it.id">
-              <a class="cat-card cat-feat-card" :href="it.url" x-html="cardInner(it)"></a>
-            </template>
-          </div>
-        </div>
-      </template>
-    </div>
-  </div>
-
   {# ── browse ── header (sort + view toggle) then the grid/list ── #}
   <div>
     <div class="cat-browse-head">
@@ -326,27 +305,18 @@ function catalogPage() {
   return {
     q: '', type: '', source: '', sort: '', lang: '',
     view: 'grid',
-    items: [], sections: [],
+    items: [],
     page: 1, hasMore: false, total: 0, loading: false,
     facetsOpen: false, facets: [], facetsLoaded: false, facetsBusy: false,
 
     init() {
       try { this.view = localStorage.getItem('op:catalog:view') || 'grid'; } catch (_) {}
-      this.loadFeatured();
       this.resetAndLoad();
     },
 
     setView(v) {
       this.view = v;
       try { localStorage.setItem('op:catalog:view', v); } catch (_) {}
-    },
-
-    async loadFeatured() {
-      try {
-        const r = await fetch('/api/hub/catalog/featured');
-        const j = await r.json();
-        this.sections = (j.sections || []).filter(s => s.items && s.items.length);
-      } catch (_) { this.sections = []; }
     },
 
     _qs() {
