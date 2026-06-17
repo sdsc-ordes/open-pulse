@@ -271,12 +271,19 @@ def neo4j_repo_neighbours(slug: str, *, limit: int = 25) -> list[dict[str, Any]]
 def neo4j_user_or_org_neighbours(
     login: str, *, limit: int = 25
 ) -> list[dict[str, Any]]:
-    """1-hop neighbours of a User or Org node, identified by login."""
+    """1-hop neighbours of a User or Org node, identified by login.
+
+    GitHub logins are unique per account *type*, but the crawl graph can
+    hold a login as **both** an ``Org`` and a (spurious) ``User`` node — so
+    we pick a single node, preferring ``Org``, and return only that node's
+    edges (otherwise an org's repos/members get mixed with the stray user).
+    """
     if not login:
         return []
     cypher = (
         "MATCH (n) "
         "WHERE (n:User OR n:Org) AND n.login = $login "
+        "WITH n ORDER BY (CASE WHEN n:Org THEN 0 ELSE 1 END) LIMIT 1 "
         "OPTIONAL MATCH (n)-[r]-(m) "
         "WHERE m IS NOT NULL "
         "RETURN type(r) AS rel, "
@@ -309,8 +316,12 @@ def neo4j_user_org_profile(login: str) -> dict[str, Any] | None:
     """
     if not login:
         return None
+    # Prefer the Org node when a login exists as both Org + User (see
+    # neo4j_user_or_org_neighbours) so an org page reports org stats, not
+    # the stray user node's.
     cypher = (
         "MATCH (n) WHERE (n:User OR n:Org) AND n.login = $login "
+        "WITH n ORDER BY (CASE WHEN n:Org THEN 0 ELSE 1 END) LIMIT 1 "
         "OPTIONAL MATCH (n)-[:OWNS]->(r:Repo) "
         "OPTIONAL MATCH (n)-[:MEMBER_OF]->(parent_org:Org) "
         "OPTIONAL MATCH (n)<-[:MEMBER_OF]-(member:User) "
