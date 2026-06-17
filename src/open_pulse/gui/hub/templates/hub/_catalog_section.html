@@ -161,11 +161,9 @@
 
 <div class="cat-wrap" x-data="catalogPage()" x-init="init()">
 
-  {# ── search ── #}
-  <div class="cat-search">
-    <input type="text" x-model="q" @input.debounce.400ms="resetAndLoad()"
-           placeholder="Filter the catalog…  (title / description)" />
-  </div>
+  {# The catalog has no search box of its own — the page's entity search
+     (top) is the single search bar; narrow the grid with the facet chips,
+     Sort and the Filters modal below. #}
 
   {# ── facets (server-rendered options) ── #}
   <div class="cat-facets">
