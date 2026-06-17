@@ -112,6 +112,8 @@
 
   /* ── filters button + modal ── */
   .cat-filters-btn { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+  .cat-filters-badge { background: var(--accent); color: #fff; border-radius: 9px;
+    padding: 0 6px; font-weight: 700; }
   .chaoss-modal-header { display: flex; align-items: center; justify-content: space-between;
     padding: 12px 18px; border-bottom: 1px solid var(--border); }
   .cat-facets-modal { max-width: 1040px; }
@@ -122,6 +124,8 @@
     border: 1px solid var(--border); border-left: 3px solid var(--fc);
     border-radius: 10px; padding: 10px 12px;
     background: color-mix(in srgb, var(--fc) 6%, var(--surface-sunk)); }
+  .cat-facet-block[data-facet="type"]            { --fc: #06b6d4; }
+  .cat-facet-block[data-facet="source"]          { --fc: #f472b6; }
   .cat-facet-block[data-facet="license"]         { --fc: #f59e0b; }
   .cat-facet-block[data-facet="language"]        { --fc: #3b82f6; }
   .cat-facet-block[data-facet="repository_type"] { --fc: #22c55e; }
@@ -165,44 +169,25 @@
      (top) is the single search bar; narrow the grid with the facet chips,
      Sort and the Filters modal below. #}
 
-  {# ── facets (server-rendered options) ── #}
-  <div class="cat-facets">
-    <div class="cat-facet-row">
-      <span class="cat-facet-label">Type</span>
-      <button class="cat-chip" :class="!type ? 'is-active' : ''" @click="setType('')">All</button>
-      {% for t in facets.types %}
-        <button class="cat-chip" :class="type === '{{ t.type }}' ? 'is-active' : ''"
-                @click="setType('{{ t.type }}')">{{ t.type }}<span class="cat-chip-n">{{ '{:,}'.format(t.count) }}</span></button>
-      {% endfor %}
-    </div>
-    <div class="cat-facet-row">
-      <span class="cat-facet-label">Source</span>
-      <button class="cat-chip" :class="!source ? 'is-active' : ''" @click="setSource('')">All</button>
-      {% for s in facets.sources %}
-        <button class="cat-chip" :class="source === '{{ s.collection }}' ? 'is-active' : ''"
-                @click="setSource('{{ s.collection }}')" title="{{ s.label }}">
-          {% if s.logo %}<img class="cat-chip-logo" src="{{ s.logo }}" alt="" loading="lazy">{% endif %}
-          {{ s.label }}<span class="cat-chip-n">{{ '{:,}'.format(s.count) }}</span>
-        </button>
-      {% endfor %}
-    </div>
-  </div>
-
-  {# ── browse ── header (sort + view toggle) then the grid/list ── #}
+  {# All filtering lives in one place — the Filters modal (button below).
+     Only the *active* filters surface here, as removable chips. #}
   <div>
     <div class="cat-browse-head">
       <span class="cat-browse-title">Browse</span>
       <span class="cat-count" x-text="countLabel()"></span>
-      {# active language filter chip #}
-      <button x-show="lang" x-cloak class="cat-chip is-active" @click="clearLang()"
-              title="Clear language filter">
-        <span x-text="lang"></span> ✕
-      </button>
+      {# active filter chips #}
+      <button x-show="type" x-cloak class="cat-chip is-active" @click="setType('')" title="Clear type">
+        <span x-text="type"></span> ✕</button>
+      <button x-show="source" x-cloak class="cat-chip is-active" @click="setSource('')" title="Clear source">
+        <span x-text="sourceLabel(source)"></span> ✕</button>
+      <button x-show="lang" x-cloak class="cat-chip is-active" @click="clearLang()" title="Clear language">
+        <span x-text="lang"></span> ✕</button>
       <span class="cat-browse-spacer"></span>
 
       <button class="cat-select cat-filters-btn" @click="openFilters()" title="Browse filters">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h18 M6 12h12 M10 19h4" stroke-linecap="round"/></svg>
         Filters
+        <span x-show="activeCount() > 0" x-cloak class="cat-chip-n cat-filters-badge" x-text="activeCount()"></span>
       </button>
 
       <span class="cat-tool">
@@ -261,12 +246,38 @@
       </div>
       <div style="padding: 14px 18px; overflow-y: auto;">
         <p class="card-meta" style="margin: 0 0 12px;">
-          The most common values for each property across the stores. Click a
-          <strong>Language</strong> to filter the catalog; other values open their
-          entity page. (Select-as-you-type <span class="mono">/filters</span> coming later.)
+          Narrow the catalog by <strong>Type</strong>, <strong>Source</strong> or
+          <strong>Language</strong>; the other properties show their most common
+          values and open the entity page.
+          (Select-as-you-type <span class="mono">/filters</span> coming later.)
         </p>
-        <div x-show="!facetsLoaded" class="card-meta">loading facets…</div>
         <div class="cat-facets-grid">
+          {# Type + Source — server-rendered, drive the grid directly #}
+          <div class="cat-facet-block" data-facet="type">
+            <div class="cat-facet-blocktitle"><span class="cat-facet-dot"></span>Type</div>
+            <div class="cat-facet-vals">
+              <button class="cat-chip" :class="!type ? 'is-active' : ''" @click="setType('')">All</button>
+              {% for t in facets.types %}
+                <button class="cat-chip" :class="type === '{{ t.type }}' ? 'is-active' : ''"
+                        @click="setType('{{ t.type }}')">{{ t.type }}<span class="cat-chip-n">{{ '{:,}'.format(t.count) }}</span></button>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="cat-facet-block" data-facet="source">
+            <div class="cat-facet-blocktitle"><span class="cat-facet-dot"></span>Source</div>
+            <div class="cat-facet-vals">
+              <button class="cat-chip" :class="!source ? 'is-active' : ''" @click="setSource('')">All</button>
+              {% for s in facets.sources %}
+                <button class="cat-chip" :class="source === '{{ s.collection }}' ? 'is-active' : ''"
+                        @click="setSource('{{ s.collection }}')" title="{{ s.label }}">
+                  {% if s.logo %}<img class="cat-chip-logo" src="{{ s.logo }}" alt="" loading="lazy">{% endif %}
+                  {{ s.label }}<span class="cat-chip-n">{{ '{:,}'.format(s.count) }}</span>
+                </button>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div x-show="!facetsLoaded" class="card-meta">loading facets…</div>
           <template x-for="f in facets" :key="f.key">
             <div class="cat-facet-block" :data-facet="f.key">
               <div class="cat-facet-blocktitle"><span class="cat-facet-dot"></span><span x-text="f.label"></span></div>
@@ -308,6 +319,10 @@ function catalogPage() {
     items: [],
     page: 1, hasMore: false, total: 0, loading: false,
     facetsOpen: false, facets: [], facetsLoaded: false, facetsBusy: false,
+    sourceLabels: { {% for s in facets.sources %}'{{ s.collection }}': {{ s.label | tojson }},{% endfor %} },
+
+    sourceLabel(c) { return this.sourceLabels[c] || c; },
+    activeCount() { return (this.type ? 1 : 0) + (this.source ? 1 : 0) + (this.lang ? 1 : 0); },
 
     init() {
       try { this.view = localStorage.getItem('op:catalog:view') || 'grid'; } catch (_) {}
