@@ -28,6 +28,10 @@
     background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
   .cat-chip-n { font-size: 10px; color: var(--fg-faint); }
   .cat-chip-logo { width: 13px; height: 13px; border-radius: 3px; }
+  /* Resolved human name (bold) + the raw id (muted, normal weight) — used by
+     the owner / cited-works facets where a chip carries both. */
+  .cat-chip-strong { font-weight: 650; color: var(--fg); }
+  .cat-chip-sub { font-size: 11px; font-weight: 400; color: var(--fg-faint); }
 
   /* ── featured ── */
   .cat-featured { display: flex; flex-direction: column; gap: 18px; }
@@ -288,8 +292,11 @@
                 <button class="cat-chip" :class="!facetCount(f) ? 'is-active' : ''" @click="clearFacet(f)">All</button>
                 <template x-for="v in f.values" :key="f.key + ':' + v.value">
                   <button class="cat-chip" :class="isFacetActive(f, v.value) ? 'is-active' : ''"
-                          @click="toggleFacet(f, v.value)" :title="v.label">
-                    <span x-text="v.label"></span>
+                          @click="toggleFacet(f, v.value)" :title="v.sub ? v.label + ' · ' + v.sub : v.label">
+                    {# resolved human label (bold) + the raw id (normal); for
+                       facets without an id the label is just shown plainly. #}
+                    <span :class="v.sub ? 'cat-chip-strong' : ''" x-text="v.label"></span>
+                    <span class="cat-chip-sub" x-show="v.sub" x-text="v.sub"></span>
                     <span class="cat-chip-n" x-show="v.count != null" x-text="v.count.toLocaleString()"></span>
                   </button>
                 </template>
