@@ -43,6 +43,21 @@ log = logging.getLogger(__name__)
 
 _MODELS_TIMEOUT = 10.0
 _CHAT_TIMEOUT = 600.0
+
+# Curated chat-model shortlist. The upstream endpoint lists 260+ entries
+# (embeddings, rerankers, OCR, dtype variants) — far too many for a picker.
+# We surface only these, in this order, and only those the endpoint actually
+# offers right now (intersected with the live ``/models`` list). The field
+# still accepts any id the user types, so power users aren't boxed in.
+# Includes the hub default (``openai/gpt-oss-120b``) plus a Swiss/EPFL model
+# and a spread of strong general instruct models from different families.
+_CHAT_MODELS: tuple[str, ...] = (
+    "openai/gpt-oss-120b",
+    "swiss-ai/Apertus-70B-Instruct-2509",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507",
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+)
 # Cadence of SSE keepalive comments emitted while a tool runs, so a long
 # (e.g. ~20s gme_search) round-trip never leaves the connection idle long
 # enough for an intermediary proxy to drop it with a 502.
@@ -95,7 +110,13 @@ def _base_url() -> str:
 def list_models(
     x_op_llm_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
-    """Return the model catalog from the configured LLM endpoint.
+    """Return the curated chat-model shortlist for the picker.
+
+    The configured endpoint (EPFL RCP) lists 260+ models — embeddings,
+    rerankers, OCR, dtype variants — which overwhelm the picker. We fetch
+    the live catalog, then narrow it to :data:`_CHAT_MODELS` (intersected
+    with what's actually offered), so the UI shows only a handful of strong,
+    available chat models. The chat field still accepts any id typed by hand.
 
     Some endpoints (RCP, OpenAI) gate the model list behind auth; others
     (Ollama, vLLM unauthenticated) don't. We pass the resolved key (a
@@ -119,9 +140,20 @@ def list_models(
         body = resp.json()
     except ValueError:
         return {"data": [], "error": "non-JSON response from upstream"}
-    # Pass through verbatim — the UI handles both ``{"data":[…]}``
-    # (OpenAI-style) and bare lists (some self-hosted servers).
-    return body
+    # The UI handles both ``{"data":[…]}`` (OpenAI-style) and bare lists
+    # (some self-hosted servers); normalise to a list of model dicts.
+    raw = body.get("data") if isinstance(body, dict) else body
+    raw = raw if isinstance(raw, list) else []
+    available = {
+        (m.get("id") if isinstance(m, dict) else m): m for m in raw
+    }
+    # Narrow to the curated shortlist, keeping only those the endpoint
+    # currently offers, in our preferred order. Fall back to the full list
+    # if none of the shortlist is available (mis-set endpoint / renamed
+    # models) so the picker is never mysteriously empty.
+    picked = [available[mid] for mid in _CHAT_MODELS if mid in available]
+    data = picked or raw
+    return {"data": [m if isinstance(m, dict) else {"id": m} for m in data]}
 
 
 # ── Schema introspection ──────────────────────────────────────────────
