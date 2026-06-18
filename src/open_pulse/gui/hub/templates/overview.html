@@ -138,6 +138,45 @@
     No samples yet — the metrics sampler runs every minute, give it a moment after first boot.
   </p>
 
+  <!-- ── Quests: recent runs + currently running (operator-only) ──────── -->
+  {% set _role = request.state.user_role if request.state and request.state.user_role else 'admin' %}
+  {% if _role == 'admin' and not hub_read_only %}
+  <section x-data="questActivity()" x-init="load()">
+    <div class="flex items-baseline mb-3">
+      <h2 class="card-title">Quests</h2>
+      <span class="ml-auto card-meta" x-text="meta"></span>
+      <a class="btn btn-ghost ml-3" href="/pipeline">Open →</a>
+      <button class="btn btn-ghost ml-2" @click="load(true)" title="Refresh">↻</button>
+    </div>
+    <div x-show="error" x-cloak class="card tone-warn">
+      <p class="card-meta" style="margin: 0;" x-text="error"></p>
+    </div>
+    <div x-show="!error && !loading && !runs.length" class="card-meta" style="font-style: italic;">
+      No quest runs yet — start one from <a href="/pipeline">Quests</a>.
+    </div>
+    <div class="grid-quests" x-show="runs.length">
+      <template x-for="q in runs" :key="q.path">
+        <div class="card quest-card" :class="'q-' + q.overall">
+          <div class="quest-head">
+            <span class="quest-dot" :class="'q-' + q.overall"></span>
+            <span class="quest-name" x-text="q.name" :title="q.quest_name || q.name"></span>
+            <span class="quest-badge" :class="'q-' + q.overall" x-text="q.overall"></span>
+          </div>
+          <div class="quest-meta">
+            <template x-if="q.overall === 'running' && q.current_step">
+              <span>step <span class="mono" x-text="q.current_step"></span> · </span>
+            </template>
+            <span x-text="rel(q.started_at)"></span>
+            <template x-if="q.run_id">
+              <span class="mono" style="opacity: .55;"> · <span x-text="q.run_id"></span></span>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+  </section>
+  {% endif %}
+
   <!-- ── Top-N facets across the whole store ──────────────────────────── -->
   <section x-data="topStats()" x-init="load()">
     <div class="flex items-baseline mb-3">
@@ -201,6 +240,28 @@
     color: var(--fg-muted);
     font-variant-numeric: tabular-nums;
   }
+
+  /* ── Quests activity cards ─────────────────────────────────────── */
+  .grid-quests { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .quest-card { padding: 12px 14px; border-left: 3px solid var(--border); }
+  .quest-card.q-running   { border-left-color: #3b82f6; }
+  .quest-card.q-completed { border-left-color: #22c55e; }
+  .quest-card.q-failed    { border-left-color: #ef4444; }
+  .quest-head { display: flex; align-items: center; gap: 8px; }
+  .quest-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-faint); flex-shrink: 0; }
+  .quest-dot.q-running   { background: #3b82f6; animation: q-pulse 1.2s ease-in-out infinite; }
+  .quest-dot.q-completed { background: #22c55e; }
+  .quest-dot.q-failed    { background: #ef4444; }
+  @keyframes q-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .quest-name { font-weight: 650; font-size: 13.5px; flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .quest-badge { font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em;
+    font-weight: 700; padding: 1px 6px; border-radius: 6px;
+    background: var(--surface-sunk); color: var(--fg-muted); }
+  .quest-badge.q-running   { color: #60a5fa; }
+  .quest-badge.q-completed { color: #4ade80; }
+  .quest-badge.q-failed    { color: #f87171; }
+  .quest-meta { font-size: 11.5px; color: var(--fg-muted); margin-top: 6px; }
 
   /* ── Top-N facet cards ─────────────────────────────────────────── */
   .grid-tops {
@@ -540,6 +601,46 @@ function overview() {
     formatVal(v) {
       if (v === null || v === undefined) return '—';
       return String(v);
+    },
+  };
+}
+
+/* Quest activity — reuses /api/pipeline/quests (each quest carries its
+   latest detached run's overall status + timestamp). Running first, then
+   most-recent. Degrades quietly when the cli/quest runner is offline. */
+function questActivity() {
+  return {
+    runs: [], loading: false, error: '', meta: '',
+    async load(refresh) {
+      this.loading = true; this.error = '';
+      try {
+        const r = await fetch('/api/pipeline/quests', { credentials: 'include' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        if (j.error) { this.error = 'Quest runner: ' + String(j.error).slice(0, 140); this.runs = []; return; }
+        const qs = (j.quests || []).filter(q => q.last_run && q.last_run.started_at);
+        qs.sort((a, b) =>
+          ((b.last_run.overall === 'running') - (a.last_run.overall === 'running'))
+          || (a.last_run.started_at < b.last_run.started_at ? 1 : -1));
+        this.runs = qs.slice(0, 8).map(q => ({
+          path: q.path, name: q.name, quest_name: q.quest_name,
+          overall: q.last_run.overall || 'pending',
+          current_step: q.last_run.current_step,
+          started_at: q.last_run.started_at, run_id: q.last_run.run_id,
+        }));
+        const running = qs.filter(q => q.last_run.overall === 'running').length;
+        this.meta = qs.length + ' with runs' + (running ? ' · ' + running + ' running' : '');
+      } catch (e) {
+        this.error = 'Quest runner offline (' + e.message + ')'; this.runs = [];
+      } finally { this.loading = false; }
+    },
+    rel(iso) {
+      if (!iso) return '';
+      const d = (Date.now() - new Date(iso).getTime()) / 1000;
+      if (d < 60) return 'just now';
+      if (d < 3600) return Math.floor(d / 60) + 'm ago';
+      if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+      return Math.floor(d / 86400) + 'd ago';
     },
   };
 }
