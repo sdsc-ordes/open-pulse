@@ -54,10 +54,12 @@ _CHAT_TIMEOUT = 600.0
 # spun up on demand and cold-starts for minutes on first use, which makes for
 # a poor default. The set was determined by probing /chat/completions (the
 # 24/7 ones answer in ~0.1s; on-demand ones time out). Re-probe and update if
-# RCP changes its always-on roster. Spread: the hub default, two Swiss/EPFL
-# models (a 70B and a fast 8B), plus a Mistral and a Qwen.
+# RCP changes its always-on roster. Spread: the hub default, a big flagship
+# (Kimi-K2.6, ~1T MoE — warm and strong at tool use), two Swiss/EPFL models
+# (a 70B and a fast 8B), a Mistral and a Qwen.
 _CHAT_MODELS: tuple[str, ...] = (
     "openai/gpt-oss-120b",
+    "moonshotai/Kimi-K2.6",
     "swiss-ai/Apertus-70B-Instruct-2509",
     "swiss-ai/Apertus-8B-Instruct-2509",
     "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
