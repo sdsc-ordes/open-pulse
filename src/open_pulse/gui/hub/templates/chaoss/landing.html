@@ -104,11 +104,15 @@
   </div>
   {% endif %}
 
-  {# ── Comparison overview — most-active indexed repos side by side ── #}
+  {# ── Comparison overview — top repos (all / EPFL) side by side ── #}
   <div class="card" x-data="chaossOverview()" x-init="load()">
     <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
-      <div class="card-title">Most active repositories</div>
-      <span class="card-meta">commits · contributors · last activity, from the GrimoireLab git index · click a column to sort</span>
+      <div class="card-title" x-text="scope === 'epfl' ? 'Top EPFL repositories' : 'Most active repositories'"></div>
+      <span class="card-meta" x-text="scope === 'epfl' ? 'EPFL-owned repos by stars · click a column to sort' : 'by commits, from the GrimoireLab git index · click a column to sort'"></span>
+      <span class="cat-viewtoggle" style="margin-left: auto;" role="group" aria-label="Scope">
+        <button class="cat-viewbtn" :class="scope === 'all' ? 'is-active' : ''" @click="load('all')" style="width:auto;padding:0 12px;">All</button>
+        <button class="cat-viewbtn" :class="scope === 'epfl' ? 'is-active' : ''" @click="load('epfl')" style="width:auto;padding:0 12px;">EPFL</button>
+      </span>
     </div>
     <div x-show="loading" style="display: flex; align-items: center; gap: 10px; margin-top: 12px;">
       <span class="hub-spinner"></span><span class="card-meta">comparing repositories…</span>
@@ -118,9 +122,9 @@
         <thead>
           <tr>
             <th style="cursor: pointer;" @click="sortBy('full')">Repository</th>
-            <th style="cursor: pointer; text-align: right;" @click="sortBy('commits')">Commits</th>
-            <th style="cursor: pointer; text-align: right;" @click="sortBy('contributors')">Contributors</th>
-            <th style="cursor: pointer; text-align: right;" @click="sortBy('last_activity')">Last activity</th>
+            <template x-for="c in columns" :key="c.key">
+              <th style="cursor: pointer; text-align: right;" @click="sortBy(c.key)" x-text="c.label"></th>
+            </template>
           </tr>
         </thead>
         <tbody>
@@ -129,19 +133,23 @@
               <td>
                 <a :href="`/chaoss/github.com/${r.full}?window={{ default_window }}`" class="mono" x-text="r.full"></a>
               </td>
-              <td style="text-align: right; position: relative;">
-                <span class="cmp-bar" :style="`width:${pct(r.commits)}%`"></span>
-                <span class="mono" style="position: relative;" x-text="r.commits.toLocaleString()"></span>
-              </td>
-              <td style="text-align: right;" class="mono" x-text="r.contributors.toLocaleString()"></td>
-              <td style="text-align: right;" class="card-meta" x-text="r.last_activity"></td>
+              <template x-for="c in columns" :key="c.key">
+                <td style="text-align: right; position: relative;"
+                    :class="c.text ? 'card-meta' : 'mono'">
+                  <template x-if="c.bar">
+                    <span class="cmp-bar" :style="`width:${pct(r[c.key])}%`"></span>
+                  </template>
+                  <span style="position: relative;"
+                        x-text="c.text ? (r[c.key] || '—') : (Number(r[c.key]||0)).toLocaleString()"></span>
+                </td>
+              </template>
             </tr>
           </template>
         </tbody>
       </table>
     </div>
     <p x-show="!loading && !rows.length" x-cloak class="card-meta" style="margin-top: 10px;">
-      No indexed repositories found.
+      No repositories found.
     </p>
   </div>
 
@@ -239,6 +247,12 @@ function chaossFilter(initialCategories) {
     border-top-color: var(--accent); border-radius: 50%; display: inline-block;
     animation: hub-spin 0.8s linear infinite; flex-shrink: 0; }
   @keyframes hub-spin { to { transform: rotate(360deg); } }
+  .cat-viewtoggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .cat-viewbtn { display: inline-flex; align-items: center; justify-content: center;
+    height: 28px; background: var(--surface); border: 0; cursor: pointer;
+    color: var(--fg-muted); font-size: 12.5px; font-weight: 600; }
+  .cat-viewbtn:hover { color: var(--fg); }
+  .cat-viewbtn.is-active { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); color: var(--fg); }
   .chaoss-cmp td { vertical-align: middle; }
   .chaoss-cmp .cmp-bar { position: absolute; right: 0; top: 50%; transform: translateY(-50%);
     height: 60%; border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent);
@@ -273,18 +287,27 @@ function chaossRepoForm() {
 
 function chaossOverview() {
   return {
+    scope: 'all',
     rows: [],
+    columns: [],
     loading: true,
-    sortKey: 'commits',
+    sortKey: '',
     sortDir: -1,        // -1 desc, 1 asc
     max: 1,
-    async load() {
+    async load(scope) {
+      if (scope) this.scope = scope;
+      this.loading = true;
       try {
-        const r = await fetch('/api/v1/metrics/chaoss/overview?limit=25', { credentials: 'include' });
+        const r = await fetch(`/api/v1/metrics/chaoss/overview?limit=25&scope=${this.scope}`, { credentials: 'include' });
         const j = await r.json();
         this.rows = j.repos || [];
-        this.max = Math.max(1, ...this.rows.map((x) => x.commits || 0));
-      } catch (_) { this.rows = []; }
+        this.columns = j.columns || [];
+        const bar = (this.columns.find((c) => c.bar) || {}).key;
+        // default sort = the bar column (commits / stars), desc.
+        this.sortKey = bar || (this.columns[0] || {}).key || 'full';
+        this.sortDir = -1;
+        this.max = Math.max(1, ...this.rows.map((x) => Number(x[bar] || 0)));
+      } catch (_) { this.rows = []; this.columns = []; }
       finally { this.loading = false; }
     },
     sortBy(key) {
@@ -300,7 +323,7 @@ function chaossOverview() {
         return 0;
       });
     },
-    pct(n) { return Math.round((n / this.max) * 100); },
+    pct(n) { return Math.round((Number(n || 0) / this.max) * 100); },
   };
 }
 </script>

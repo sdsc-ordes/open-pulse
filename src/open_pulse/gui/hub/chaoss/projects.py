@@ -206,3 +206,44 @@ def repo_overview(limit: int = 25) -> list[dict[str, Any]]:
         return out
 
     return qdrant.cached_panel("chaoss_overview", str(limit), _gather)
+
+
+def epfl_top_repos(limit: int = 25) -> list[dict[str, Any]]:
+    """Top EPFL-owned repositories by GitHub stars.
+
+    Scopes to GitHub orgs whose login carries ``epfl`` (vita-epfl, epfLLM,
+    lampepfl, …) and ranks by ``stargazers_count`` from the crawled
+    ``github_repos`` DuckDB index — EPFL repos mostly lack git ingest, so
+    stars (not commits) is the populated signal. Cached."""
+    from ..knowledge import duckdb_browser as ddb, qdrant  # lazy
+
+    limit = max(1, min(100, int(limit or 25)))
+
+    def _gather() -> list[dict[str, Any]]:
+        b = ddb._BACKING.get("github_repos")
+        if b is None:
+            return []
+        src = ddb._source_expr(b)
+        sql = (
+            f'SELECT owner, name, stargazers_count AS stars, '
+            f'forks_count AS forks, primary_language AS language '
+            f"FROM {src} WHERE lower(owner) LIKE '%epfl%' "
+            f"ORDER BY stargazers_count DESC NULLS LAST LIMIT {limit}"
+        )
+        out: list[dict[str, Any]] = []
+        try:
+            with ddb._connect(b.db_path) as con:
+                for owner, name, stars, forks, lang in con.execute(sql).fetchall():
+                    if not owner or not name:
+                        continue
+                    out.append({
+                        "full": f"{owner}/{name}",
+                        "stars": int(stars or 0),
+                        "forks": int(forks or 0),
+                        "language": lang or "",
+                    })
+        except Exception as exc:  # noqa: BLE001
+            log.info("epfl_top_repos failed: %s", exc)
+        return out
+
+    return qdrant.cached_panel("chaoss_epfl_top", str(limit), _gather)
