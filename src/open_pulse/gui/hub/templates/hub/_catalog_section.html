@@ -175,13 +175,13 @@
     <div class="cat-browse-head">
       <span class="cat-browse-title">Browse</span>
       <span class="cat-count" x-text="countLabel()"></span>
-      {# active filter chips #}
-      <button x-show="type" x-cloak class="cat-chip is-active" @click="setType('')" title="Clear type">
-        <span x-text="type"></span> ✕</button>
-      <button x-show="source" x-cloak class="cat-chip is-active" @click="setSource('')" title="Clear source">
-        <span x-text="sourceLabel(source)"></span> ✕</button>
-      <button x-show="lang" x-cloak class="cat-chip is-active" @click="clearLang()" title="Clear language">
-        <span x-text="lang"></span> ✕</button>
+      {# active filter chips — every selection, removable; human labels #}
+      <template x-for="chip in activeChips()" :key="chip.kind + ':' + chip.key + ':' + chip.value">
+        <button class="cat-chip is-active" x-cloak @click="removeChip(chip)" :title="'Remove ' + chip.label">
+          <span x-text="chip.label"></span> ✕</button>
+      </template>
+      <button x-show="activeCount() > 1" x-cloak class="cat-chip" @click="clearAll()" title="Clear all filters">
+        Clear all</button>
       <span class="cat-browse-spacer"></span>
 
       <button class="cat-select cat-filters-btn" @click="openFilters()" title="Browse filters">
@@ -246,30 +246,31 @@
       </div>
       <div style="padding: 14px 18px; overflow-y: auto;">
         <p class="card-meta" style="margin: 0 0 12px;">
-          Narrow the catalog by <strong>Type</strong>, <strong>Source</strong> or
-          <strong>Language</strong>; the other properties show their most common
-          values and open the entity page.
-          (Select-as-you-type <span class="mono">/filters</span> coming later.)
+          Pick any combination — selections within a facet match
+          <em>either</em> value, across facets <em>all</em> must hold. The
+          research properties (<strong>licence</strong>, <strong>owner</strong>,
+          <strong>discipline</strong>, <strong>repository type</strong>,
+          <strong>cited works</strong>) narrow to the matching repositories.
         </p>
         <div class="cat-facets-grid">
-          {# Type + Source — server-rendered, drive the grid directly #}
+          {# Type + Source — server-rendered, multi-select, drive the grid #}
           <div class="cat-facet-block" data-facet="type">
             <div class="cat-facet-blocktitle"><span class="cat-facet-dot"></span>Type</div>
             <div class="cat-facet-vals">
-              <button class="cat-chip" :class="!type ? 'is-active' : ''" @click="setType('')">All</button>
+              <button class="cat-chip" :class="!types.length ? 'is-active' : ''" @click="clearArr('types')">All</button>
               {% for t in facets.types %}
-                <button class="cat-chip" :class="type === '{{ t.type }}' ? 'is-active' : ''"
-                        @click="setType('{{ t.type }}')">{{ t.type }}<span class="cat-chip-n">{{ '{:,}'.format(t.count) }}</span></button>
+                <button class="cat-chip" :class="types.includes('{{ t.type }}') ? 'is-active' : ''"
+                        @click="toggleArr('types', '{{ t.type }}')">{{ t.type }}<span class="cat-chip-n">{{ '{:,}'.format(t.count) }}</span></button>
               {% endfor %}
             </div>
           </div>
           <div class="cat-facet-block" data-facet="source">
             <div class="cat-facet-blocktitle"><span class="cat-facet-dot"></span>Source</div>
             <div class="cat-facet-vals">
-              <button class="cat-chip" :class="!source ? 'is-active' : ''" @click="setSource('')">All</button>
+              <button class="cat-chip" :class="!sources.length ? 'is-active' : ''" @click="clearArr('sources')">All</button>
               {% for s in facets.sources %}
-                <button class="cat-chip" :class="source === '{{ s.collection }}' ? 'is-active' : ''"
-                        @click="setSource('{{ s.collection }}')" title="{{ s.label }}">
+                <button class="cat-chip" :class="sources.includes('{{ s.collection }}') ? 'is-active' : ''"
+                        @click="toggleArr('sources', '{{ s.collection }}')" title="{{ s.label }}">
                   {% if s.logo %}<img class="cat-chip-logo" src="{{ s.logo }}" alt="" loading="lazy">{% endif %}
                   {{ s.label }}<span class="cat-chip-n">{{ '{:,}'.format(s.count) }}</span>
                 </button>
@@ -278,29 +279,19 @@
           </div>
 
           <div x-show="!facetsLoaded" class="card-meta">loading facets…</div>
+          {# Language (own column) + graph properties — all multi-select; a
+             click always filters, never navigates. #}
           <template x-for="f in facets" :key="f.key">
             <div class="cat-facet-block" :data-facet="f.key">
               <div class="cat-facet-blocktitle"><span class="cat-facet-dot"></span><span x-text="f.label"></span></div>
               <div class="cat-facet-vals">
+                <button class="cat-chip" :class="!facetCount(f) ? 'is-active' : ''" @click="clearFacet(f)">All</button>
                 <template x-for="v in f.values" :key="f.key + ':' + v.value">
-                  <span>
-                    <button x-show="f.kind === 'language'"
-                            class="cat-chip" :class="lang === v.value ? 'is-active' : ''"
-                            @click="applyLang(v.value)">
-                      <span x-text="v.label"></span>
-                      <span class="cat-chip-n" x-show="v.count != null" x-text="v.count.toLocaleString()"></span>
-                    </button>
-                    <a x-show="f.kind !== 'language' && v.url"
-                       :href="v.url" :target="v.external ? '_blank' : '_self'"
-                       class="cat-chip" :title="v.value">
-                      <span x-text="v.label"></span>
-                      <span class="cat-chip-n" x-show="v.count != null" x-text="v.count.toLocaleString()"></span>
-                    </a>
-                    <span x-show="f.kind !== 'language' && !v.url" class="cat-chip" :title="v.value">
-                      <span x-text="v.label"></span>
-                      <span class="cat-chip-n" x-show="v.count != null" x-text="v.count.toLocaleString()"></span>
-                    </span>
-                  </span>
+                  <button class="cat-chip" :class="isFacetActive(f, v.value) ? 'is-active' : ''"
+                          @click="toggleFacet(f, v.value)" :title="v.label">
+                    <span x-text="v.label"></span>
+                    <span class="cat-chip-n" x-show="v.count != null" x-text="v.count.toLocaleString()"></span>
+                  </button>
                 </template>
               </div>
             </div>
@@ -314,15 +305,27 @@
 <script>
 function catalogPage() {
   return {
-    q: '', type: '', source: '', sort: '', lang: '',
-    view: 'grid',
+    q: '', sort: '', view: 'grid',
+    // multi-select state — arrays for column facets, a {key:[values]} map for
+    // the graph facets (licence / owner / discipline / repo-type / citation).
+    types: [], sources: [], langs: [], graph: {},
     items: [],
     page: 1, hasMore: false, total: 0, loading: false,
     facetsOpen: false, facets: [], facetsLoaded: false, facetsBusy: false,
     sourceLabels: { {% for s in facets.sources %}'{{ s.collection }}': {{ s.label | tojson }},{% endfor %} },
+    // value → human label, populated as facets load (for the active chips).
+    valueLabels: {},
 
     sourceLabel(c) { return this.sourceLabels[c] || c; },
-    activeCount() { return (this.type ? 1 : 0) + (this.source ? 1 : 0) + (this.lang ? 1 : 0); },
+    cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; },
+    labelFor(key, value) { return (this.valueLabels[key] || {})[value] || value; },
+
+    graphCount() {
+      return Object.values(this.graph).reduce((n, a) => n + (a ? a.length : 0), 0);
+    },
+    activeCount() {
+      return this.types.length + this.sources.length + this.langs.length + this.graphCount();
+    },
 
     init() {
       try { this.view = localStorage.getItem('op:catalog:view') || 'grid'; } catch (_) {}
@@ -337,10 +340,11 @@ function catalogPage() {
     _qs() {
       const p = new URLSearchParams();
       if (this.q) p.set('q', this.q);
-      if (this.type) p.set('type', this.type);
-      if (this.source) p.set('source', this.source);
+      if (this.types.length) p.set('type', this.types.join(','));
+      if (this.sources.length) p.set('source', this.sources.join(','));
+      if (this.langs.length) p.set('lang', this.langs.join(','));
+      if (this.graphCount()) p.set('graph', JSON.stringify(this.graph));
       if (this.sort) p.set('sort', this.sort);
-      if (this.lang) p.set('lang', this.lang);
       p.set('page', String(this.page));
       return p.toString();
     },
@@ -364,8 +368,60 @@ function catalogPage() {
       const more = await this._fetch();
       this.items = this.items.concat(more);
     },
-    setType(t) { this.type = t; this.resetAndLoad(); },
-    setSource(s) { this.source = s; this.resetAndLoad(); },
+
+    // ── multi-select toggles (modal stays open; grid reloads live) ──
+    toggleArr(name, val) {
+      const a = this[name];
+      const i = a.indexOf(val);
+      if (i === -1) a.push(val); else a.splice(i, 1);
+      this.resetAndLoad();
+    },
+    clearArr(name) { if (this[name].length) { this[name] = []; this.resetAndLoad(); } },
+
+    isFacetActive(f, val) {
+      return f.mode === 'column' ? this.langs.includes(val)
+                                 : (this.graph[f.key] || []).includes(val);
+    },
+    facetCount(f) {
+      return f.mode === 'column' ? this.langs.length : (this.graph[f.key] || []).length;
+    },
+    toggleFacet(f, val) {
+      if (f.mode === 'column') { this.toggleArr('langs', val); return; }
+      const a = (this.graph[f.key] || []).slice();
+      const i = a.indexOf(val);
+      if (i === -1) a.push(val); else a.splice(i, 1);
+      if (a.length) this.graph[f.key] = a; else delete this.graph[f.key];
+      this.resetAndLoad();
+    },
+    clearFacet(f) {
+      if (f.mode === 'column') { this.clearArr('langs'); return; }
+      if (this.graph[f.key]) { delete this.graph[f.key]; this.resetAndLoad(); }
+    },
+
+    // ── active-filter chips (browse header) ──
+    activeChips() {
+      const out = [];
+      this.types.forEach(v => out.push({ kind: 'type', key: '', value: v, label: this.cap(v) }));
+      this.sources.forEach(v => out.push({ kind: 'source', key: '', value: v, label: this.sourceLabel(v) }));
+      this.langs.forEach(v => out.push({ kind: 'lang', key: '', value: v, label: v }));
+      Object.keys(this.graph).forEach(k => (this.graph[k] || []).forEach(
+        v => out.push({ kind: 'graph', key: k, value: v, label: this.labelFor(k, v) })));
+      return out;
+    },
+    removeChip(chip) {
+      if (chip.kind === 'type') this.toggleArr('types', chip.value);
+      else if (chip.kind === 'source') this.toggleArr('sources', chip.value);
+      else if (chip.kind === 'lang') this.toggleArr('langs', chip.value);
+      else if (chip.kind === 'graph') {
+        const a = (this.graph[chip.key] || []).filter(v => v !== chip.value);
+        if (a.length) this.graph[chip.key] = a; else delete this.graph[chip.key];
+        this.resetAndLoad();
+      }
+    },
+    clearAll() {
+      this.types = []; this.sources = []; this.langs = []; this.graph = {};
+      this.resetAndLoad();
+    },
 
     // ── Filters modal (cached facet values from /api/hub/facets) ──
     openFilters() {
@@ -380,12 +436,17 @@ function catalogPage() {
         const r = await fetch(url, { credentials: 'include' });
         const j = r.ok ? await r.json() : { facets: [] };
         this.facets = j.facets || [];
+        // index value → label per facet so the active chips read in human terms.
+        const idx = {};
+        this.facets.forEach(f => {
+          idx[f.key] = {};
+          (f.values || []).forEach(v => { idx[f.key][v.value] = v.label; });
+        });
+        this.valueLabels = idx;
         this.facetsLoaded = true;
       } catch (_) { this.facetsLoaded = true; }
       finally { this.facetsBusy = false; }
     },
-    applyLang(v) { this.lang = (this.lang === v) ? '' : v; this.facetsOpen = false; this.resetAndLoad(); },
-    clearLang() { this.lang = ''; this.resetAndLoad(); },
     countLabel() {
       if (this.loading && !this.items.length) return 'loading…';
       const n = this.total;
