@@ -546,14 +546,31 @@ def hub_catalog() -> RedirectResponse:
     return RedirectResponse(url="/hub", status_code=307)
 
 
+def _csv(v: str) -> list[str]:
+    """Split a comma-separated multi-select param into a clean list."""
+    return [p.strip() for p in (v or "").split(",") if p.strip()]
+
+
 @router.get("/api/hub/catalog", dependencies=[Depends(maybe_require_auth)])
 def api_catalog(
     type: str = "", source: str = "", q: str = "", sort: str = "",
-    lang: str = "", page: int = 1,
+    lang: str = "", graph: str = "", page: int = 1,
 ) -> dict[str, Any]:
-    """A page of normalised catalog items across the in-scope stores."""
+    """A page of normalised catalog items across the in-scope stores.
+
+    ``type`` / ``source`` / ``lang`` are comma-separated multi-selects.
+    ``graph`` is a JSON ``{facet_key: [values]}`` of GME graph-property
+    selections (licence / owner / discipline / repository type / cited works).
+    """
+    try:
+        graph_sel = json.loads(graph) if graph else {}
+        if not isinstance(graph_sel, dict):
+            graph_sel = {}
+    except (ValueError, TypeError):
+        graph_sel = {}
     return catalog_mod.browse(
-        type=type, source=source, q=q, sort=sort, lang=lang, page=page
+        types=_csv(type), sources=_csv(source), q=q, sort=sort,
+        langs=_csv(lang), graph=graph_sel, page=page,
     )
 
 

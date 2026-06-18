@@ -209,39 +209,67 @@ def _sort_clause(source: dict[str, Any], sort: str) -> str:
     return f"{col}:desc" if direction == "desc" else str(col)
 
 
-def _lang_filter(source: dict[str, Any], lang: str) -> dict[str, str] | None:
-    """``{lang_column: value}`` for a source that declares a language column,
-    else ``None`` (caller should then exclude the source from a lang-filtered
-    page — a language filter only makes sense for code sources)."""
-    if not lang:
+def _lang_filter(source: dict[str, Any], langs: list[str]) -> dict[str, Any] | None:
+    """``{lang_column: [values]}`` for a source that declares a language
+    column, else ``None`` (caller then excludes the source — a language filter
+    only makes sense for code sources). Empty ``langs`` → no constraint."""
+    if not langs:
         return {}
     col = source.get("lang")
-    return {col: lang} if col else None
+    return {col: langs} if col else None
+
+
+def _as_list(v: Any) -> list[str]:
+    """Coerce a scalar / list / None into a clean list of non-empty strings."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        v = [v]
+    return [str(x).strip() for x in v if str(x).strip()]
+
+
+# Graph facets resolve to github repos, hydrated from this collection.
+_GRAPH_COLLECTION = "github_repos"
+_GRAPH_ID_COL = "repo_id"
 
 
 def browse(
-    *, type: str = "", source: str = "", q: str = "", sort: str = "", lang: str = "",
+    *, types: Any = None, sources: Any = None, q: str = "", sort: str = "",
+    langs: Any = None, graph: dict[str, Any] | None = None,
     page: int = 1, page_size: int = 24,
 ) -> dict[str, Any]:
     """A page of normalised catalog items across the in-scope stores.
 
-    ``source`` pins to one collection; ``type`` narrows the source set; ``q`` is
-    the per-store substring search; ``sort`` reorders by stars / recency / name
-    (mapped to each store's own column); ``lang`` filters to a language (exact
-    match on each store's declared language column — sources without one are
-    dropped). With no ``source`` the page pages each store independently and
-    interleaves — approximate (not a single global sort), fine for a browse
-    catalog and keeps every store reachable.
+    ``sources`` pins to a set of collections; ``types`` narrows the source set;
+    ``q`` is the per-store substring search; ``sort`` reorders by stars /
+    recency / name (mapped to each store's own column); ``langs`` filters to
+    one-or-more languages (case-insensitive match on each store's declared
+    language column — sources without one are dropped).
+
+    ``graph`` is a ``{facet_key: [values]}`` map of GME graph-property
+    selections (licence / owner / discipline / repository type / cited works).
+    When any graph facet is active the result set is the github repositories
+    matching *all* of them (resolved + sorted + paged in SPARQL, then hydrated
+    from the ``github_repos`` index); ``langs`` is folded in as a further graph
+    constraint. With no graph facet the page interleaves each in-scope store
+    independently — approximate, but keeps every store reachable.
     """
     page = max(1, int(page or 1))
     page_size = max(1, min(60, int(page_size or 24)))
+    types, sources, langs = _as_list(types), _as_list(sources), _as_list(langs)
+    graph = {k: _as_list(v) for k, v in (graph or {}).items()}
+    graph = {k: v for k, v in graph.items() if v}
+
+    if graph:
+        return _browse_graph(graph, langs, q=q, sort=sort, page=page, page_size=page_size)
+
     scope = [
         s for s in _SOURCES
         if ddb.is_browsable(s["collection"])
-        and (not source or s["collection"] == source)
-        and (not type or s["type"] == type)
+        and (not sources or s["collection"] in sources)
+        and (not types or s["type"] in types)
         # A language filter only applies to sources that carry a language col.
-        and (not lang or s.get("lang"))
+        and (not langs or s.get("lang"))
     ]
     if not scope:
         return {"items": [], "page": page, "has_more": False, "total": 0}
@@ -250,7 +278,7 @@ def browse(
         s = scope[0]
         res = ddb.list_rows(
             s["collection"], page=page, size=page_size, q=q,
-            sort=_sort_clause(s, sort), filters=_lang_filter(s, lang),
+            sort=_sort_clause(s, sort), filters=_lang_filter(s, langs),
         ) or {}
         items = [_item(s, r, res.get("columns", [])) for r in res.get("rows", [])]
         return {"items": items, "page": page,
@@ -263,7 +291,7 @@ def browse(
     for s in scope:
         res = ddb.list_rows(
             s["collection"], page=page, size=per, q=q,
-            sort=_sort_clause(s, sort), filters=_lang_filter(s, lang),
+            sort=_sort_clause(s, sort), filters=_lang_filter(s, langs),
         ) or {}
         cols = res.get("columns", [])
         buckets.append([_item(s, r, cols) for r in res.get("rows", [])])
@@ -275,6 +303,42 @@ def browse(
             if i < len(b):
                 items.append(b[i])
     return {"items": items[:page_size], "page": page, "has_more": has_more, "total": total}
+
+
+def _browse_graph(
+    graph: dict[str, list[str]], langs: list[str], *,
+    q: str, sort: str, page: int, page_size: int,
+) -> dict[str, Any]:
+    """Graph-facet result set: github repos matching every selected graph
+    property, resolved + paged in SPARQL, hydrated from ``github_repos``."""
+    from . import facets as facets_mod  # lazy — avoids an import cycle
+
+    selections = dict(graph)
+    if langs:  # language has a graph predicate too — AND it in.
+        selections["language"] = langs
+    res = facets_mod.graph_repo_page(
+        selections, sort=sort, page=page, size=page_size
+    )
+    refs = res.get("refs") or []
+    total = res.get("total") or 0
+    s = _SOURCE_BY_COLLECTION.get(_GRAPH_COLLECTION)
+    if not refs or s is None:
+        return {"items": [], "page": page, "has_more": page * page_size < total,
+                "total": total}
+
+    hydrated = ddb.rows_for_refs(_GRAPH_COLLECTION, _GRAPH_ID_COL, refs) or {}
+    cols = hydrated.get("columns", [])
+    rows = hydrated.get("rows", [])
+    if q:  # post-filter the page by the free-text query (title / desc / owner)
+        ql = q.lower()
+        rows = [
+            r for r in rows
+            if any(ql in str(r.get(c, "")).lower()
+                   for c in ("repo_id", "name", "owner", "description"))
+        ]
+    items = [_item(s, r, cols) for r in rows]
+    return {"items": items, "page": page,
+            "has_more": page * page_size < total, "total": total}
 
 
 # SDSC featured plan: (collection, search term, sort clause, how many to take).
