@@ -953,10 +953,31 @@ def chaoss_api_repos() -> dict[str, list[str]]:
 )
 def chaoss_api_overview(
     limit: int = Query(25, ge=1, le=100),
+    scope: str = Query("all", pattern="^(all|epfl)$"),
 ) -> dict[str, Any]:
-    """Most-active indexed repos for the front-page comparison — commits,
-    contributors and last activity per repo, from one git-index aggregation."""
-    return {"repos": projects_mod.repo_overview(limit)}
+    """Top repos for the landing comparison. ``scope=all`` (default) ranks
+    the GrimoireLab-indexed repos by commits; ``scope=epfl`` ranks
+    EPFL-owned repos by GitHub stars. Returns a self-describing
+    ``{scope, columns, repos}`` so the table renders generically."""
+    if scope == "epfl":
+        return {
+            "scope": "epfl",
+            "columns": [
+                {"key": "stars", "label": "Stars", "bar": True},
+                {"key": "forks", "label": "Forks"},
+                {"key": "language", "label": "Language", "text": True},
+            ],
+            "repos": projects_mod.epfl_top_repos(limit),
+        }
+    return {
+        "scope": "all",
+        "columns": [
+            {"key": "commits", "label": "Commits", "bar": True},
+            {"key": "contributors", "label": "Contributors"},
+            {"key": "last_activity", "label": "Last activity", "text": True},
+        ],
+        "repos": projects_mod.repo_overview(limit),
+    }
 
 
 @router.get(
