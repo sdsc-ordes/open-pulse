@@ -1380,11 +1380,24 @@ def list_rows(
         all_cols, visible_cols = _resolve_visible_cols(con, b)
 
         where_sql, params_filter = _build_filter(b, q)
-        # AND-combine exact-match filters on validated columns.
+        # AND-combine exact-match filters on validated columns. A list/tuple
+        # value becomes a case-insensitive ``IN (…)`` (OR within the facet);
+        # a scalar stays an ILIKE.
         extra_clauses: list[str] = []
         extra_params: list[Any] = []
         for col, val in filters.items():
-            if col in all_cols and str(val).strip():
+            if col not in all_cols:
+                continue
+            if isinstance(val, (list, tuple, set)):
+                vals = [str(v).strip() for v in val if str(v).strip()]
+                if not vals:
+                    continue
+                placeholders = ", ".join("?" for _ in vals)
+                extra_clauses.append(
+                    f'lower(CAST("{col}" AS VARCHAR)) IN ({placeholders})'
+                )
+                extra_params.extend(v.lower() for v in vals)
+            elif str(val).strip():
                 extra_clauses.append(f'CAST("{col}" AS VARCHAR) ILIKE ?')
                 extra_params.append(str(val).strip())
         if extra_clauses:
@@ -1431,6 +1444,42 @@ def list_rows(
         "q": q,
         "sort": sort,
     }
+
+
+def rows_for_refs(
+    collection: str, id_col: str, refs: list[str]
+) -> dict[str, Any] | None:
+    """Fetch the rows of ``collection`` whose ``id_col`` matches one of
+    ``refs`` (case-insensitive), returned in the given ``refs`` order.
+
+    Used to hydrate a page of catalog items from an externally-computed id
+    list — e.g. the github repo refs a SPARQL graph-facet query resolves.
+    Returns ``{columns, rows}`` (rows as dicts) or ``None`` if the collection
+    isn't registered. The id list is deduped and capped so a single page can't
+    materialise an unbounded ``IN`` list.
+    """
+    b = _BACKING.get(collection)
+    if b is None or not refs:
+        return None
+    wanted = list(dict.fromkeys(refs))[:MAX_PAGE_SIZE]
+    src = _source_expr(b)
+    with _connect(b.db_path) as con:
+        _all_cols, visible_cols = _resolve_visible_cols(con, b)
+        if id_col not in visible_cols:
+            return {"columns": visible_cols, "rows": []}
+        col_list = ", ".join(f'"{c}"' for c in visible_cols)
+        placeholders = ", ".join("?" for _ in wanted)
+        rows = con.execute(
+            f"SELECT {col_list} FROM {src} "
+            f'WHERE lower(CAST("{id_col}" AS VARCHAR)) IN ({placeholders})',
+            [r.lower() for r in wanted],
+        ).fetchall()
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        rec = {c: _json_safe(v) for c, v in zip(visible_cols, row)}
+        by_id[str(rec.get(id_col, "")).lower()] = rec
+    ordered = [by_id[r.lower()] for r in wanted if r.lower() in by_id]
+    return {"columns": visible_cols, "rows": ordered}
 
 
 # Cap on how many rows a single ``/export`` call may return. Picked
