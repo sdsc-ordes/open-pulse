@@ -49,14 +49,19 @@ _CHAT_TIMEOUT = 600.0
 # We surface only these, in this order, and only those the endpoint actually
 # offers right now (intersected with the live ``/models`` list). The field
 # still accepts any id the user types, so power users aren't boxed in.
-# Includes the hub default (``openai/gpt-oss-120b``) plus a Swiss/EPFL model
-# and a spread of strong general instruct models from different families.
+#
+# These are the **always-resident (24/7)** models — most of the catalogue is
+# spun up on demand and cold-starts for minutes on first use, which makes for
+# a poor default. The set was determined by probing /chat/completions (the
+# 24/7 ones answer in ~0.1s; on-demand ones time out). Re-probe and update if
+# RCP changes its always-on roster. Spread: the hub default, two Swiss/EPFL
+# models (a 70B and a fast 8B), plus a Mistral and a Qwen.
 _CHAT_MODELS: tuple[str, ...] = (
     "openai/gpt-oss-120b",
     "swiss-ai/Apertus-70B-Instruct-2509",
-    "Qwen/Qwen3-235B-A22B-Instruct-2507",
-    "meta-llama/Llama-3.3-70B-Instruct",
+    "swiss-ai/Apertus-8B-Instruct-2509",
     "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+    "Qwen/Qwen3-30B-A3B-Instruct-2507",
 )
 # Cadence of SSE keepalive comments emitted while a tool runs, so a long
 # (e.g. ~20s gme_search) round-trip never leaves the connection idle long
