@@ -304,6 +304,12 @@ _RESOLVABLE_HOSTS = frozenset({
 # flood the page (the DESCRIBE returns one triple per owned repo).
 _RDF_NEIGHBOUR_CAP = 40
 
+# Predicates whose values are opaque internal IDs (content-hash references to
+# sub-objects the store doesn't expose as triples) — never worth showing as a
+# fact. ``releases`` lists one md5-ish id per release; the human-readable
+# release info lives in ``latest_version`` / ``git_tags`` / the release dates.
+_NOISE_PREDICATES = frozenset({"releases"})
+
 
 def facts_from_bindings(bindings: Iterable[dict]) -> list[Fact]:
     """Render literal ``?p ?o`` rows as RDF Fact entries.
@@ -311,6 +317,7 @@ def facts_from_bindings(bindings: Iterable[dict]) -> list[Fact]:
     Object IRIs whose predicate denotes a relationship (author, owns, …) are
     skipped here — they're surfaced as graph edges by
     :func:`neighbours_from_bindings` instead, unifying RDF and Neo4j display.
+    Opaque-id predicates (:data:`_NOISE_PREDICATES`) are dropped entirely.
     Multiple values for the same predicate are kept as separate rows so the
     page preserves their original order.
     """
@@ -321,11 +328,42 @@ def facts_from_bindings(bindings: Iterable[dict]) -> list[Fact]:
         value = o_node.get("value", "")
         if not p or not value:
             continue
+        local = _predicate_localname(p)
+        if local in _NOISE_PREDICATES:
+            continue  # opaque hash id — no display value
         is_uri = o_node.get("type") == "uri"
-        if is_uri and _predicate_localname(p) in _RELATION_PREDICATES:
+        if is_uri and local in _RELATION_PREDICATES:
             continue  # → graph edge, not a fact row
         href = value if is_uri and value.startswith("http") else ""
         out.append(Fact(label=humanize_predicate(p), value=value, href=href, source="rdf"))
+    return out
+
+
+# Fact labels (humanised) whose value is a git tag / version we can deep-link
+# to the GitHub release page for that tag.
+_RELEASE_TAG_LABELS = frozenset({"Git tags", "Latest version"})
+
+
+def _link_release_tags(facts: list[Fact], slug: str) -> list[Fact]:
+    """For a github repo, turn release-tag facts into links to the matching
+    GitHub release page (``…/releases/tag/<tag>``). ``Git tags`` get an ``href``
+    so the aggregator renders them as linked chips; ``Latest version`` becomes a
+    single linked chip directly."""
+    out: list[Fact] = []
+    for f in facts:
+        v = (f.value or "").strip()
+        if (
+            f.label not in _RELEASE_TAG_LABELS
+            or not v or v.startswith("http")
+            or f.value_links or f.value_list
+        ):
+            out.append(f)
+            continue
+        url = f"https://github.com/{slug}/releases/tag/{v}"
+        if f.label == "Latest version":
+            out.append(replace(f, value_links=((v, url),)))
+        else:  # Git tags — let the aggregator collapse them into linked chips
+            out.append(replace(f, href=url))
     return out
 
 
@@ -791,9 +829,12 @@ def build_entity(
         except Exception:  # noqa: BLE001
             pass
 
-    # Resolve a human page title for homepage-style pointer facts, then
-    # aggregate same-label multi-value facts (keywords, topics, disciplines,
-    # tags, releases, versions, …) into a single chip row.
+    # Deep-link git tags / latest version to their GitHub release page (github
+    # repos only) before aggregation, so they collapse into clickable version
+    # chips. Resolve a human page title for homepage-style pointer facts, then
+    # aggregate same-label multi-value facts (keywords, tags, versions, …).
+    if canonical_ref.host == "github.com" and "/" in canonical_ref.path:
+        facts = _link_release_tags(facts, canonical_ref.path)
     facts = _enrich_url_titles(facts)
     facts = _aggregate_facts(facts)
 
