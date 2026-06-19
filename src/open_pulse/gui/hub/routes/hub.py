@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -66,6 +67,34 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 from ..knowledge.resolvers.base import human_url_label as _human_url_label  # noqa: E402
 
 templates.env.globals["human_url_label"] = _human_url_label
+
+
+def _url_host(url: str) -> str:
+    """Bare host of a URL (``https://orcid.org/0000-… `` → ``orcid.org``),
+    or ``""`` for a non-URL. Used to badge a value with its source."""
+    m = re.match(r"^https?://([^/]+)", (url or "").strip(), re.I)
+    return m.group(1).lower().lstrip("www.") if m else ""
+
+
+def _source_logo(url: str) -> str:
+    """A small source logo for a URL's host (ORCID / GitHub / ROR / DOI / …),
+    reusing the catalog's per-host overrides + favicon fallback. ``""`` when
+    the value isn't a URL so the template can skip the icon."""
+    host = _url_host(url)
+    if not host:
+        return ""
+    meta = _SOURCE_METADATA.get(host, {})
+    return meta.get("logo_url") or _logo_for_host(host)
+
+
+templates.env.globals["url_host"] = _url_host
+templates.env.globals["source_logo"] = _source_logo
+
+# Thematic grouping of the Facts card into separate cards (Classification /
+# Metrics / Timeline / Details).
+from ..knowledge.resolvers.base import fact_groups as _fact_groups  # noqa: E402
+
+templates.env.globals["fact_groups"] = _fact_groups
 
 
 # Featured / example URLs surfaced on the landing page. A small, diverse

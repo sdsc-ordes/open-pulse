@@ -75,6 +75,14 @@ class Neighbour:
     ``works`` (cited publications) or ``other``. Set by the merge so the
     template can group related edges instead of showing one flat list."""
 
+    neo4j_rel: str = ""
+    """Raw Neo4j relationship type (``CONTRIBUTES_TO``, ``OWNS``, …) behind
+    this edge, shown as the tooltip on the Neo4j provenance chip."""
+
+    rdf_predicate: str = ""
+    """RDF property qname (``schema:author``, ``ownedBy``, …) behind this
+    edge, shown as the tooltip on the RDF provenance chip."""
+
 
 @dataclass(frozen=True)
 class Mention:

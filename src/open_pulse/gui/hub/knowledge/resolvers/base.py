@@ -20,6 +20,7 @@ import hashlib
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import replace
+from typing import Any
 
 from ..agent import narrate
 from ..entity import Entity, Fact, Neighbour
@@ -197,16 +198,66 @@ _SECTION_BY_KIND: dict[str, str] = {
     "Org": "orgs", "Repo": "repos", "Publication": "works",
 }
 
-# Equivalent relation verbs the two stores phrase differently — canonicalised
-# so they read consistently and corroborate when they point at the same target.
-_CANON_REL: dict[str, str] = {
-    "authored by": "contributed by",
-    "contributed": "contributed by",
+# Equivalent edges the two stores phrase differently collapse onto one concept
+# so the same target merges into a single corroborated row. The *display* verb
+# then prefers the RDF wording (see _merge_neighbours) — e.g. a person both
+# Neo4j-"contributed by" and RDF-"authored by" merges and shows "authored by".
+_REL_CONCEPT: dict[str, str] = {
+    "contributed by": "contributor", "authored by": "contributor",
+    "contributed": "contributor",
+    "owned by": "owner", "owns": "owns",
+    "member of": "memberof", "has member": "member",
+    "affiliated with": "affiliation", "published by": "publisher",
+    "funded by": "funder",
+    "fork of": "fork", "forked from": "fork",
+    "contributes to": "contributesto", "part of": "partof",
+    "created by": "creator", "maintained by": "maintainer",
+    "cites": "cites", "references": "references", "based on": "basedon",
 }
 
 
 def _section_for(relation: str, kind: str) -> str:
     return _SECTION_BY_REL.get(relation) or _SECTION_BY_KIND.get(kind, "other")
+
+
+# Thematic grouping of the Facts card into separate cards. Matched by keyword
+# against the (humanised, lower-cased) fact label, first match wins; anything
+# unmatched lands in a trailing "Details" card. Order here is display order.
+_FACT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Classification", (
+        "type", "repositor", "discipline", "licen", "languag", "topic",
+        "keyword", "resource", "access", "pipeline", "librar", "categor",
+        "sdk", "framework", "tag",
+    )),
+    ("Metrics", (
+        "issue", "watcher", "subscriber", "follow", "public repo", "size",
+        "network", "download", "view", "contribution", "star", "fork",
+        "commit", "release", "count", "members",
+    )),
+    ("Timeline", (
+        "creat", "updat", "push", "modif", "date", "publish", "last ",
+    )),
+)
+
+
+def fact_groups(facts: list[Fact]) -> list[tuple[str, list[Fact]]]:
+    """Bucket facts into thematic groups (Classification / Metrics / Timeline /
+    Details) so the page can render one card per group instead of one long
+    table. Empty groups are dropped; order is stable."""
+    buckets: dict[str, list[Fact]] = {name: [] for name, _ in _FACT_GROUPS}
+    details: list[Fact] = []
+    for f in facts:
+        low = (f.label or "").lower()
+        for name, kws in _FACT_GROUPS:
+            if any(k in low for k in kws):
+                buckets[name].append(f)
+                break
+        else:
+            details.append(f)
+    out = [(name, buckets[name]) for name, _ in _FACT_GROUPS if buckets[name]]
+    if details:
+        out.append(("Details", details))
+    return out
 
 
 # Object-property predicates whose object is another entity — surfaced as
@@ -308,7 +359,7 @@ def neighbours_from_bindings(bindings: Iterable[dict]) -> list[Neighbour]:
         out.append(Neighbour(
             label=label, relation=relation, hub_url=hub_url,
             external_url=external, kind=kind, source_type="RDF",
-            sources=("RDF",),
+            sources=("RDF",), rdf_predicate=predicate_label(p),
         ))
     return out
 
@@ -392,6 +443,7 @@ def neighbours_from_neo4j(
                 kind=kind,
                 source_type="Neo4j",
                 sources=("Neo4j",),
+                neo4j_rel=rel,
             )
         )
     return out
@@ -423,41 +475,68 @@ def _merge_facts(facts: list[Fact]) -> list[Fact]:
     return [by_key[k] for k in order]
 
 
-def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
-    """Collapse edges pointing at the same target into one, unioning the graph
-    stores that assert them — so an ``owned by`` edge known to both Neo4j and
-    the RDF store reads as one corroborated edge tagged with both.
+def _is_slug_label(label: str) -> bool:
+    """True for a URL-ish / ``owner/repo`` label — i.e. not a human name."""
+    return (not label) or label.startswith("http") or "/" in label
 
-    The identity is ``(relation, hub_url | external_url | label)`` rather than
-    the display label, because Neo4j carries the human name ("Swiss Data
-    Science Center") while the RDF store carries the URL slug
-    ("github.com/sdsc-ordes") for the *same* entity — keying on the resolved
-    target lets them merge, and the first (Neo4j) row keeps its richer label.
+
+def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
+    """Collapse edges pointing at the same target into one corroborated row.
+
+    Edges merge on ``(concept, target)`` where *concept* unifies the two
+    stores' phrasings (Neo4j "contributed by" ≡ RDF "authored by") and *target*
+    is the resolved ``hub_url`` / ``external_url`` (Neo4j carries the human name
+    while RDF carries the URL slug for the *same* entity). The merged row:
+
+    * **displays the RDF verb** when an RDF edge contributed it (the user wants
+      the RDF vocabulary surfaced), else the Neo4j verb;
+    * keeps the richest label (a human name over a slug);
+    * carries every store in ``sources`` plus the raw ``neo4j_rel`` /
+      ``rdf_predicate`` for the per-chip tooltips.
     """
-    order: list[tuple[str, str]] = []
-    by_key: dict[tuple[str, str], Neighbour] = {}
+    order: list[str] = []
+    acc: dict[str, dict[str, Any]] = {}
     for n in neighbours:
-        # Canonicalise equivalent verbs (authored by → contributed by) so the
-        # two stores' phrasings collapse and corroborate on a shared target.
-        rel = _CANON_REL.get(n.relation, n.relation)
+        concept = _REL_CONCEPT.get(n.relation, n.relation)
         ident = n.hub_url or n.external_url or n.label
-        key = (rel, ident)
-        srcs = list(n.sources) or ([n.source_type] if n.source_type else [])
-        if key in by_key:
-            ex = by_key[key]
-            merged = list(ex.sources or ([ex.source_type] if ex.source_type else []))
-            for s in srcs:
-                if s and s not in merged:
-                    merged.append(s)
-            by_key[key] = replace(ex, sources=tuple(merged))
-        else:
-            uniq = tuple(dict.fromkeys(s for s in srcs if s))
-            by_key[key] = replace(
-                n, relation=rel, sources=uniq,
-                category=_section_for(rel, n.kind),
-            )
+        key = f"{concept}\x00{ident}"
+        is_rdf = n.source_type == "RDF" or "RDF" in n.sources
+        a = acc.get(key)
+        if a is None:
+            a = {
+                "base": n, "sources": [], "neo4j_rel": "", "rdf_predicate": "",
+                "rdf_rel": "", "neo4j_rel_label": "", "label": n.label,
+                "hub_url": n.hub_url, "external_url": n.external_url, "kind": n.kind,
+            }
+            acc[key] = a
             order.append(key)
-    return [by_key[k] for k in order]
+        for s in (list(n.sources) or ([n.source_type] if n.source_type else [])):
+            if s and s not in a["sources"]:
+                a["sources"].append(s)
+        a["neo4j_rel"] = a["neo4j_rel"] or n.neo4j_rel
+        a["rdf_predicate"] = a["rdf_predicate"] or n.rdf_predicate
+        if is_rdf:
+            a["rdf_rel"] = a["rdf_rel"] or n.relation
+        else:
+            a["neo4j_rel_label"] = a["neo4j_rel_label"] or n.relation
+        a["hub_url"] = a["hub_url"] or n.hub_url
+        a["external_url"] = a["external_url"] or n.external_url
+        a["kind"] = a["kind"] or n.kind
+        # Prefer a human name over a URL-ish slug.
+        if _is_slug_label(a["label"]) and not _is_slug_label(n.label):
+            a["label"] = n.label
+    out: list[Neighbour] = []
+    for key in order:
+        a = acc[key]
+        rel = a["rdf_rel"] or a["neo4j_rel_label"] or a["base"].relation
+        out.append(replace(
+            a["base"], relation=rel, label=a["label"],
+            hub_url=a["hub_url"], external_url=a["external_url"],
+            sources=tuple(a["sources"]),
+            neo4j_rel=a["neo4j_rel"], rdf_predicate=a["rdf_predicate"],
+            category=_section_for(rel, a["kind"]),
+        ))
+    return out
 
 
 def maybe_narrate(entity: Entity) -> Entity:
