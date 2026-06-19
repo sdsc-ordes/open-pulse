@@ -131,6 +131,84 @@ def humanize_predicate(predicate_iri: str) -> str:
     return s[:1].upper() + s[1:] if s else local
 
 
+def _split_camel(s: str) -> str:
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", s).replace("_", " ").strip()
+
+
+def human_url_label(value: str) -> str:
+    """A short, human-readable label for a URL / IRI fact value.
+
+    Pointer-style facts (a licence URL, a ``schema.org`` type, a repo or DOI
+    link) otherwise show their raw URL, which reads poorly. This collapses them
+    to the meaningful tail — ``http://schema.org/SoftwareSourceCode`` →
+    ``Software source code``, ``…/licenses/Apache-2.0.html`` → ``Apache-2.0``,
+    ``https://github.com/sdsc-ordes/gimie`` → ``sdsc-ordes/gimie``. Non-URL
+    values (and anything already short) pass straight through, so it's safe to
+    wrap every fact value with it.
+    """
+    v = (value or "").strip()
+    if not v:
+        return v
+    # Ontology / schema.org term → humanised local name (also catches fragment
+    # IRIs like ``…/ontology#EducationalResource``).
+    if re.match(r"^https?://(www\.)?schema\.org/", v, re.I) or (
+        re.match(r"^https?://", v, re.I) and "#" in v
+    ):
+        local = re.split(r"[#/]", v.rstrip("/"))[-1]
+        s = _split_camel(local)
+        return (s[:1].upper() + s[1:]) if s else local
+    if not re.match(r"^https?://", v, re.I):
+        return v  # not a URL — leave as-is
+    # Wikidata entity (e.g. a discipline) → its memoised English label. Pure
+    # cache read; warmed during resolution (see build_entity) and by the
+    # facets panel. Falls back to the bare Q-id when not yet resolved.
+    wd = re.search(r"wikidata\.org/(?:entity|wiki)/(Q\d+)", v, re.I)
+    if wd:
+        from .. import facets  # lazy — avoid an import cycle at module load
+        return facets.cached_qid_label(wd.group(1)) or wd.group(1)
+    stripped = re.sub(r"^https?://(www\.)?", "", v, flags=re.I).rstrip("/")
+    host = stripped.split("/", 1)[0].lower()
+    rest = stripped[len(host):].lstrip("/")
+    if "spdx.org" in host:  # licenses/Apache-2.0.html → Apache-2.0
+        return re.sub(r"\.(html|json)$", "", rest.split("/")[-1], flags=re.I) or stripped
+    if host in ("github.com", "gitlab.com"):
+        return rest or host  # owner/repo or owner login
+    if host in ("doi.org", "orcid.org", "ror.org", "openalex.org"):
+        return rest or stripped
+    seg = rest.split("/")[-1] if rest else ""
+    return seg or stripped
+
+
+# Edge sectioning — group the harmonised graph edges into the page's
+# "Related" sub-sections, primarily by relation verb (the controlled
+# vocabulary), then by neighbour kind as a fallback. ``people`` deliberately
+# unifies "contributed by" (Neo4j) and "authored by" (RDF) — see _CANON_REL.
+_SECTION_BY_REL: dict[str, str] = {
+    "contributed by": "people", "authored by": "people", "created by": "people",
+    "contributed": "people", "maintained by": "people", "has member": "people",
+    "owned by": "orgs", "affiliated with": "orgs", "member of": "orgs",
+    "published by": "orgs", "funded by": "orgs",
+    "owns": "repos", "contributes to": "repos", "fork of": "repos",
+    "forked from": "repos", "part of": "repos",
+    "cites": "works", "references": "works", "based on": "works",
+}
+_SECTION_BY_KIND: dict[str, str] = {
+    "Person": "people", "User": "people",
+    "Org": "orgs", "Repo": "repos", "Publication": "works",
+}
+
+# Equivalent relation verbs the two stores phrase differently — canonicalised
+# so they read consistently and corroborate when they point at the same target.
+_CANON_REL: dict[str, str] = {
+    "authored by": "contributed by",
+    "contributed": "contributed by",
+}
+
+
+def _section_for(relation: str, kind: str) -> str:
+    return _SECTION_BY_REL.get(relation) or _SECTION_BY_KIND.get(kind, "other")
+
+
 # Object-property predicates whose object is another entity — surfaced as
 # graph edges (like Neo4j neighbours) rather than key/value rows. Maps the
 # predicate local name to (relation verb, neighbour kind).
@@ -359,8 +437,11 @@ def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
     order: list[tuple[str, str]] = []
     by_key: dict[tuple[str, str], Neighbour] = {}
     for n in neighbours:
+        # Canonicalise equivalent verbs (authored by → contributed by) so the
+        # two stores' phrasings collapse and corroborate on a shared target.
+        rel = _CANON_REL.get(n.relation, n.relation)
         ident = n.hub_url or n.external_url or n.label
-        key = (n.relation, ident)
+        key = (rel, ident)
         srcs = list(n.sources) or ([n.source_type] if n.source_type else [])
         if key in by_key:
             ex = by_key[key]
@@ -371,7 +452,10 @@ def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
             by_key[key] = replace(ex, sources=tuple(merged))
         else:
             uniq = tuple(dict.fromkeys(s for s in srcs if s))
-            by_key[key] = replace(n, sources=uniq)
+            by_key[key] = replace(
+                n, relation=rel, sources=uniq,
+                category=_section_for(rel, n.kind),
+            )
             order.append(key)
     return [by_key[k] for k in order]
 
@@ -498,6 +582,22 @@ def build_entity(
     # carries them; differing values for the same label stay as distinct rows
     # so a real conflict surfaces instead of being silently dropped.
     facts = _merge_facts([*facts, *qdrant_facts])
+
+    # Warm Wikidata labels for any discipline-style entity values so the facts
+    # card can show human names (e.g. Q428691 → "computer engineering") instead
+    # of bare Q-ids. Batched + memoised; the render path only reads the cache.
+    qids = []
+    for f in facts:
+        m = re.search(r"wikidata\.org/(?:entity|wiki)/(Q\d+)", f.value)
+        if m:
+            qids.append(m.group(1))
+    if qids:
+        try:
+            from .. import facets as _facets
+
+            _facets.warm_qid_labels(qids)
+        except Exception:  # noqa: BLE001
+            pass
 
     identifiers = identifiers_fn(bindings) if identifiers_fn else []
 

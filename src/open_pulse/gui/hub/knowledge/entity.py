@@ -69,6 +69,12 @@ class Neighbour:
     :func:`resolvers.base.build_entity`; when empty the renderer falls
     back to the single ``source_type`` tag above."""
 
+    category: str = "other"
+    """Section the edge belongs to on the page — ``people`` (contributors /
+    authors), ``orgs`` (owners / affiliations), ``repos`` (forks / projects),
+    ``works`` (cited publications) or ``other``. Set by the merge so the
+    template can group related edges instead of showing one flat list."""
+
 
 @dataclass(frozen=True)
 class Mention:

@@ -60,6 +60,12 @@ log = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+# Human-readable label for URL/IRI fact values (licence URLs, schema.org
+# types, repo/DOI pointers) so the facts card shows readable text, not raw
+# URLs. Defined in the resolver base alongside the predicate humaniser.
+from ..knowledge.resolvers.base import human_url_label as _human_url_label  # noqa: E402
+
+templates.env.globals["human_url_label"] = _human_url_label
 
 
 # Featured / example URLs surfaced on the landing page. A small, diverse
