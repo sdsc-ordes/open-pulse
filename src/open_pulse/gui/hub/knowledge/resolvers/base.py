@@ -230,7 +230,7 @@ _FACT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Classification", (
         "type", "repositor", "discipline", "licen", "languag", "topic",
         "keyword", "resource", "access", "pipeline", "librar", "categor",
-        "sdk", "framework", "tag",
+        "sdk", "framework", "tag", "badge",
     )),
     ("Metrics", (
         "issue", "watcher", "subscriber", "follow", "public repo", "size",
@@ -364,6 +364,61 @@ def _link_release_tags(facts: list[Fact], slug: str) -> list[Fact]:
             out.append(replace(f, value_links=((v, url),)))
         else:  # Git tags — let the aggregator collapse them into linked chips
             out.append(replace(f, href=url))
+    return out
+
+
+# Badge / status images live inside markdown blobs (a user/org ``profile_readme``,
+# a repo README) as ``[![alt](img)](link)`` or ``<img src>`` — not as their own
+# triples. These extract the badge image URLs (+ their click target) so they
+# render as actual badges instead of a wall of raw markdown.
+_MD_LINKED_IMG = re.compile(r"\[!\[[^\]]*\]\(\s*([^)\s]+)[^)]*\)\]\(\s*([^)\s]+)")
+_MD_IMG = re.compile(r"!\[[^\]]*\]\(\s*([^)\s]+)")
+_HTML_IMG = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.I)
+
+
+def _is_badge_url(url: str) -> bool:
+    ul = (url or "").lower()
+    return (
+        "shields.io" in ul or "badgen.net" in ul or "badge.fury" in ul
+        or "forthebadge" in ul or ul.endswith(".svg") or "badge" in ul
+    )
+
+
+def _extract_badges(facts: list[Fact]) -> list[Fact]:
+    """Pull badge images out of markdown blob facts (profile_readme / readme)
+    into a single ``Badges`` chip-row, and drop the unreadable raw blob.
+
+    Each badge becomes a ``(image_url, link_url)`` pair so the template renders
+    the image linked to its target (``[![alt](img)](link)``); unlinked badges
+    link to the image itself."""
+    out: list[Fact] = []
+    badges: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for f in facts:
+        v = f.value or ""
+        is_md_blob = len(v) > 120 and ("![" in v or "<img" in v)
+        if not is_md_blob:
+            out.append(f)
+            continue
+        # Linked markdown badges first, then strip them so the unlinked pass
+        # doesn't double-count, then bare images (md + html).
+        for img, link in _MD_LINKED_IMG.findall(v):
+            if _is_badge_url(img) and img not in seen:
+                seen.add(img)
+                badges.append((img, link))
+        rest = _MD_LINKED_IMG.sub("", v)
+        for img in _MD_IMG.findall(rest) + _HTML_IMG.findall(v):
+            if _is_badge_url(img) and img not in seen:
+                seen.add(img)
+                badges.append((img, img))
+        # Drop the raw markdown blob fact (unreadable as a key/value row).
+    if badges:
+        out.append(Fact(
+            label="Badges",
+            value=f"{len(badges)} badge{'s' if len(badges) != 1 else ''}",
+            value_links=tuple(badges[:16]),
+            source="rdf",
+        ))
     return out
 
 
@@ -850,6 +905,7 @@ def build_entity(
     # aggregate same-label multi-value facts (keywords, tags, versions, …).
     if canonical_ref.host == "github.com" and "/" in canonical_ref.path:
         facts = _link_release_tags(facts, canonical_ref.path)
+    facts = _extract_badges(facts)
     facts = _enrich_url_titles(facts)
     facts = _aggregate_facts(facts)
 
