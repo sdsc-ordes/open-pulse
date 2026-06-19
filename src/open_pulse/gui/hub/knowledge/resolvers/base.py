@@ -658,6 +658,7 @@ def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
                 "base": n, "sources": [], "neo4j_rel": "", "rdf_predicate": "",
                 "rdf_rel": "", "neo4j_rel_label": "", "label": n.label,
                 "hub_url": n.hub_url, "external_url": n.external_url, "kind": n.kind,
+                "orcid_url": "",
             }
             acc[key] = a
             order.append(key)
@@ -673,6 +674,7 @@ def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
         a["hub_url"] = a["hub_url"] or n.hub_url
         a["external_url"] = a["external_url"] or n.external_url
         a["kind"] = a["kind"] or n.kind
+        a["orcid_url"] = a["orcid_url"] or n.orcid_url
         # Prefer a human name over a URL-ish slug.
         if _is_slug_label(a["label"]) and not _is_slug_label(n.label):
             a["label"] = n.label
@@ -685,6 +687,7 @@ def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
             hub_url=a["hub_url"], external_url=a["external_url"],
             sources=tuple(a["sources"]),
             neo4j_rel=a["neo4j_rel"], rdf_predicate=a["rdf_predicate"],
+            orcid_url=a["orcid_url"],
             category=_section_for(rel, a["kind"]),
         ))
     return out
@@ -787,6 +790,18 @@ def build_entity(
     # corroborated row tagged with both ("Neo4j" + "RDF") rather than appearing
     # twice or hiding the agreement.
     neighbours = _merge_neighbours([*neighbours, *rdf_neighbours])
+    # Person identity bridge: an RDF author keyed by ORCID is the same person as
+    # a Neo4j contributor keyed by github login when their names match (local
+    # lookup, no API). Rewrite the matched ORCID authors onto the github
+    # identity and re-merge so the contributor gets an RDF chip + ORCID link.
+    try:
+        from .. import identity as _identity
+
+        bridged = _identity.harmonize_people(neighbours)
+        if bridged != neighbours:
+            neighbours = _merge_neighbours(bridged)
+    except Exception as exc:  # noqa: BLE001
+        log.info("person identity harmonization skipped: %s", exc)
 
     coll_label = (
         ", ".join(collections)

@@ -378,6 +378,9 @@
                   {% else %}
                     <span>{{ n.label }}</span>
                   {% endif %}
+                  {# extra ORCID logo-link when the identity bridge matched this
+                     contributor to an RDF author keyed by ORCID. #}
+                  {% if n.orcid_url and n.orcid_url != n.external_url %}{{ src_logo(n.orcid_url) }}{% endif %}
                 </li>
               {% endfor %}
               </ul>
