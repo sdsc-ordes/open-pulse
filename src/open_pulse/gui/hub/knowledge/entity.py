@@ -83,6 +83,11 @@ class Neighbour:
     """RDF property qname (``schema:author``, ``ownedBy``, …) behind this
     edge, shown as the tooltip on the RDF provenance chip."""
 
+    orcid_url: str = ""
+    """ORCID iD of this person when the identity bridge matched a Neo4j
+    contributor (github) to an RDF author (ORCID) — rendered as an extra
+    ORCID logo-link beside the name. Set by ``knowledge.identity``."""
+
 
 @dataclass(frozen=True)
 class Mention:
