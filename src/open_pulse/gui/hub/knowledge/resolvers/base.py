@@ -306,9 +306,11 @@ _RDF_NEIGHBOUR_CAP = 40
 
 # Predicates whose values are opaque internal IDs (content-hash references to
 # sub-objects the store doesn't expose as triples) — never worth showing as a
-# fact. ``releases`` lists one md5-ish id per release; the human-readable
-# release info lives in ``latest_version`` / ``git_tags`` / the release dates.
-_NOISE_PREDICATES = frozenset({"releases"})
+# fact. ``releases`` lists one md5-ish id per release; ``badges`` does the same
+# per badge. The human-readable info lives in ``latest_version`` / ``git_tags``
+# and ``badge_image_urls`` respectively. ``badge_count`` is redundant once the
+# badges render.
+_NOISE_PREDICATES = frozenset({"releases", "badges", "badge_count"})
 
 
 def facts_from_bindings(bindings: Iterable[dict]) -> list[Fact]:
@@ -384,15 +386,97 @@ def _is_badge_url(url: str) -> bool:
     )
 
 
+def _badge_label(url: str) -> str:
+    """A short, reliable label for a badge — derived from its own image URL
+    (host / workflow file), since the store's ``badge_labels`` can't be aligned
+    to specific images. Used as the badge's hover tooltip + alt text."""
+    u = (url or "").lower()
+    if "coveralls" in u or "codecov" in u or "coverage" in u:
+        return "Coverage"
+    if "badge.fury" in u or "/pypi/" in u or "pypistats" in u or "pepy" in u:
+        return "PyPI"
+    if "readthedocs" in u or "sphinx" in u or "/docs" in u:
+        return "Docs"
+    if "license" in u:
+        return "License"
+    m = re.search(r"/workflows/([^/]+?)\.ya?ml", url or "")
+    if m:
+        return m.group(1).replace("-", " ").replace("_", " ").title()
+    # shields.io/badge/<label>-<message>-<color> → just the label
+    m = re.search(r"shields\.io/badge/([^?/]+)", url or "")
+    if m:
+        import urllib.parse
+        seg = urllib.parse.unquote(m.group(1))
+        seg = re.sub(r"-[0-9A-Fa-f]{3,8}$", "", seg)  # drop trailing hex colour
+        seg = seg.split("-", 1)[0].replace("_", " ").strip()
+        if seg:
+            return seg[:40]
+    if "actions" in u or "/test" in u or "pytest" in u or "ci" in u:
+        return "CI"
+    seg = re.sub(r"\?.*$", "", url or "").rstrip("/").rsplit("/", 1)[-1]
+    return re.sub(r"\.(svg|png|jpg)$", "", seg, flags=re.I) or "badge"
+
+
+def _host(url: str) -> str:
+    return re.sub(r"^https?://", "", (url or "").lower()).split("/", 1)[0]
+
+
+def _match_badge_link(img: str, links: list[str]) -> str:
+    """Pick the click target for a badge image from the available links —
+    prefer one on the same host (coveralls↔coveralls, badge.fury↔badge.fury),
+    else one sharing a distinctive path token (a workflow name), else none."""
+    ih = _host(img)
+    for k in links:  # exact host match wins
+        if k and _host(k) == ih and ih:
+            return k
+    itoks = {t for t in re.split(r"[^a-z0-9]+", img.lower()) if len(t) > 3}
+    best, best_score = "", 0
+    for k in links:
+        if not k:
+            continue
+        ktoks = {t for t in re.split(r"[^a-z0-9]+", k.lower()) if len(t) > 3}
+        score = len(itoks & ktoks - {"github", "https", "actions", "workflows", "badge"})
+        if score > best_score:
+            best, best_score = k, score
+    return best
+
+
+def _structured_badges(facts: list[Fact]) -> list[Fact]:
+    """Fold a repo's structured badge predicates into one rendered ``Badges``
+    fact. ``badge_image_urls`` carries the images (the opaque ``badges`` hashes
+    + ``badge_count`` are already dropped as noise); each image gets a label
+    derived from its URL and a click target host-matched from ``badge_links``.
+    The raw ``Badge image urls`` / ``Badge labels`` / ``Badge links`` rows are
+    consumed. Only absolute-URL images are kept (relative repo assets like a
+    logo or schema diagram aren't status badges)."""
+    imgs = [f.value for f in facts if f.label == "Badge image urls"
+            and str(f.value).startswith("http")]
+    if not imgs:
+        return facts
+    links = [f.value for f in facts if f.label == "Badge links"]
+    consumed = {"Badge image urls", "Badge labels", "Badge links"}
+    out = [f for f in facts if f.label not in consumed]
+    seen: set[str] = set()
+    badges: list[tuple[str, str, str]] = []
+    for img in imgs:
+        if img in seen:
+            continue
+        seen.add(img)
+        badges.append((img, _badge_label(img), _match_badge_link(img, links) or img))
+    out.append(Fact(
+        label="Badges", value=f"{len(badges)} badges",
+        badges=tuple(badges[:16]), source="rdf",
+    ))
+    return out
+
+
 def _extract_badges(facts: list[Fact]) -> list[Fact]:
     """Pull badge images out of markdown blob facts (profile_readme / readme)
-    into a single ``Badges`` chip-row, and drop the unreadable raw blob.
-
-    Each badge becomes a ``(image_url, link_url)`` pair so the template renders
-    the image linked to its target (``[![alt](img)](link)``); unlinked badges
-    link to the image itself."""
+    into a single ``Badges`` fact, and drop the unreadable raw blob. Each badge
+    is ``(image_url, label, link_url)`` — the image links to its target
+    (``[![alt](img)](link)``; unlinked → the image) with a URL-derived label."""
     out: list[Fact] = []
-    badges: list[tuple[str, str]] = []
+    badges: list[tuple[str, str, str]] = []
     seen: set[str] = set()
     for f in facts:
         v = f.value or ""
@@ -400,24 +484,20 @@ def _extract_badges(facts: list[Fact]) -> list[Fact]:
         if not is_md_blob:
             out.append(f)
             continue
-        # Linked markdown badges first, then strip them so the unlinked pass
-        # doesn't double-count, then bare images (md + html).
         for img, link in _MD_LINKED_IMG.findall(v):
             if _is_badge_url(img) and img not in seen:
                 seen.add(img)
-                badges.append((img, link))
+                badges.append((img, _badge_label(img), link))
         rest = _MD_LINKED_IMG.sub("", v)
         for img in _MD_IMG.findall(rest) + _HTML_IMG.findall(v):
             if _is_badge_url(img) and img not in seen:
                 seen.add(img)
-                badges.append((img, img))
+                badges.append((img, _badge_label(img), img))
         # Drop the raw markdown blob fact (unreadable as a key/value row).
     if badges:
         out.append(Fact(
-            label="Badges",
-            value=f"{len(badges)} badge{'s' if len(badges) != 1 else ''}",
-            value_links=tuple(badges[:16]),
-            source="rdf",
+            label="Badges", value=f"{len(badges)} badges",
+            badges=tuple(badges[:16]), source="rdf",
         ))
     return out
 
@@ -905,6 +985,7 @@ def build_entity(
     # aggregate same-label multi-value facts (keywords, tags, versions, …).
     if canonical_ref.host == "github.com" and "/" in canonical_ref.path:
         facts = _link_release_tags(facts, canonical_ref.path)
+    facts = _structured_badges(facts)
     facts = _extract_badges(facts)
     facts = _enrich_url_titles(facts)
     facts = _aggregate_facts(facts)
