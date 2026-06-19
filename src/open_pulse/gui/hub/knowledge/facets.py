@@ -98,6 +98,20 @@ def _qid(iri: str) -> str:
     return m.group(1) if m else ""
 
 
+def cached_qid_label(qid: str) -> str:
+    """The memoised Wikidata label for a Q-ID, or ``""`` if not resolved yet.
+    A pure cache read (no network) — safe to call from template rendering.
+    Warm the cache first via :func:`warm_qid_labels` / :func:`gather`."""
+    return _WD_LABELS.get(qid, "")
+
+
+def warm_qid_labels(qids: list[str]) -> None:
+    """Resolve + memoise the given Wikidata Q-IDs (batched, best-effort) so a
+    later :func:`cached_qid_label` lookup finds a human name. No-op for ids
+    already cached."""
+    _resolve_qids(qids)
+
+
 def _resolve_qids(qids: list[str]) -> dict[str, str]:
     """Wikidata Q-ID → English label, batched + memoised. Best-effort: any
     unresolved id just falls back to the bare Q-ID at the call site."""

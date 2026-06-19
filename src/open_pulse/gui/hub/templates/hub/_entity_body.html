@@ -41,13 +41,14 @@
 {%- endmacro %}
 
 {# Render a value that *might* be a URL.
- * If it's a URL, prefer the hub-internal link (walks the data plane)
- * and append a small ↗ to the external source. Otherwise plain text. #}
+ * If it's a URL, show a human-readable label (licence id, schema.org type,
+ * owner/repo, DOI) linked into the hub, with the full URL on hover and a
+ * small ↗ to the external source. Otherwise plain text. #}
 {% macro hub_or_external(value, href) -%}
   {% set url = href if href else (value if value.startswith('http') else '') %}
   {%- if url -%}
-    <a href="{{ hub_link(url) }}">{{ value }}</a>
-    <a href="{{ url }}" rel="noopener" target="_blank" class="card-meta" title="open at source" style="margin-left: 4px;">↗</a>
+    <a href="{{ hub_link(url) }}" class="fact-link" title="{{ value }}">{{ human_url_label(value) }}</a>
+    <a href="{{ url }}" rel="noopener" target="_blank" class="fact-ext" title="open at source">↗</a>
   {%- else -%}
     {{ value }}
   {%- endif %}
@@ -126,19 +127,36 @@
     }
 
     /* ── facts as a 2-column masonry of key/value pairs ── */
-    .facts-grid { column-gap: 22px; }
+    .facts-grid { column-gap: 24px; }
     @media (min-width: 560px) { .facts-grid { column-count: 2; } }
-    .facts-grid .fact { break-inside: avoid; padding: 7px 0;
-      border-bottom: 1px solid var(--border); }
-    .fact-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
-      color: var(--fg-faint); margin-bottom: 2px; }
-    .fact-value { font-size: 13.5px; word-break: break-word; }
+    .facts-grid .fact { break-inside: avoid; padding: 8px 0;
+      border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
+    .facts-grid .fact:hover .fact-label { color: var(--fg-muted); }
+    .fact-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--fg-faint); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .fact-value { font-size: 13.5px; word-break: break-word; line-height: 1.4; }
+    /* humanised pointer link + its small external-source affordance */
+    .fact-link { color: var(--accent); text-decoration: none; font-weight: 550; }
+    .fact-link:hover { text-decoration: underline; }
+    .fact-ext { color: var(--fg-faint); text-decoration: none; margin-left: 5px; font-size: 11px; }
+    .fact-ext:hover { color: var(--fg); }
 
     /* ── compact key/value list (cross-references) ── */
     .kv { padding: 6px 0; border-bottom: 1px solid var(--border); }
     .kv:last-child { border-bottom: 0; }
     .kv-k { font-size: 11px; color: var(--fg-muted); margin-bottom: 2px; }
     .kv-v { font-size: 12.5px; }
+
+    /* ── grouped graph relations ── */
+    .rel-section + .rel-section { margin-top: 12px; padding-top: 10px;
+      border-top: 1px dashed var(--border); }
+    .rel-section-title { font-size: 11px; font-weight: 650; color: var(--fg-muted);
+      display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
+    .rel-count { font-size: 10px; font-weight: 700; color: var(--fg-faint);
+      background: var(--surface-sunk); border-radius: 8px; padding: 0 6px; }
+    .rel-list { margin: 0; padding: 0; list-style: none; display: flex;
+      flex-direction: column; gap: 6px; }
+    .rel-list li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 
     /* ── provenance tags — which store a fact / edge came from ── */
     .src-tag { font-size: 8.5px; font-weight: 700; text-transform: uppercase;
@@ -288,30 +306,47 @@
       {% endif %}
 
       {% if entity.neighbours %}
+        {# Group the harmonised edges into readable sections by category
+           (set on each neighbour by the merge). Contributors & authors are
+           unified across Neo4j ("contributed by") and RDF ("authored by");
+           owners/orgs include github orgs surfaced from RDF. #}
+        {% set REL_SECTIONS = [
+          ('people', '👤 Contributors &amp; authors'),
+          ('orgs',   '🏛️ Organizations &amp; owners'),
+          ('repos',  '📦 Repositories &amp; forks'),
+          ('works',  '📄 Cited works'),
+          ('other',  '🔗 Other links'),
+        ] %}
         <div class="card">
           <div class="card-title">🕸 Related in the graph</div>
-          <div class="card-meta" style="margin: 4px 0 10px;">
-            Harmonised from <strong>Neo4j</strong> + <strong>RDF</strong> (SPARQL) —
-            owners, contributors, forks, cited works. Rows tagged with both
-            stores are corroborated by each.
+          <div class="card-meta" style="margin: 4px 0 12px;">
+            Harmonised from <strong>Neo4j</strong> + <strong>RDF</strong> (SPARQL).
+            Rows tagged with both stores are corroborated by each.
           </div>
-          <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px;">
-          {% for n in entity.neighbours %}
-            <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
-              {{ prov_chips(n.sources if n.sources else ([n.source_type] if n.source_type else [])) }}
-              <span class="pill pill-neutral" style="text-transform: lowercase; font-size: 11px;">{{ n.relation }}</span>
-              {% if n.kind %}<span class="card-meta" style="font-size: 11px;">{{ n.kind.lower() }}</span>{% endif %}
-              {% if n.hub_url %}
-                <a href="{{ n.hub_url }}" class="mono" style="word-break: break-all;">{{ n.label }}</a>
-                {% if n.external_url %}<a href="{{ n.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>{% endif %}
-              {% elif n.external_url %}
-                <a href="{{ n.external_url }}" rel="noopener" target="_blank">{{ n.label }}</a>
-              {% else %}
-                <span>{{ n.label }}</span>
-              {% endif %}
-            </li>
+          {% for sec, title in REL_SECTIONS %}
+            {% set items = entity.neighbours | selectattr('category','equalto', sec) | list %}
+            {% if items %}
+              <div class="rel-section">
+                <div class="rel-section-title">{{ title | safe }}<span class="rel-count">{{ items | length }}</span></div>
+                <ul class="rel-list">
+                {% for n in items %}
+                  <li>
+                    {{ prov_chips(n.sources if n.sources else ([n.source_type] if n.source_type else [])) }}
+                    <span class="pill pill-neutral" style="text-transform: lowercase; font-size: 11px;">{{ n.relation }}</span>
+                    {% if n.hub_url %}
+                      <a href="{{ n.hub_url }}" style="word-break: break-word;">{{ n.label }}</a>
+                      {% if n.external_url %}<a href="{{ n.external_url }}" rel="noopener" target="_blank" class="fact-ext" title="open at source">↗</a>{% endif %}
+                    {% elif n.external_url %}
+                      <a href="{{ n.external_url }}" rel="noopener" target="_blank">{{ n.label }}</a>
+                    {% else %}
+                      <span>{{ n.label }}</span>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
           {% endfor %}
-          </ul>
         </div>
       {% endif %}
 
