@@ -32,6 +32,11 @@ class Fact:
     href: str = ""
     value_list: tuple[str, ...] = ()
     value_links: tuple[tuple[str, str], ...] = ()
+    badges: tuple[tuple[str, str, str], ...] = ()
+    """Rendered badge images — one ``(image_url, label, link_url)`` per badge.
+    The template renders each as ``<a href=link title=label><img src=image>``.
+    Built from a repo's structured badge predicates or a README's markdown
+    badges (see ``resolvers.base``)."""
     source: str = ""
     """Provenance tag driving a small source chip in the UI:
     ``"rdf"`` (SPARQL / Oxigraph), ``"index"`` (GME payload via Qdrant),
