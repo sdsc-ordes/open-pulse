@@ -90,6 +90,16 @@ def _source_logo(url: str) -> str:
 templates.env.globals["url_host"] = _url_host
 templates.env.globals["source_logo"] = _source_logo
 
+
+def _short_date(value: str) -> str:
+    """Trim an ISO datetime to just its date (``2022-12-07T10:19:30Z`` →
+    ``2022-12-07``); pass anything else through unchanged."""
+    s = str(value or "")
+    return s[:10] if re.match(r"^\d{4}-\d{2}-\d{2}[T ]", s) else s
+
+
+templates.env.globals["short_date"] = _short_date
+
 # Thematic grouping of the Facts card into separate cards (Classification /
 # Metrics / Timeline / Details).
 from ..knowledge.resolvers.base import fact_groups as _fact_groups  # noqa: E402
