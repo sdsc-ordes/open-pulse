@@ -230,6 +230,7 @@ def neighbours_from_bindings(bindings: Iterable[dict]) -> list[Neighbour]:
         out.append(Neighbour(
             label=label, relation=relation, hub_url=hub_url,
             external_url=external, kind=kind, source_type="RDF",
+            sources=("RDF",),
         ))
     return out
 
@@ -311,10 +312,68 @@ def neighbours_from_neo4j(
                 hub_url=hub_url,
                 external_url=external,
                 kind=kind,
-                source_type="GitHub",
+                source_type="Neo4j",
+                sources=("Neo4j",),
             )
         )
     return out
+
+
+def _merge_facts(facts: list[Fact]) -> list[Fact]:
+    """Collapse facts sharing an exact (label, value) into one row, unioning
+    their provenance tags so corroboration across stores reads as a single
+    multi-source fact. Genuinely different values for the same label stay as
+    separate rows (so a SPARQL/Neo4j conflict is shown, not hidden). Order is
+    first-seen."""
+    order: list[tuple[str, str]] = []
+    by_key: dict[tuple[str, str], Fact] = {}
+    for f in facts:
+        key = (f.label, f.value)
+        srcs = list(f.sources) or ([f.source] if f.source else [])
+        if key in by_key:
+            ex = by_key[key]
+            merged = list(ex.sources or ([ex.source] if ex.source else []))
+            for s in srcs:
+                if s and s not in merged:
+                    merged.append(s)
+            by_key[key] = replace(ex, sources=tuple(merged),
+                                  source=merged[0] if merged else ex.source)
+        else:
+            uniq = tuple(dict.fromkeys(s for s in srcs if s))
+            by_key[key] = replace(f, sources=uniq)
+            order.append(key)
+    return [by_key[k] for k in order]
+
+
+def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
+    """Collapse edges pointing at the same target into one, unioning the graph
+    stores that assert them — so an ``owned by`` edge known to both Neo4j and
+    the RDF store reads as one corroborated edge tagged with both.
+
+    The identity is ``(relation, hub_url | external_url | label)`` rather than
+    the display label, because Neo4j carries the human name ("Swiss Data
+    Science Center") while the RDF store carries the URL slug
+    ("github.com/sdsc-ordes") for the *same* entity — keying on the resolved
+    target lets them merge, and the first (Neo4j) row keeps its richer label.
+    """
+    order: list[tuple[str, str]] = []
+    by_key: dict[tuple[str, str], Neighbour] = {}
+    for n in neighbours:
+        ident = n.hub_url or n.external_url or n.label
+        key = (n.relation, ident)
+        srcs = list(n.sources) or ([n.source_type] if n.source_type else [])
+        if key in by_key:
+            ex = by_key[key]
+            merged = list(ex.sources or ([ex.source_type] if ex.source_type else []))
+            for s in srcs:
+                if s and s not in merged:
+                    merged.append(s)
+            by_key[key] = replace(ex, sources=tuple(merged))
+        else:
+            uniq = tuple(dict.fromkeys(s for s in srcs if s))
+            by_key[key] = replace(n, sources=uniq)
+            order.append(key)
+    return [by_key[k] for k in order]
 
 
 def maybe_narrate(entity: Entity) -> Entity:
@@ -409,16 +468,11 @@ def build_entity(
     neighbours = neighbours_from_neo4j(canonical, slug=canonical_ref.path)
     _emit(on_status, f"Neo4j: {len(neighbours)} neighbours")
 
-    # Unify the two graphs: Neo4j (GitHub) edges first, then RDF edges,
-    # de-duplicated on (relation, label) so a repo owned-by relation that
-    # both stores know isn't shown twice.
-    if rdf_neighbours:
-        seen_edges = {(n.relation, n.label) for n in neighbours}
-        for n in rdf_neighbours:
-            if (n.relation, n.label) in seen_edges:
-                continue
-            neighbours.append(n)
-            seen_edges.add((n.relation, n.label))
+    # Harmonise the two graphs: Neo4j edges first, then RDF edges, collapsed
+    # on (relation, label) so an edge both stores assert reads as one
+    # corroborated row tagged with both ("Neo4j" + "RDF") rather than appearing
+    # twice or hiding the agreement.
+    neighbours = _merge_neighbours([*neighbours, *rdf_neighbours])
 
     coll_label = (
         ", ".join(collections)
@@ -439,12 +493,11 @@ def build_entity(
     if not facts and not neighbours and not mentions and not qdrant_facts:
         return None
 
-    seen = {f.label for f in facts}
-    for f in qdrant_facts:
-        if f.label in seen:
-            continue
-        facts.append(f)
-        seen.add(f.label)
+    # Harmonise SPARQL (rdf) + Qdrant-payload (index) facts: identical
+    # (label, value) pairs collapse into one row tagged with every store that
+    # carries them; differing values for the same label stay as distinct rows
+    # so a real conflict surfaces instead of being silently dropped.
+    facts = _merge_facts([*facts, *qdrant_facts])
 
     identifiers = identifiers_fn(bindings) if identifiers_fn else []
 
