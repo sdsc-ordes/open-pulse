@@ -52,19 +52,22 @@
   {%- endif -%}
 {%- endmacro %}
 
-{# True-ish (non-empty) when a URL points at a renderable badge / image —
-   shields.io & friends, or a plain .svg/.png. #}
-{% macro is_badge(u) -%}
+{# True-ish (non-empty) when a URL points at a renderable image — a badge
+   (shields.io & friends), a plain image file (.svg/.png/.jpg/…), or an avatar
+   (githubusercontent / any 'avatar' URL, which carry no file extension). #}
+{% macro is_img(u) -%}
   {%- set ul = (u or '')|lower -%}
-  {%- if ul.startswith('http') and (ul.endswith('.svg') or 'shields.io' in ul or 'badgen.net' in ul or 'badge.fury' in ul or ('badge' in ul and ul.endswith('.png'))) -%}1{%- endif -%}
+  {%- if ul.startswith('http') and (
+        ('.svg' in ul or '.png' in ul or '.jpg' in ul or '.jpeg' in ul or '.gif' in ul or '.webp' in ul)
+        or 'shields.io' in ul or 'badgen.net' in ul or 'badge' in ul or 'avatar' in ul) -%}1{%- endif -%}
 {%- endmacro %}
 
-{# A single value — a badge image (linked), or a humanised link prefixed with
-   its source logo, or plain text. #}
+{# A single value — a badge/avatar image (linked), or a humanised link prefixed
+   with its source logo, or plain text (ISO datetimes trimmed to the date). #}
 {% macro one_value(value, href) -%}
   {%- set url = href if href else value -%}
-  {%- if is_badge(url) -%}
-    <a href="{{ url }}" rel="noopener" target="_blank"><img class="fact-badge" src="{{ url }}" alt="" loading="lazy"></a>
+  {%- if is_img(url) -%}
+    <a href="{{ url }}" rel="noopener" target="_blank" title="{{ url_host(url) }} ↗"><img class="fact-img" src="{{ url }}" alt="" loading="lazy"></a>
   {%- else -%}
     {{ src_logo(href if href else value) }}{{ hub_or_external(value, href) }}
   {%- endif -%}
@@ -79,7 +82,7 @@
       {% if f.value_links %}
         <div class="fact-chips">
           {% for label, url in f.value_links[:14] %}
-            {% if url and is_badge(url) %}<a href="{{ url }}" rel="noopener" target="_blank"><img class="fact-badge" src="{{ url }}" alt="{{ label }}" loading="lazy"></a>
+            {% if url and is_img(url) %}<a href="{{ url }}" rel="noopener" target="_blank"><img class="fact-img" src="{{ url }}" alt="{{ label }}" loading="lazy"></a>
             {% elif url %}<a class="pill pill-info" href="{{ url }}" {% if url.startswith('http') %}rel="noopener" target="_blank"{% endif %} style="font-size: 12px; text-decoration: none;">{{ label }}</a>
             {% else %}<span class="pill pill-neutral" style="font-size: 12px;">{{ label }}</span>{% endif %}
           {% endfor %}
@@ -116,7 +119,7 @@
     <a href="{{ hub_link(url) }}" class="fact-link" title="{{ value }}">{{ human_url_label(value) }}</a>
     <a href="{{ url }}" rel="noopener" target="_blank" class="fact-ext" title="open at source">↗</a>
   {%- else -%}
-    {{ value }}
+    {{ short_date(value) }}
   {%- endif %}
 {%- endmacro %}
 
@@ -148,7 +151,7 @@
   {%- elif label == 'country_code' -%}
     <span class="mono">{{ value | upper }}</span>
   {%- else -%}
-    {{ value }}
+    {{ short_date(value) }}
   {%- endif %}
 {%- endmacro %}
 
@@ -211,7 +214,9 @@
     .fact-chips .pill { transition: border-color .12s ease, background .12s ease; }
     .fact-chips a.pill:hover { border-color: var(--accent); }
     /* rendered status / version badge image (shields.io & friends) */
-    .fact-badge { height: 18px; vertical-align: middle; border-radius: 3px; display: inline-block; }
+    /* rendered badge / avatar / image fact value */
+    .fact-img { height: 20px; max-width: 100%; vertical-align: middle; border-radius: 4px;
+      display: inline-block; background: var(--surface); }
 
     /* ── compact key/value list (cross-references) ── */
     .kv { padding: 6px 0; border-bottom: 1px solid var(--border); }
