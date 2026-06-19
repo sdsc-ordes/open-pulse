@@ -32,7 +32,25 @@
    the rendered body fragment swaps in over the spinner. The lazy
    backlinks panel below the body fetches independently after the
    entity has rendered, so a slow Qdrant doesn't pin the main load. #}
-<div x-data='hubStream({{ ref_payload | tojson }})' x-init="connect()" style="position: relative; display: flex; flex-direction: column; gap: 16px;">
+<div x-data='hubStream({{ ref_payload | tojson }})' x-init="start()" style="position: relative; display: flex; flex-direction: column; gap: 16px;">
+
+  {# Inline RDF named-graph selector. Re-scopes the SPARQL-derived facts +
+     relations to a single graph and re-resolves the page live. Shares the
+     per-session ``rdf_graph`` setting with Settings, so a choice here is
+     reflected there and vice-versa. Hidden when the store has no named graphs. #}
+  <div x-show="graphs.length" x-cloak class="entity-graphbar">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="9" r="2.4"/><circle cx="9" cy="18" r="2.4"/><path d="M7.7 7.4 16 8.6 M8 16.2 16.5 10.6" stroke-linecap="round"/></svg>
+    <span class="card-meta" style="font-weight:600;">RDF graph</span>
+    <select class="entity-graphsel" x-model="graph" @change="changeGraph($event.target.value)">
+      <option value="">Default · all graphs</option>
+      <template x-for="g in graphs" :key="g.iri">
+        <option :value="g.iri" x-text="g.label + ' · ' + (g.count||0).toLocaleString() + ' triples'"></option>
+      </template>
+    </select>
+    <span x-show="graph" x-cloak class="card-meta" style="opacity:.7; font-size:11px;">
+      facts &amp; relations scoped to this graph
+    </span>
+  </div>
 
   <div x-show="!done" class="card" style="display: flex; flex-direction: column; gap: 12px;">
     <div style="display: flex; align-items: center; gap: 12px;">
@@ -83,6 +101,23 @@
      derived works, related orgs, main developers, activity statistics.
      Each fetches its own endpoint after the entity body lands. #}
   <div class="entity-panels">
+
+  {# CHAOSS health — compact headline metrics for a software repo, with a
+     link to the full per-repo dashboard. The endpoint returns an empty body
+     for non-repo URLs, so the slot hides itself there. #}
+  <template x-if="done && found">
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "chaoss", "📊 CHAOSS health")' x-init="load()"
+         x-show="loading || html.length > 0">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
+        <span class="hub-spinner" aria-hidden="true"></span>
+        <div>
+          <div class="card-title" style="margin-bottom: 2px;" x-text="title"></div>
+          <div style="font-size: 14px;" class="card-meta">computing health metrics…</div>
+        </div>
+      </div>
+      <div x-show="!loading && html.length > 0" x-html="html"></div>
+    </div>
+  </template>
 
   {# Non-github entities — surface the GitHub repos they reference.
      Each item navigates to the github.com hub page, where Neo4j
@@ -194,6 +229,13 @@
     animation: hub-spin 0.8s linear infinite;
     flex-shrink: 0;
   }
+  /* Inline RDF graph selector bar. */
+  .entity-graphbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface-sunk); color: var(--fg-muted); }
+  .entity-graphsel { font-size: 12.5px; padding: 5px 9px; border-radius: 8px;
+    background: var(--surface); border: 1px solid var(--border); color: var(--fg);
+    cursor: pointer; max-width: 100%; }
   @keyframes hub-spin { to { transform: rotate(360deg); } }
 
   /* Lazy panels tile into a balanced two-column masonry on wide
@@ -217,6 +259,31 @@ function hubStream(ref) {
     done: false,
     found: false,
     error: '',
+    graphs: [],
+    graph: '',
+    _es: null,
+    // Entry point — read the pinned graph, load the graph list, then resolve.
+    start() {
+      try { this.graph = (window.opSecrets && window.opSecrets.get('rdf_graph')) || ''; } catch (_) {}
+      this.loadGraphs();
+      this.connect();
+    },
+    async loadGraphs() {
+      try {
+        const r = await fetch('/api/hub/graphs', { credentials: 'include' });
+        const j = await r.json();
+        this.graphs = j.graphs || [];
+      } catch (_) { this.graphs = []; }
+    },
+    // Pin a graph (shared with Settings via opSecrets) and re-resolve live.
+    changeGraph(v) {
+      this.graph = v || '';
+      try { window.opSecrets && window.opSecrets.set('rdf_graph', this.graph); } catch (_) {}
+      if (this._es) { try { this._es.close(); } catch (_) {} this._es = null; }
+      this.done = false; this.found = false; this.result = '';
+      this.error = ''; this.log = []; this.status = 're-resolving…';
+      this.connect();
+    },
     connect() {
       let url = `/api/hub/resolve-stream/${ref.encoded_path}`;
       // Pinned RDF graph (Settings → "RDF graph"). Sent as a query param
@@ -227,6 +294,7 @@ function hubStream(ref) {
       // `withCredentials` so the session cookie travels — otherwise
       // a non-public hub would 401 the EventSource.
       const es = new EventSource(url, { withCredentials: true });
+      this._es = es;
       es.addEventListener('status', (e) => {
         this.log.push(e.data);
         this.status = e.data;

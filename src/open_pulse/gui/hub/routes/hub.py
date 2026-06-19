@@ -1418,6 +1418,81 @@ def hub_activity(request: Request, ref: str) -> HTMLResponse:
     )
 
 
+# Compact CHAOSS headline set for the software-page panel — one per axis
+# (community / popularity / quality). The full 20-metric dashboard lives at
+# /chaoss/github.com/<owner>/<repo>; this is the at-a-glance teaser.
+_CHAOSS_PANEL_SLUGS = (
+    "contributors",
+    "project_popularity",
+    "technical_fork",
+    "academic_impact",
+    "release_frequency",
+    "licenses_declared",
+)
+_CHAOSS_PANEL_WINDOW = 3650  # match the dashboard default (≈all-time)
+_CHAOSS_PANEL_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+@router.get(
+    "/api/hub/chaoss/{ref:path}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+async def hub_chaoss(request: Request, ref: str) -> HTMLResponse:
+    """Compact CHAOSS health panel for a github repository URL.
+
+    Computes a small headline set of metrics (concurrently) and links to the
+    full per-repo dashboard. Non-repo URLs get an empty body so the lazy slot
+    hides itself.
+    """
+    parsed = normalize.parse_ref(ref)
+    is_repo = parsed.host == "github.com" and parsed.path.count("/") == 1
+    if not is_repo:
+        return templates.TemplateResponse(
+            request, "hub/_chaoss_body.html",
+            {"metrics": [], "full": "", "window": _CHAOSS_PANEL_WINDOW, "window_label": ""},
+        )
+
+    from ..chaoss import metrics as chaoss_metrics  # lazy — heavy import
+
+    full = parsed.path
+    canonical = parsed.canonical_url
+
+    metrics = _CHAOSS_PANEL_CACHE.get(canonical)
+    if metrics is None:
+        def _compute(slug: str) -> dict[str, Any] | None:
+            spec = chaoss_metrics.spec_for(slug)
+            if spec is None:
+                return None
+            try:
+                r = spec.compute(full, canonical, _CHAOSS_PANEL_WINDOW)
+            except Exception as exc:  # noqa: BLE001
+                log.info("chaoss panel metric %s failed for %s: %s", slug, full, exc)
+                return None
+            return {
+                "slug": slug, "name": spec.name, "category": spec.category,
+                "value": r.value, "label": r.label,
+                "secondary": r.secondary, "tone": r.headline_tone or "",
+            }
+
+        results = await asyncio.gather(
+            *(asyncio.to_thread(_compute, s) for s in _CHAOSS_PANEL_SLUGS)
+        )
+        metrics = [m for m in results if m]
+        if len(_CHAOSS_PANEL_CACHE) > 256:
+            _CHAOSS_PANEL_CACHE.clear()
+        _CHAOSS_PANEL_CACHE[canonical] = metrics
+
+    return templates.TemplateResponse(
+        request, "hub/_chaoss_body.html",
+        {
+            "metrics": metrics, "full": full,
+            "window": _CHAOSS_PANEL_WINDOW,
+            "window_label": chaoss_metrics.window_label(_CHAOSS_PANEL_WINDOW),
+        },
+    )
+
+
 @router.get("/api/hub/graphs", dependencies=[Depends(maybe_require_auth)])
 def hub_graphs() -> dict[str, Any]:
     """List the SPARQL store's named graphs for the hub graph picker.
@@ -1432,7 +1507,13 @@ def hub_graphs() -> dict[str, Any]:
             out.append({"iri": iri, "count": g["count"], "label": label})
         return out
 
-    return {"graphs": qdrant.cached_panel("graphs", "*", _gather)}
+    graphs = qdrant.cached_panel("graphs", "*", _gather)
+    # The panel cache also caches empties — a transient SPARQL blip (e.g. just
+    # after a restart) would otherwise hide the graph picker for the whole TTL.
+    # Recompute once when the cache is empty so the picker self-heals.
+    if not graphs:
+        graphs = qdrant.cached_panel("graphs", "*", _gather, force=True)
+    return {"graphs": graphs}
 
 
 @router.get(

@@ -1,0 +1,30 @@
+{# Compact CHAOSS health panel for a software (github repo) entity page.
+   Rendered by /api/hub/chaoss/{ref}. Empty `metrics` → nothing renders and
+   the lazy slot in entity.html hides itself. Full dashboard lives at
+   /chaoss/github.com/<full>. #}
+{% if metrics %}
+{% set TONE = {'good': 'tone-ok', 'warn': 'tone-warn', 'danger': 'tone-bad', 'info': 'tone-info'} %}
+<div class="card">
+  <div class="card-title">📊 CHAOSS health</div>
+  <div class="card-meta" style="margin: 4px 0 12px;">
+    Community, popularity &amp; quality signals{% if window_label %} · {{ window_label }}{% endif %} ·
+    harmonised across Neo4j · SPARQL · OpenSearch.
+  </div>
+  <div class="grid-stats">
+    {% for m in metrics %}
+      <div class="card {{ TONE.get(m.tone, 'tone-info') }}">
+        <div class="card-meta" style="text-transform: uppercase; letter-spacing: .05em; font-size: 10px;">{{ m.category }}</div>
+        <div class="card-title" style="font-size: 12.5px; margin: 1px 0 4px;">{{ m.name }}</div>
+        <div class="stat-value" style="font-size: 21px; line-height: 1.1;">{{ m.value }}</div>
+        {% if m.label %}<div class="card-meta" style="margin-top: 3px;">{{ m.label }}</div>{% endif %}
+        {% if m.secondary %}<div class="card-meta" style="opacity: .8;">{{ m.secondary }}</div>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  <div style="margin-top: 12px;">
+    <a class="btn btn-ghost" href="/chaoss/github.com/{{ full }}?window={{ window }}">
+      Full CHAOSS dashboard →
+    </a>
+  </div>
+</div>
+{% endif %}
