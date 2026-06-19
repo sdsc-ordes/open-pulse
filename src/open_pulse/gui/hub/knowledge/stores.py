@@ -193,13 +193,20 @@ def neo4j_run(
             pass
 
 
-def sparql_describe(subject_iri: str, limit: int = 200) -> list[dict[str, Any]]:
+def sparql_describe(
+    subject_iri: str, limit: int = 200, *, scoped: bool = True
+) -> list[dict[str, Any]]:
     """Convenience: every ``?p ?o`` for a subject, capped at ``limit``.
 
     Used by every resolver as the first probe — if the store has any
     statements about the canonical URL, the entity counts as known.
+
+    Scoped to the pinned named graph when one is active. Pass ``scoped=False``
+    to always query the union across all graphs — used for relationship edges
+    (contributors / owners) so they don't vanish when a graph that lacks them
+    is pinned, even though the descriptive facts stay graph-scoped.
     """
-    graph = get_active_graph()
+    graph = get_active_graph() if scoped else ""
     if graph:
         query = (
             f"SELECT ?p ?o WHERE {{ GRAPH <{graph}> "

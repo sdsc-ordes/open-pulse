@@ -66,10 +66,15 @@ def url_aliases(canonical_url: str) -> list[str]:
     return deduped
 
 
-def probe_sparql(canonical_url: str) -> list[dict]:
-    """Try every URL alias until something comes back from SPARQL."""
+def probe_sparql(canonical_url: str, *, scoped: bool = True) -> list[dict]:
+    """Try every URL alias until something comes back from SPARQL.
+
+    ``scoped`` honours the pinned named graph (default); ``scoped=False`` always
+    queries the union across all graphs — used for relationship edges so a
+    contributor/owner doesn't disappear when a graph that lacks them is pinned.
+    """
     for alias in url_aliases(canonical_url):
-        bindings = sparql_describe(alias)
+        bindings = sparql_describe(alias, scoped=scoped)
         if bindings:
             return bindings
     return []
@@ -913,7 +918,15 @@ def build_entity(
     _emit(on_status, f"Probing SPARQL store for {canonical}")
     bindings = probe_sparql(canonical)
     facts = facts_from_bindings(bindings)
-    rdf_neighbours = neighbours_from_bindings(bindings)
+    # Relationship edges (contributors / owners / cited works) are resolved from
+    # the union across all graphs — not the pinned graph — so they don't vanish
+    # when a graph that lacks them is pinned (the descriptive facts above stay
+    # graph-scoped). When no graph is pinned the scoped probe is already the
+    # union, so reuse it instead of querying twice.
+    from ..stores import get_active_graph  # local — keep import lazy
+
+    union_bindings = probe_sparql(canonical, scoped=False) if get_active_graph() else bindings
+    rdf_neighbours = neighbours_from_bindings(union_bindings)
     _emit(on_status, f"SPARQL: {len(facts)} facts, {len(rdf_neighbours)} edges")
 
     _emit(on_status, "Querying Neo4j for 1-hop neighbours")
