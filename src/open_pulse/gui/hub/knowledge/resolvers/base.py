@@ -17,6 +17,7 @@ human-facing label/kind/identifier mapping.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import replace
@@ -27,6 +28,8 @@ from ..entity import Entity, Fact, Neighbour
 from ..normalize import HubRef, parse_ref
 from ..qdrant import lookup_for_ref
 from ..stores import sparql_describe, sparql_select
+
+log = logging.getLogger(__name__)
 
 # Process-lifetime cache for the agent narrative: composing a
 # narrative is a 1–30s call, but the inputs (facts hash) rarely
@@ -475,6 +478,116 @@ def _merge_facts(facts: list[Fact]) -> list[Fact]:
     return [by_key[k] for k in order]
 
 
+def _is_numeric(value: str) -> bool:
+    return value.replace(",", "").replace(".", "", 1).isdigit()
+
+
+def _aggregate_facts(facts: list[Fact]) -> list[Fact]:
+    """Collapse same-label multi-value facts into a single chip row.
+
+    A predicate that repeats (keywords, topics, disciplines, git tags,
+    releases, package versions, …) reads as one fact rendered as chips rather
+    than N near-identical rows. URL values become *linked* chips with a human
+    label; plain literals become plain chips. All-numeric repeats (a metric the
+    two stores disagree on) are left as separate rows so the discrepancy stays
+    visible. Single-value facts pass through untouched."""
+    order: list[str] = []
+    grouped: dict[str, list[Fact]] = {}
+    for f in facts:
+        if f.value_list or f.value_links:  # already a chip fact — keep as-is
+            order.append(f"\x00keep\x00{len(order)}")
+            grouped[order[-1]] = [f]
+            continue
+        grouped.setdefault(f.label, []).append(f)
+        if f.label not in order:
+            order.append(f.label)
+
+    out: list[Fact] = []
+    for key in order:
+        fs = grouped[key]
+        # de-dup identical values, preserve order
+        seen: set[str] = set()
+        items = [f for f in fs if not (f.value in seen or seen.add(f.value))]
+        if len(items) == 1 or all(_is_numeric(str(f.value)) for f in items):
+            out.extend(items)
+            continue
+        srcs: list[str] = []
+        for f in items:
+            for s in (f.sources or ([f.source] if f.source else [])):
+                if s and s not in srcs:
+                    srcs.append(s)
+        label = items[0].label
+        if any(f.href or str(f.value).startswith("http") for f in items):
+            # Build (label, url) chips, deduped by the human label so a slug +
+            # its full-URL variant ("owner/repo" + ".../owner/repo") collapse.
+            seen_lbl: set[str] = set()
+            links_list: list[tuple[str, str]] = []
+            for f in items:
+                lbl = human_url_label(f.value)
+                if lbl in seen_lbl:
+                    continue
+                seen_lbl.add(lbl)
+                links_list.append((lbl, f.href or f.value))
+            links = tuple(links_list)
+            out.append(Fact(
+                label=label, value=", ".join(lbl for lbl, _ in links),
+                value_links=links, source=srcs[0] if srcs else "", sources=tuple(srcs),
+            ))
+        else:
+            vals = tuple(str(f.value) for f in items)
+            out.append(Fact(
+                label=label, value=", ".join(vals), value_list=vals,
+                source=srcs[0] if srcs else "", sources=tuple(srcs),
+            ))
+    return out
+
+
+# Fact labels whose value is a project URL worth resolving to a page title.
+_TITLE_FACT_LABELS = frozenset({"homepage", "Homepage", "url", "URL", "Homepage url"})
+_PAGE_TITLES: dict[str, str] = {}
+
+
+def _page_title(url: str) -> str:
+    """The ``<title>`` of an HTML page, memoised. Best-effort: short timeout,
+    capped read, empty string on any failure (caller falls back to the URL)."""
+    if url in _PAGE_TITLES:
+        return _PAGE_TITLES[url]
+    title = ""
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(url, headers={"User-Agent": "open-pulse-hub/1.0"})
+        with urllib.request.urlopen(req, timeout=4) as r:  # noqa: S310
+            ctype = r.headers.get("Content-Type", "")
+            if "html" in ctype.lower() or not ctype:
+                html = r.read(20000).decode("utf-8", "replace")
+                m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+                if m:
+                    title = re.sub(r"\s+", " ", m.group(1)).strip()[:80]
+    except Exception as exc:  # noqa: BLE001
+        log.info("page title fetch failed (%s): %s", url, exc)
+    _PAGE_TITLES[url] = title
+    return title
+
+
+def _enrich_url_titles(facts: list[Fact]) -> list[Fact]:
+    """For homepage-style pointer facts, fetch the page title and render it as a
+    linked chip (``title → url``) so the value reads as a name, not a bare URL."""
+    out: list[Fact] = []
+    for f in facts:
+        if (
+            f.label in _TITLE_FACT_LABELS
+            and not f.value_links and not f.value_list
+            and str(f.value).startswith("http")
+        ):
+            title = _page_title(str(f.value))
+            if title:
+                out.append(replace(f, value_links=((title, str(f.value)),)))
+                continue
+        out.append(f)
+    return out
+
+
 def _is_slug_label(label: str) -> bool:
     """True for a URL-ish / ``owner/repo`` label — i.e. not a human name."""
     return (not label) or label.startswith("http") or "/" in label
@@ -677,6 +790,12 @@ def build_entity(
             _facets.warm_qid_labels(qids)
         except Exception:  # noqa: BLE001
             pass
+
+    # Resolve a human page title for homepage-style pointer facts, then
+    # aggregate same-label multi-value facts (keywords, topics, disciplines,
+    # tags, releases, versions, …) into a single chip row.
+    facts = _enrich_url_titles(facts)
+    facts = _aggregate_facts(facts)
 
     identifiers = identifiers_fn(bindings) if identifiers_fn else []
 
