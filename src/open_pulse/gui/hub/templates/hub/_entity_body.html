@@ -79,11 +79,19 @@
   <div class="fact">
     <div class="fact-label">{{ f.label.replace('_',' ') }}{{ fact_prov(f) }}</div>
     <div class="fact-value">
-      {% if f.value_links %}
+      {% if f.badges %}
+        {# Rendered badge images — each linked to its target with the label as
+           a hover tooltip + alt text. #}
+        <div class="fact-chips">
+          {% for img, label, link in f.badges[:16] %}
+            <a href="{{ link or img }}" rel="noopener" target="_blank" title="{{ label }}"><img class="fact-img" src="{{ img }}" alt="{{ label }}" loading="lazy"></a>
+          {% endfor %}
+          {% if f.badges|length > 16 %}<span class="card-meta" style="align-self: center;">+{{ f.badges|length - 16 }} more</span>{% endif %}
+        </div>
+      {% elif f.value_links %}
         <div class="fact-chips">
           {% for label, url in f.value_links[:14] %}
-            {% if is_img(label) %}{# badge: label is the image, url is its click target #}<a href="{{ url or label }}" rel="noopener" target="_blank"><img class="fact-img" src="{{ label }}" alt="badge" loading="lazy"></a>
-            {% elif url and is_img(url) %}<a href="{{ url }}" rel="noopener" target="_blank"><img class="fact-img" src="{{ url }}" alt="{{ label }}" loading="lazy"></a>
+            {% if url and is_img(url) %}<a href="{{ url }}" rel="noopener" target="_blank"><img class="fact-img" src="{{ url }}" alt="{{ label }}" loading="lazy"></a>
             {% elif url %}<a class="pill pill-info" href="{{ url }}" {% if url.startswith('http') %}rel="noopener" target="_blank"{% endif %} style="font-size: 12px; text-decoration: none;">{{ label }}</a>
             {% else %}<span class="pill pill-neutral" style="font-size: 12px;">{{ label }}</span>{% endif %}
           {% endfor %}
