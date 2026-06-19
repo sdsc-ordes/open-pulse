@@ -37,6 +37,13 @@ class Fact:
     ``"rdf"`` (SPARQL / Oxigraph), ``"index"`` (GME payload via Qdrant),
     ``"graph"`` (Neo4j). Empty for synthetic / audit facts."""
 
+    sources: tuple[str, ...] = ()
+    """All stores that corroborate this exact fact (same label + value),
+    in first-seen order — e.g. ``("rdf", "index")`` when SPARQL and the
+    Qdrant payload agree. Set by the harmonising merge in
+    :func:`resolvers.base.build_entity`; when empty the renderer falls
+    back to the single ``source`` tag above."""
+
 
 @dataclass(frozen=True)
 class Neighbour:
@@ -54,6 +61,13 @@ class Neighbour:
     external_url: str = ""
     kind: str = ""
     source_type: str = "GitHub"
+
+    sources: tuple[str, ...] = ()
+    """All graph stores that assert this same edge (same relation +
+    label), in first-seen order — e.g. ``("Neo4j", "RDF")`` when both the
+    crawl graph and the RDF store agree. Set by the harmonising merge in
+    :func:`resolvers.base.build_entity`; when empty the renderer falls
+    back to the single ``source_type`` tag above."""
 
 
 @dataclass(frozen=True)

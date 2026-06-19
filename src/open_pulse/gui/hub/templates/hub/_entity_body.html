@@ -12,11 +12,26 @@
 {% set tiles = entity.facts | selectattr('label','in', headline) | list %}
 {% set rest  = entity.facts | rejectattr('label','in', headline) | list %}
 
-{# Provenance tag — which store a fact / edge came from. #}
-{% set SRC_LABELS = {'rdf': 'RDF', 'index': 'Index', 'graph': 'Neo4j'} %}
-{% macro src_tag(s) -%}
-  {%- if s and s in SRC_LABELS %}<span class="src-tag src-{{ s }}" title="from the {{ SRC_LABELS[s] }} store">{{ SRC_LABELS[s] }}</span>{% endif -%}
+{# Provenance tags — which store(s) a fact / edge came from. Accepts both the
+   fact vocabulary (rdf/index/graph) and the neighbour vocabulary (RDF/Neo4j),
+   normalising each to one styled chip. A row carrying more than one source is
+   corroborated by every store listed. #}
+{% set SRC_MAP = {
+  'rdf':   ('RDF',   'rdf'),
+  'RDF':   ('RDF',   'rdf'),
+  'index': ('Index', 'index'),
+  'Index': ('Index', 'index'),
+  'graph': ('Neo4j', 'graph'),
+  'Neo4j': ('Neo4j', 'graph'),
+} %}
+{% macro prov_chips(sources) -%}
+  {%- for s in sources if s in SRC_MAP -%}
+    <span class="src-tag src-{{ SRC_MAP[s][1] }}" title="from the {{ SRC_MAP[s][0] }} store">{{ SRC_MAP[s][0] }}</span>
+  {%- endfor -%}
 {%- endmacro %}
+{# Fact → its provenance list (multi-source ``sources`` if the merge set it,
+   else the single ``source``). #}
+{% macro fact_prov(f) -%}{{ prov_chips(f.sources if f.sources else ([f.source] if f.source else [])) }}{%- endmacro %}
 
 {% macro hub_link(url) -%}
   /hub/{{ url
@@ -162,7 +177,7 @@
     <div class="grid-stats">
       {% for f in tiles %}
         <div class="card tone-info">
-          <div class="card-title">{{ f.label.replace('_',' ') }}{{ src_tag(f.source) }}</div>
+          <div class="card-title">{{ f.label.replace('_',' ') }}{{ fact_prov(f) }}</div>
           <div class="stat-value" style="font-size: 22px;">{{ tile_value(f.label, f.value) | safe }}</div>
         </div>
       {% endfor %}
@@ -189,7 +204,7 @@
           <div class="facts-grid" style="margin-top: 10px;">
           {% for f in rest %}
             <div class="fact">
-              <div class="fact-label">{{ f.label.replace('_',' ') }}{{ src_tag(f.source) }}</div>
+              <div class="fact-label">{{ f.label.replace('_',' ') }}{{ fact_prov(f) }}</div>
               <div class="fact-value">
                 {% if f.value_links %}
                   {# Multi-valued fact with per-chip hub links — each
@@ -276,14 +291,14 @@
         <div class="card">
           <div class="card-title">🕸 Related in the graph</div>
           <div class="card-meta" style="margin: 4px 0 10px;">
-            Neo4j crawl graph — owning orgs/users, contributors, forks.
+            Harmonised from <strong>Neo4j</strong> + <strong>RDF</strong> (SPARQL) —
+            owners, contributors, forks, cited works. Rows tagged with both
+            stores are corroborated by each.
           </div>
           <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px;">
           {% for n in entity.neighbours %}
             <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
-              {% if n.source_type %}
-                <span class="pill {{ 'pill-rdf' if n.source_type == 'RDF' else 'pill-info' }}" style="font-size: 10px; padding: 1px 6px;">{{ n.source_type }}</span>
-              {% endif %}
+              {{ prov_chips(n.sources if n.sources else ([n.source_type] if n.source_type else [])) }}
               <span class="pill pill-neutral" style="text-transform: lowercase; font-size: 11px;">{{ n.relation }}</span>
               {% if n.kind %}<span class="card-meta" style="font-size: 11px;">{{ n.kind.lower() }}</span>{% endif %}
               {% if n.hub_url %}
