@@ -23,8 +23,8 @@ log = logging.getLogger(__name__)
 # Empty → query the store's default graph (today's behaviour). Set per
 # request from the ``graph`` query param on the resolve stream; propagates
 # into the worker thread because ``asyncio.to_thread`` copies the context.
-_active_graph: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "op_active_graph", default=""
+_active_graphs: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "op_active_graphs", default=()
 )
 # An RDF graph IRI we'll splice into ``GRAPH <...>`` — keep it to safe IRI
 # characters so the value (which originates in the browser) can't break out
@@ -32,14 +32,39 @@ _active_graph: contextvars.ContextVar[str] = contextvars.ContextVar(
 _GRAPH_IRI_RE = re.compile(r"^https?://[^\s<>{}\"'`]+$")
 
 
-def set_active_graph(iri: str) -> None:
-    """Pin the named graph for SPARQL probes in this context (or clear it)."""
-    iri = (iri or "").strip()
-    _active_graph.set(iri if _GRAPH_IRI_RE.match(iri) else "")
+def set_active_graph(value: str) -> None:
+    """Pin one or more named graphs for SPARQL probes in this context.
+
+    Accepts a single IRI or a comma/space-separated list (the inline picker
+    lets the visitor select one *or another* — or several — graphs). Each is
+    validated against :data:`_GRAPH_IRI_RE`; invalid entries are dropped, an
+    empty result clears the scoping (query the default/union graph)."""
+    parts = re.split(r"[,\s]+", (value or "").strip())
+    _active_graphs.set(tuple(p for p in parts if p and _GRAPH_IRI_RE.match(p)))
+
+
+def get_active_graphs() -> tuple[str, ...]:
+    """The pinned named graphs for this context (empty → default/union)."""
+    return _active_graphs.get()
 
 
 def get_active_graph() -> str:
-    return _active_graph.get()
+    """First pinned graph (or ``""``) — back-compat for single-graph callers."""
+    graphs = _active_graphs.get()
+    return graphs[0] if graphs else ""
+
+
+def _graph_scoped(inner: str) -> str:
+    """Wrap a triple pattern in ``GRAPH`` scoping for the active graph(s):
+    one graph → ``GRAPH <g> { … }``; several → ``GRAPH ?g { … } FILTER(?g IN …)``;
+    none → the pattern unscoped (default/union graph)."""
+    graphs = get_active_graphs()
+    if not graphs:
+        return inner
+    if len(graphs) == 1:
+        return f"GRAPH <{graphs[0]}> {{ {inner} }}"
+    vals = ", ".join(f"<{g}>" for g in graphs)
+    return f"GRAPH ?g {{ {inner} }} FILTER(?g IN ({vals}))"
 
 # Neo4j 5.x emits a notification for every property name in a WHERE
 # clause that no node in the database carries. Our defensive OR-filter
@@ -206,14 +231,9 @@ def sparql_describe(
     (contributors / owners) so they don't vanish when a graph that lacks them
     is pinned, even though the descriptive facts stay graph-scoped.
     """
-    graph = get_active_graph() if scoped else ""
-    if graph:
-        query = (
-            f"SELECT ?p ?o WHERE {{ GRAPH <{graph}> "
-            f"{{ <{subject_iri}> ?p ?o }} }} LIMIT {int(limit)}"
-        )
-    else:
-        query = f"SELECT ?p ?o WHERE {{ <{subject_iri}> ?p ?o }} LIMIT {int(limit)}"
+    inner = f"<{subject_iri}> ?p ?o"
+    body = _graph_scoped(inner) if scoped else inner
+    query = f"SELECT ?p ?o WHERE {{ {body} }} LIMIT {int(limit)}"
     return sparql_select(query)
 
 

@@ -1112,16 +1112,13 @@ def sources_summary(
 def sparql_label_query(canonical_url: str) -> str:
     """Try schema:name / schema:headline / rdfs:label for a title.
 
-    Scoped to the pinned named graph when one is active (same per-request
+    Scoped to the pinned named graph(s) when active (same per-request
     selection that scopes :func:`stores.sparql_describe`)."""
-    from ..stores import get_active_graph
+    from ..stores import _graph_scoped
 
     aliases = " ".join(f"<{u}>" for u in url_aliases(canonical_url))
     pattern = "?s (schema:name|schema:headline|rdfs:label) ?label"
-    graph = get_active_graph()
-    where = (
-        f"GRAPH <{graph}> {{ {pattern} }}" if graph else pattern
-    )
+    where = _graph_scoped(pattern)
     return (
         "PREFIX schema: <http://schema.org/> "
         "PREFIX rdfs:   <http://www.w3.org/2000/01/rdf-schema#> "

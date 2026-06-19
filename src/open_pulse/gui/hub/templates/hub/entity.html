@@ -34,21 +34,18 @@
    entity has rendered, so a slow Qdrant doesn't pin the main load. #}
 <div x-data='hubStream({{ ref_payload | tojson }})' x-init="start()" style="position: relative; display: flex; flex-direction: column; gap: 16px;">
 
-  {# Inline RDF named-graph selector. Re-scopes the SPARQL-derived facts +
-     relations to a single graph and re-resolves the page live. Shares the
-     per-session ``rdf_graph`` setting with Settings, so a choice here is
-     reflected there and vice-versa. Hidden when the store has no named graphs. #}
+  {# Inline RDF named-graph selector (TomSelect). Pick one *or several* named
+     graphs to scope the descriptive facts to (relationships always union
+     across graphs); re-resolves the page live. Shares the per-session
+     ``rdf_graph`` setting with Settings. Hidden when the store has no graphs.
+     TomSelect owns the <select>, so we populate + init it in JS rather than
+     binding it with Alpine. #}
   <div x-show="graphs.length" x-cloak class="entity-graphbar">
     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="9" r="2.4"/><circle cx="9" cy="18" r="2.4"/><path d="M7.7 7.4 16 8.6 M8 16.2 16.5 10.6" stroke-linecap="round"/></svg>
     <span class="card-meta" style="font-weight:600;">RDF graph</span>
-    <select class="entity-graphsel" x-model="graph" @change="changeGraph($event.target.value)">
-      <option value="">Default · all graphs</option>
-      <template x-for="g in graphs" :key="g.iri">
-        <option :value="g.iri" x-text="g.label + ' · ' + (g.count||0).toLocaleString() + ' triples'"></option>
-      </template>
-    </select>
-    <span x-show="graph" x-cloak class="card-meta" style="opacity:.7; font-size:11px;">
-      facts &amp; relations scoped to this graph
+    <select class="entity-graphsel" x-ref="graphsel" multiple placeholder="Default · all graphs"></select>
+    <span x-show="sel.length" x-cloak class="card-meta" style="opacity:.7; font-size:11px;">
+      facts scoped to <span x-text="sel.length"></span> graph<span x-show="sel.length>1">s</span> · relations span all
     </span>
   </div>
 
@@ -233,9 +230,21 @@
   .entity-graphbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px;
     background: var(--surface-sunk); color: var(--fg-muted); }
-  .entity-graphsel { font-size: 12.5px; padding: 5px 9px; border-radius: 8px;
-    background: var(--surface); border: 1px solid var(--border); color: var(--fg);
-    cursor: pointer; max-width: 100%; }
+  /* TomSelect graph picker — themed to match the hub surfaces. */
+  .entity-graphbar .ts-wrapper { flex: 1; min-width: 240px; max-width: 620px; margin: 0; }
+  .entity-graphbar .ts-control { background: var(--surface); border: 1px solid var(--border);
+    color: var(--fg); border-radius: 8px; min-height: 30px; font-size: 12.5px;
+    padding: 2px 6px; box-shadow: none; }
+  .entity-graphbar .ts-control.focus { border-color: var(--accent); box-shadow: none; }
+  .entity-graphbar .ts-control > input { color: var(--fg); }
+  .entity-graphbar .ts-control .item { background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+    color: var(--fg); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-radius: 6px; font-size: 11.5px; padding: 1px 6px; }
+  .entity-graphbar .ts-control .item .remove { border-left-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .ts-dropdown { background: var(--surface); border: 1px solid var(--border-strong, var(--border));
+    color: var(--fg); border-radius: 8px; font-size: 12.5px; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
+  .ts-dropdown .option { color: var(--fg-muted); }
+  .ts-dropdown .option.active { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); color: var(--fg); }
   @keyframes hub-spin { to { transform: rotate(360deg); } }
 
   /* Lazy panels tile into a balanced two-column masonry on wide
@@ -260,12 +269,18 @@ function hubStream(ref) {
     found: false,
     error: '',
     graphs: [],
-    graph: '',
+    sel: [],          // selected graph IRIs (one or several)
     _es: null,
-    // Entry point — read the pinned graph, load the graph list, then resolve.
-    start() {
-      try { this.graph = (window.opSecrets && window.opSecrets.get('rdf_graph')) || ''; } catch (_) {}
-      this.loadGraphs();
+    _ts: null,        // the TomSelect instance
+    // Entry point — read the pinned graph(s), load the list, init the picker,
+    // then resolve.
+    async start() {
+      try {
+        const raw = (window.opSecrets && window.opSecrets.get('rdf_graph')) || '';
+        this.sel = raw.split(',').map(s => s.trim()).filter(Boolean);
+      } catch (_) { this.sel = []; }
+      await this.loadGraphs();
+      this.initGraphSelect();
       this.connect();
     },
     async loadGraphs() {
@@ -275,10 +290,28 @@ function hubStream(ref) {
         this.graphs = j.graphs || [];
       } catch (_) { this.graphs = []; }
     },
-    // Pin a graph (shared with Settings via opSecrets) and re-resolve live.
-    changeGraph(v) {
-      this.graph = v || '';
-      try { window.opSecrets && window.opSecrets.set('rdf_graph', this.graph); } catch (_) {}
+    // Build the TomSelect multi-select from the loaded graphs.
+    initGraphSelect() {
+      const el = this.$refs.graphsel;
+      if (!el || !this.graphs.length || typeof TomSelect === 'undefined' || this._ts) return;
+      const options = this.graphs.map(g => ({
+        value: g.iri,
+        label: `${g.label} · ${(g.count || 0).toLocaleString()} triples`,
+      }));
+      this._ts = new TomSelect(el, {
+        options, items: this.sel,
+        valueField: 'value', labelField: 'label', searchField: 'label',
+        plugins: ['remove_button'], maxItems: null, closeAfterSelect: false,
+        placeholder: 'Default · all graphs',
+        onChange: (vals) => this.changeGraph(Array.isArray(vals) ? vals : (vals ? [vals] : [])),
+      });
+    },
+    // Pin the chosen graph(s) (shared with Settings via opSecrets) + re-resolve.
+    changeGraph(vals) {
+      const next = (vals || []).filter(Boolean);
+      if (next.join(',') === this.sel.join(',')) return;  // no-op (e.g. init echo)
+      this.sel = next;
+      try { window.opSecrets && window.opSecrets.set('rdf_graph', this.sel.join(',')); } catch (_) {}
       if (this._es) { try { this._es.close(); } catch (_) {} this._es = null; }
       this.done = false; this.found = false; this.result = '';
       this.error = ''; this.log = []; this.status = 're-resolving…';
