@@ -69,23 +69,54 @@ def _orcid_rdf_info(orcid_url: str) -> tuple[str, str]:
     return name, gh
 
 
+# DuckDB person stores that map an ORCID → display name, tried in order.
+# ``(collection, orcid_column, name_sql)`` — name_sql is a hardcoded expression
+# (no user input) that builds the display name, coalescing the parts a given
+# store carries. Reconciling across all of them — not just OpenAlex ``authors``
+# — is the point: a person absent from one store is often named in another
+# (e.g. an EPFL contributor only in ``orcid_epfl_persons``).
+_PERSON_STORES: tuple[tuple[str, str, str], ...] = (
+    ("authors", "orcid", "display_name"),
+    ("infoscience_persons", "orcid",
+     "COALESCE(display_name, NULLIF(concat_ws(' ', given_name, family_name), ''))"),
+    ("orcid_epfl_persons", "orcid_id",
+     "COALESCE(display_name, NULLIF(concat_ws(' ', given_name, family_name), ''))"),
+    ("orcid_switzerland_persons", "orcid_id",
+     "COALESCE(display_name, NULLIF(concat_ws(' ', given_name, family_name), ''))"),
+    ("ethz_research_collection_persons", "orcid",
+     "COALESCE(display_name, NULLIF(concat_ws(' ', given_name, family_name), ''))"),
+    ("snsf_persons", "orcid", "NULLIF(concat_ws(' ', first_name, last_name), '')"),
+)
+_ORCID_NAME_DUCKDB_CACHE: dict[str, str] = {}
+
+
 def _orcid_name_local(orcid_url: str) -> str:
-    """Display name for an ORCID from the local ``authors`` index (fallback when
-    the RDF node carries no name). No network. Best-effort."""
-    b = ddb._BACKING.get("authors")
-    if b is None:
-        return ""
-    try:
-        with ddb._connect(b.db_path) as con:
-            rows = con.execute(
-                f"SELECT display_name FROM {ddb._source_expr(b)} "
-                f'WHERE lower(CAST(orcid AS VARCHAR)) = lower(?) LIMIT 1',
-                [orcid_url],
-            ).fetchall()
-        return (rows[0][0] if rows and rows[0][0] else "") or ""
-    except Exception as exc:  # noqa: BLE001
-        log.info("orcid local name lookup failed (%s): %s", orcid_url, exc)
-        return ""
+    """Display name for an ORCID, reconciled across every DuckDB person store
+    (OpenAlex / Infoscience / ORCID-EPFL / ORCID-CH / ETHZ / SNSF). The ORCID is
+    matched on its bare id so a store keying by full URL or by bare id both hit.
+    No network; cached; ``""`` if not found anywhere."""
+    if orcid_url in _ORCID_NAME_DUCKDB_CACHE:
+        return _ORCID_NAME_DUCKDB_CACHE[orcid_url]
+    bare = orcid_url.rstrip("/").rsplit("/", 1)[-1]
+    name = ""
+    for coll, col, name_sql in _PERSON_STORES:
+        b = ddb._BACKING.get(coll)
+        if b is None:
+            continue
+        try:
+            with ddb._connect(b.db_path) as con:
+                rows = con.execute(
+                    f"SELECT {name_sql} FROM {ddb._source_expr(b)} "
+                    f'WHERE CAST("{col}" AS VARCHAR) ILIKE ? LIMIT 1',
+                    [f"%{bare}%"],
+                ).fetchall()
+            if rows and rows[0][0] and str(rows[0][0]).strip():
+                name = str(rows[0][0]).strip()
+                break
+        except Exception as exc:  # noqa: BLE001
+            log.info("orcid name lookup failed (%s on %s): %s", orcid_url, coll, exc)
+    _ORCID_NAME_DUCKDB_CACHE[orcid_url] = name
+    return name
 
 
 def _hub_url_for_github(github_url: str) -> str:
@@ -164,6 +195,48 @@ def _rdf_node_name(iri: str) -> str:
     return name
 
 
+# DuckDB publication stores that map a DOI → title, tried in order. Reconciling
+# across all of them means a cited work indexed in Infoscience / Zenodo / ETHZ /
+# HF-papers but not OpenAlex still gets a title.
+_WORK_STORES: tuple[tuple[str, str, str], ...] = (
+    ("works", "doi", "title"),
+    ("infoscience_articles", "doi", "title"),
+    ("zenodo_records", "doi", "title"),
+    ("ethz_research_collection_articles", "doi", "title"),
+    ("huggingface_papers", "doi", "title"),
+)
+_DOI_TITLE_DUCKDB_CACHE: dict[str, str] = {}
+
+
+def _doi_title_duckdb(doi_url: str) -> str:
+    """Title for a DOI, reconciled across every DuckDB publication store. The
+    DOI is matched on its bare id (``10.x/…``) so full-URL or bare columns both
+    hit. No network; cached; ``""`` if not found anywhere."""
+    if doi_url in _DOI_TITLE_DUCKDB_CACHE:
+        return _DOI_TITLE_DUCKDB_CACHE[doi_url]
+    bare = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi_url, flags=re.I).strip("/")
+    title = ""
+    if bare:
+        for coll, col, title_col in _WORK_STORES:
+            b = ddb._BACKING.get(coll)
+            if b is None:
+                continue
+            try:
+                with ddb._connect(b.db_path) as con:
+                    rows = con.execute(
+                        f'SELECT "{title_col}" FROM {ddb._source_expr(b)} '
+                        f'WHERE CAST("{col}" AS VARCHAR) ILIKE ? LIMIT 1',
+                        [f"%{bare}%"],
+                    ).fetchall()
+                if rows and rows[0][0] and str(rows[0][0]).strip():
+                    title = re.sub(r"<[^>]+>", "", str(rows[0][0])).strip()[:120]
+                    break
+            except Exception as exc:  # noqa: BLE001
+                log.info("doi title lookup failed (%s on %s): %s", doi_url, coll, exc)
+    _DOI_TITLE_DUCKDB_CACHE[doi_url] = title
+    return title
+
+
 def harmonize_works(neighbours: list[Neighbour]) -> list[Neighbour]:
     """Label cited-work (publication) edges by their title.
 
@@ -175,7 +248,7 @@ def harmonize_works(neighbours: list[Neighbour]) -> list[Neighbour]:
     out: list[Neighbour] = []
     for n in neighbours:
         if n.category == "works" and n.external_url:
-            title = _rdf_node_name(n.external_url)
+            title = _rdf_node_name(n.external_url) or _doi_title_duckdb(n.external_url)
             if title and _norm_name(title) != _norm_name(n.label):
                 out.append(replace(n, label=title))
                 continue
