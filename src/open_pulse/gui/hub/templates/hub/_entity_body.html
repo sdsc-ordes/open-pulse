@@ -195,18 +195,16 @@
       border: 1px solid rgba(255,255,255,.32); backdrop-filter: blur(3px); }
     .entity-hero-link:hover { background: rgba(255,255,255,.28); }
 
-    /* ── two-column body ── */
-    .entity-cols { display: grid; gap: 16px; align-items: start; }
-    @media (min-width: 880px) {
-      .entity-cols { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
-    }
-    .entity-col-main, .entity-col-rail {
-      display: flex; flex-direction: column; gap: 16px; min-width: 0;
-    }
+    /* ── masonry body — Summary + metrics pinned on top (rendered above),
+       every other card flows into a height-packed masonry that re-balances
+       across 2–3 columns by viewport width. ── */
+    .entity-masonry { column-gap: 16px; }
+    @media (min-width: 760px)  { .entity-masonry { column-count: 2; } }
+    @media (min-width: 1320px) { .entity-masonry { column-count: 3; } }
+    .entity-masonry > * { break-inside: avoid; margin-bottom: 16px; }
 
-    /* ── facts as a 2-column masonry of key/value pairs ── */
+    /* facts stack in a single column inside their (now narrower) masonry card */
     .facts-grid { column-gap: 24px; }
-    @media (min-width: 560px) { .facts-grid { column-count: 2; } }
     .facts-grid .fact { break-inside: avoid; padding: 8px 0;
       border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
     .facts-grid .fact:hover .fact-label { color: var(--fg-muted); }
@@ -292,19 +290,16 @@
     </div>
   {% endif %}
 
-  <div class="entity-cols">
-    <div class="entity-col-main">
+  {# ── Summary pinned at the top, full width, right under the metric tiles. ── #}
+  {% if entity.narrative %}
+    <div class="card tone-info">
+      <div class="card-title">📝 Summary</div>
+      <p style="margin: 6px 0 0; line-height: 1.55;">{{ entity.narrative }}</p>
+    </div>
+  {% endif %}
 
-      {% if entity.narrative %}
-        <div class="card tone-info">
-          <div class="card-title">📝 Summary</div>
-          {# Default whitespace handling — the LLM is instructed to output
-             a single paragraph, so any stray newlines collapse cleanly.
-             Previously ``white-space: pre-line`` was preserving them and
-             leaving visible vertical gaps. #}
-          <p style="margin: 6px 0 0; line-height: 1.55;">{{ entity.narrative }}</p>
-        </div>
-      {% endif %}
+  {# ── Everything else flows into a masonry that re-packs by card height. ── #}
+  <div class="entity-masonry">
 
       {# Facts split into thematic cards (Classification / Metrics / Timeline /
          Details) instead of one long table. #}
@@ -317,33 +312,6 @@
           </div>
         </div>
       {% endfor %}
-
-      {% if entity.mentions %}
-        <div class="card">
-          <div class="card-title">💬 Mentions</div>
-          <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-          {% for m in entity.mentions %}
-            <div style="border-left: 2px solid var(--border); padding: 4px 0 4px 10px;">
-              <div class="card-meta" style="margin-bottom: 4px;">
-                <span class="pill pill-info">{{ m.collection }}</span>
-                {% if m.source_label %}<span style="margin-left: 6px;">{{ m.source_label }}</span>{% endif %}
-              </div>
-              {% if m.text %}<div style="line-height: 1.55;">{{ m.text[:600] }}{% if m.text|length > 600 %}…{% endif %}</div>{% endif %}
-              {% if m.source_url %}
-                <div class="card-meta" style="margin-top: 4px;">
-                  <a href="{{ hub_link(m.source_url) }}">{{ m.source_url }}</a>
-                  <a href="{{ m.source_url }}" rel="noopener" target="_blank" title="open at source">↗</a>
-                </div>
-              {% endif %}
-            </div>
-          {% endfor %}
-          </div>
-        </div>
-      {% endif %}
-
-    </div>
-
-    <div class="entity-col-rail">
 
       {% if entity.identifiers %}
         <div class="card">
@@ -403,8 +371,30 @@
         {% endfor %}
       {% endif %}
 
-    </div>
-  </div>
+      {% if entity.mentions %}
+        <div class="card">
+          <div class="card-title">💬 Mentions</div>
+          <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
+          {% for m in entity.mentions %}
+            <div style="border-left: 2px solid var(--border); padding: 4px 0 4px 10px;">
+              <div class="card-meta" style="margin-bottom: 4px;">
+                <span class="pill pill-info">{{ m.collection }}</span>
+                {% if m.source_label %}<span style="margin-left: 6px;">{{ m.source_label }}</span>{% endif %}
+              </div>
+              {% if m.text %}<div style="line-height: 1.55;">{{ m.text[:600] }}{% if m.text|length > 600 %}…{% endif %}</div>{% endif %}
+              {% if m.source_url %}
+                <div class="card-meta" style="margin-top: 4px;">
+                  <a href="{{ hub_link(m.source_url) }}">{{ m.source_url }}</a>
+                  <a href="{{ m.source_url }}" rel="noopener" target="_blank" title="open at source">↗</a>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+  </div>{# /.entity-masonry #}
 
   {# The Backlinks / Activity / Community / Related panels are rendered
      separately by lazy fetches in entity.html — they tile into a
