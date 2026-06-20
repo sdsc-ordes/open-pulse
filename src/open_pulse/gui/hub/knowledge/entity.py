@@ -93,6 +93,10 @@ class Neighbour:
     contributor (github) to an RDF author (ORCID) — rendered as an extra
     ORCID logo-link beside the name. Set by ``knowledge.identity``."""
 
+    ror_url: str = ""
+    """ROR iD of this organisation (from a github org's ``unitOf``) — rendered
+    as an extra ROR logo-link beside the org name. Set by ``knowledge.identity``."""
+
 
 @dataclass(frozen=True)
 class Mention:

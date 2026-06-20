@@ -360,9 +360,10 @@
                   {% else %}
                     <span>{{ n.label }}</span>
                   {% endif %}
-                  {# extra ORCID logo-link when the identity bridge matched this
-                     contributor to an RDF author keyed by ORCID. #}
+                  {# extra reference logos from the identity bridge: ORCID for a
+                     matched person, ROR (parent institution) for a github org. #}
                   {% if n.orcid_url and n.orcid_url != n.external_url %}{{ src_logo(n.orcid_url) }}{% endif %}
+                  {% if n.ror_url and n.ror_url != n.external_url %}{{ src_logo(n.ror_url) }}{% endif %}
                 </li>
               {% endfor %}
               </ul>

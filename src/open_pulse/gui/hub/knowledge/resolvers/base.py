@@ -798,7 +798,7 @@ def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
                 "base": n, "sources": [], "neo4j_rel": "", "rdf_predicate": "",
                 "rdf_rel": "", "neo4j_rel_label": "", "label": n.label,
                 "hub_url": n.hub_url, "external_url": n.external_url, "kind": n.kind,
-                "orcid_url": "",
+                "orcid_url": "", "ror_url": "",
             }
             acc[key] = a
             order.append(key)
@@ -815,6 +815,7 @@ def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
         a["external_url"] = a["external_url"] or n.external_url
         a["kind"] = a["kind"] or n.kind
         a["orcid_url"] = a["orcid_url"] or n.orcid_url
+        a["ror_url"] = a["ror_url"] or n.ror_url
         # Prefer a human name over a URL-ish slug.
         if _is_slug_label(a["label"]) and not _is_slug_label(n.label):
             a["label"] = n.label
@@ -827,7 +828,7 @@ def _merge_neighbours(neighbours: list[Neighbour]) -> list[Neighbour]:
             hub_url=a["hub_url"], external_url=a["external_url"],
             sources=tuple(a["sources"]),
             neo4j_rel=a["neo4j_rel"], rdf_predicate=a["rdf_predicate"],
-            orcid_url=a["orcid_url"],
+            orcid_url=a["orcid_url"], ror_url=a["ror_url"],
             category=_section_for(rel, a["kind"]),
         ))
     return out
@@ -945,13 +946,16 @@ def build_entity(
     try:
         from .. import identity as _identity
 
-        bridged = _identity.harmonize_people(neighbours)
-        if bridged != neighbours:
-            neighbours = _merge_neighbours(bridged)
-        # Cited works: label each by its publication title (from the DOI node's
-        # schema:name in RDF) instead of the bare DOI; the DOI stays as the
-        # reference link/logo — the same name-as-label treatment as people.
-        neighbours = _identity.harmonize_works(neighbours)
+        # Identity harmonization, then one re-merge to collapse the rewritten
+        # rows: people bridge an RDF ORCID author onto its Neo4j github
+        # contributor; orgs bridge an RDF ROR institution onto its Neo4j github
+        # org (same org, two identifiers) → one corroborated row carrying both
+        # references. Works just relabel cited DOIs by title.
+        harmonized = _identity.harmonize_people(neighbours)
+        harmonized = _identity.harmonize_works(harmonized)
+        harmonized = _identity.harmonize_orgs(harmonized)
+        if harmonized != neighbours:
+            neighbours = _merge_neighbours(harmonized)
     except Exception as exc:  # noqa: BLE001
         log.info("identity harmonization skipped: %s", exc)
 

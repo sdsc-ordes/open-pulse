@@ -254,3 +254,110 @@ def harmonize_works(neighbours: list[Neighbour]) -> list[Neighbour]:
                 continue
         out.append(n)
     return out
+
+
+# DuckDB org stores that map a ROR id → institution name, tried in order.
+_ROR_STORES: tuple[tuple[str, str, str], ...] = (
+    ("institutions", "ror", "display_name"),
+    ("ror_worldwide", "ror_id", "name"),
+    ("ror_epfl_ethz", "ror_id", "name"),
+    ("ror_switzerland", "ror_id", "name"),
+)
+_ROR_NAME_CACHE: dict[str, str] = {}
+_ORG_ROR_CACHE: dict[str, str] = {}
+
+
+def _ror_name(ror_url: str) -> str:
+    """Institution name for a ROR iD — the RDF node's name first, then the
+    DuckDB ROR / institutions stores. Cached; matched on the bare ROR id."""
+    if ror_url in _ROR_NAME_CACHE:
+        return _ROR_NAME_CACHE[ror_url]
+    name = _rdf_node_name(ror_url)
+    if not name:
+        bare = ror_url.rstrip("/").rsplit("/", 1)[-1]
+        for coll, col, name_col in _ROR_STORES:
+            b = ddb._BACKING.get(coll)
+            if b is None:
+                continue
+            try:
+                with ddb._connect(b.db_path) as con:
+                    rows = con.execute(
+                        f'SELECT "{name_col}" FROM {ddb._source_expr(b)} '
+                        f'WHERE CAST("{col}" AS VARCHAR) ILIKE ? LIMIT 1',
+                        [f"%{bare}%"],
+                    ).fetchall()
+                if rows and rows[0][0] and str(rows[0][0]).strip():
+                    name = str(rows[0][0]).strip()
+                    break
+            except Exception as exc:  # noqa: BLE001
+                log.info("ror name lookup failed (%s on %s): %s", ror_url, coll, exc)
+    _ROR_NAME_CACHE[ror_url] = name
+    return name
+
+
+def _github_org_ror(github_url: str) -> str:
+    """The ``unitOf`` ROR iD of a github org (the institution it's a unit of),
+    from the unscoped RDF. Cached; ``""`` if none."""
+    if github_url in _ORG_ROR_CACHE:
+        return _ORG_ROR_CACHE[github_url]
+    ror = ""
+    try:
+        from . import stores
+
+        for r in stores.sparql_describe(github_url, limit=120, scoped=False):
+            p = r.get("p", {}).get("value", "").lower()
+            o = r.get("o", {}).get("value", "")
+            if p.endswith("unitof") and "ror.org/" in o.lower():
+                ror = o
+                break
+    except Exception as exc:  # noqa: BLE001
+        log.info("github org ror lookup failed (%s): %s", github_url, exc)
+    _ORG_ROR_CACHE[github_url] = ror
+    return ror
+
+
+def harmonize_orgs(neighbours: list[Neighbour]) -> list[Neighbour]:
+    """Identity across organisations — the same name-as-label / id-as-reference
+    treatment as people and publications.
+
+    * A **github org** carries its ``unitOf`` ROR as an extra reference logo.
+    * An org edge pointing straight at a **ROR** is labelled by the institution
+      **name** (the ROR stays as the link + logo) instead of a bare ROR id; and
+      when that ROR is the parent of a github org also present, it's rewritten
+      onto the github identity so the two collapse into one corroborated row
+      (the same org, two identifiers) on the downstream re-merge."""
+    # Index github orgs by their unitOf ROR (lower-cased) → in-hub identity.
+    ror_to_github: dict[str, str] = {}
+    for n in neighbours:
+        if n.category == "orgs" and "github.com/" in (n.external_url or "").lower():
+            ror = _github_org_ror(n.external_url)
+            if ror:
+                ror_to_github.setdefault(ror.rstrip("/").lower(), n.hub_url or n.external_url)
+
+    out: list[Neighbour] = []
+    for n in neighbours:
+        if n.category != "orgs" or not n.external_url:
+            out.append(n)
+            continue
+        ext = n.external_url.lower()
+        if "ror.org/" in ext:
+            name = _ror_name(n.external_url)
+            gh_identity = ror_to_github.get(ext.rstrip("/"))
+            if gh_identity:
+                # Same org as a present github org → adopt its identity so the
+                # merge corroborates them; carry the ROR as the reference.
+                out.append(replace(
+                    n, hub_url=gh_identity, label=name or n.label,
+                    ror_url=n.external_url,
+                ))
+                continue
+            if name and _norm_name(name) != _norm_name(n.label):
+                out.append(replace(n, label=name, ror_url=n.external_url))
+                continue
+        elif "github.com/" in ext:
+            ror = _github_org_ror(n.external_url)
+            if ror:
+                out.append(replace(n, ror_url=ror))
+                continue
+        out.append(n)
+    return out
