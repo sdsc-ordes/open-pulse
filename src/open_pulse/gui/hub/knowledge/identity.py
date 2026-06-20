@@ -135,3 +135,49 @@ def harmonize_people(neighbours: list[Neighbour]) -> list[Neighbour]:
         else:
             out.append(replace(n, orcid_url=n.external_url))
     return out
+
+
+_NODE_NAME_CACHE: dict[str, str] = {}
+
+
+def _rdf_node_name(iri: str) -> str:
+    """The ``schema:name`` / ``dc:title`` of an RDF node (a cited publication's
+    DOI carries its title there) — unscoped + cached. ``""`` if none."""
+    if iri in _NODE_NAME_CACHE:
+        return _NODE_NAME_CACHE[iri]
+    name = ""
+    try:
+        from . import stores
+
+        for r in stores.sparql_describe(iri, limit=60, scoped=False):
+            p = r.get("p", {}).get("value", "").lower()
+            o = r.get("o", {}).get("value", "")
+            if o and (p.endswith("#name") or p.endswith("/name")
+                      or p.endswith("title") or p.endswith("label")
+                      or p.endswith("headline")):
+                name = o
+                break
+    except Exception as exc:  # noqa: BLE001
+        log.info("rdf node name failed (%s): %s", iri, exc)
+    name = re.sub(r"<[^>]+>", "", name).strip()[:120]
+    _NODE_NAME_CACHE[iri] = name
+    return name
+
+
+def harmonize_works(neighbours: list[Neighbour]) -> list[Neighbour]:
+    """Label cited-work (publication) edges by their title.
+
+    A ``cites`` / ``references`` edge points at a DOI whose RDF node carries the
+    publication's ``schema:name`` (title); use it as the label so the row reads
+    as a paper title rather than a bare DOI. The DOI stays as the edge's link +
+    source logo (the reference) — mirroring the name-as-label / ORCID-as-logo
+    treatment for people."""
+    out: list[Neighbour] = []
+    for n in neighbours:
+        if n.category == "works" and n.external_url:
+            title = _rdf_node_name(n.external_url)
+            if title and _norm_name(title) != _norm_name(n.label):
+                out.append(replace(n, label=title))
+                continue
+        out.append(n)
+    return out

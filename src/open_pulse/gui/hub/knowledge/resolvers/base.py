@@ -948,8 +948,12 @@ def build_entity(
         bridged = _identity.harmonize_people(neighbours)
         if bridged != neighbours:
             neighbours = _merge_neighbours(bridged)
+        # Cited works: label each by its publication title (from the DOI node's
+        # schema:name in RDF) instead of the bare DOI; the DOI stays as the
+        # reference link/logo — the same name-as-label treatment as people.
+        neighbours = _identity.harmonize_works(neighbours)
     except Exception as exc:  # noqa: BLE001
-        log.info("person identity harmonization skipped: %s", exc)
+        log.info("identity harmonization skipped: %s", exc)
 
     coll_label = (
         ", ".join(collections)
