@@ -361,3 +361,76 @@ def harmonize_orgs(neighbours: list[Neighbour]) -> list[Neighbour]:
                 continue
         out.append(n)
     return out
+
+
+def _contrib_key(url: str) -> str:
+    return re.sub(r"^https?://(www\.)?", "", (url or "").lower()).rstrip("/")
+
+
+_REPO_CONTRIB_CACHE: dict[str, dict[str, tuple[int, str, str]]] = {}
+
+
+def _repo_contributions(repo_url: str) -> dict[str, tuple[int, str, str]]:
+    """``{author_key: (commit_count, first_date, last_date)}`` for a repo, from
+    the RDF Contribution nodes (``contributionTo`` → repo, ``schema:author`` →
+    person). Queried across all named graphs (the data is graph-specific) +
+    cached. ``author_key`` is the scheme-stripped author IRI."""
+    if repo_url in _REPO_CONTRIB_CACHE:
+        return _REPO_CONTRIB_CACHE[repo_url]
+    stats: dict[str, tuple[int, str, str]] = {}
+    try:
+        from . import stores
+
+        rows = stores.sparql_select(
+            "PREFIX pulse: <https://open-pulse.epfl.ch/ontology#> "
+            "PREFIX schema: <http://schema.org/> "
+            "SELECT ?author "
+            "(MAX(<http://www.w3.org/2001/XMLSchema#integer>(?n)) AS ?count) "
+            "(MIN(?first) AS ?f) (MAX(?last) AS ?l) WHERE { GRAPH ?g { "
+            f"?c pulse:contributionTo <{repo_url}> ; schema:author ?author ; "
+            "pulse:contributionCount ?n . "
+            "OPTIONAL { ?c pulse:firstContributionDate ?first } "
+            "OPTIONAL { ?c pulse:lastContributionDate ?last } } } "
+            "GROUP BY ?author LIMIT 500"
+        )
+        for r in rows:
+            author = r.get("author", {}).get("value", "")
+            if not author:
+                continue
+            try:
+                cnt = int(r.get("count", {}).get("value") or 0)
+            except (TypeError, ValueError):
+                cnt = 0
+            first = (r.get("f", {}).get("value") or "")[:10]
+            last = (r.get("l", {}).get("value") or "")[:10]
+            stats[_contrib_key(author)] = (cnt, first, last)
+    except Exception as exc:  # noqa: BLE001
+        log.info("repo contributions failed (%s): %s", repo_url, exc)
+    _REPO_CONTRIB_CACHE[repo_url] = stats
+    return stats
+
+
+def attach_contributions(neighbours: list[Neighbour], repo_url: str) -> list[Neighbour]:
+    """Decorate each contributor edge with their commit count + first/last date
+    for this repo (from the RDF Contribution nodes). Matches a contributor to a
+    Contribution by any of their identities (github hub_url / external / ORCID)."""
+    stats = _repo_contributions(repo_url)
+    if not stats:
+        return neighbours
+    out: list[Neighbour] = []
+    for n in neighbours:
+        if n.category == "people":
+            cands = (
+                _contrib_key((n.hub_url or "").replace("/hub/", "")),
+                _contrib_key(n.external_url),
+                _contrib_key(n.orcid_url),
+            )
+            hit = next((stats[c] for c in cands if c and c in stats), None)
+            if hit:
+                out.append(replace(
+                    n, contribution_count=hit[0],
+                    first_contribution=hit[1], last_contribution=hit[2],
+                ))
+                continue
+        out.append(n)
+    return out

@@ -97,6 +97,14 @@ class Neighbour:
     """ROR iD of this organisation (from a github org's ``unitOf``) — rendered
     as an extra ROR logo-link beside the org name. Set by ``knowledge.identity``."""
 
+    contribution_count: int = 0
+    """For a contributor edge: their commit count to this repo (the RDF
+    ``contributionCount``). 0 when unknown. Set by ``knowledge.identity``."""
+
+    first_contribution: str = ""
+    last_contribution: str = ""
+    """``YYYY-MM-DD`` of the contributor's first / last commit to this repo."""
+
 
 @dataclass(frozen=True)
 class Mention:

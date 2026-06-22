@@ -240,6 +240,9 @@
     .rel-list li { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
     .rel-verb { font-size: 10.5px; text-transform: lowercase; color: var(--fg-faint);
       white-space: nowrap; }
+    /* per-repo contribution rollup pill on a contributor row */
+    .rel-meta { font-size: 10px; color: var(--fg-muted); white-space: nowrap;
+      background: var(--surface-sunk); border-radius: 8px; padding: 1px 7px; }
     /* source logo badge next to a value (orcid / github / ror / doi) */
     .val-logo { display: inline-flex; flex-shrink: 0; }
     .val-logo img { width: 15px; height: 15px; border-radius: 3px;
@@ -364,6 +367,8 @@
                      matched person, ROR (parent institution) for a github org. #}
                   {% if n.orcid_url and n.orcid_url != n.external_url %}{{ src_logo(n.orcid_url) }}{% endif %}
                   {% if n.ror_url and n.ror_url != n.external_url %}{{ src_logo(n.ror_url) }}{% endif %}
+                  {# per-repo contribution rollup for a contributor #}
+                  {% if n.contribution_count %}<span class="rel-meta" title="commits to this repository">{{ '{:,}'.format(n.contribution_count) }} commit{{ 's' if n.contribution_count != 1 }}{% if n.first_contribution %} · {{ n.first_contribution[:4] }}{% if n.last_contribution and n.last_contribution[:4] != n.first_contribution[:4] %}–{{ n.last_contribution[:4] }}{% endif %}{% endif %}</span>{% endif %}
                 </li>
               {% endfor %}
               </ul>
