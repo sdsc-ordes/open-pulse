@@ -956,6 +956,10 @@ def build_entity(
         harmonized = _identity.harmonize_orgs(harmonized)
         if harmonized != neighbours:
             neighbours = _merge_neighbours(harmonized)
+        # Decorate contributors with their per-repo commit count + date range
+        # (RDF Contribution nodes) — github repos only.
+        if canonical_ref.host == "github.com" and "/" in canonical_ref.path:
+            neighbours = _identity.attach_contributions(neighbours, canonical)
     except Exception as exc:  # noqa: BLE001
         log.info("identity harmonization skipped: %s", exc)
 
