@@ -3,8 +3,14 @@
 {% block subheading %}Browser-local secrets. Stored in <code>localStorage</code> on this device only — the hub never persists or proxies these unless a request explicitly sends them.{% endblock %}
 
 {% block content %}
+{# Reader sessions get a trimmed "viewer" settings panel: just the view
+   preferences (RDF graph, browser-local backup). The credential/secret and
+   agent-model cards are admin-only. #}
+{% set _role = request.state.user_role if request.state and request.state.user_role else 'admin' %}
+{% set _is_admin = _role == 'admin' %}
 <div x-data="settingsPanel()" x-init="reload()" class="space-y-4">
 
+  {% if _is_admin %}
   <div class="card tone-info">
     <div class="card-title">How this works</div>
     <p class="card-meta mt-1">
@@ -17,7 +23,19 @@
       Clearing your browser data (or hitting <em>Clear all</em>) wipes them.
     </p>
   </div>
+  {% else %}
+  <div class="card tone-info">
+    <div class="card-title">Viewer settings</div>
+    <p class="card-meta mt-1">
+      Your personal view preferences for this device — which RDF graph the
+      hub reads from, plus a backup of your browser-local state (theme, query
+      tabs). Everything here is stored in your browser only and changes
+      nothing server-side.
+    </p>
+  </div>
+  {% endif %}
 
+  {% if _is_admin %}
   <div class="card">
     <div class="flex items-baseline">
       <div class="card-title">Keys</div>
@@ -81,6 +99,7 @@
     </div>
     <p class="card-meta" style="margin-top: 8px;" x-show="models.length" x-text="models.length + ' models available with this key'"></p>
   </div>
+  {% endif %}{# /admin-only: Keys + Agent model #}
 
   <!-- RDF graph picker — scopes the hub's SPARQL probes on entity pages -->
   <div class="card" x-data="graphPanel()" x-init="init()">

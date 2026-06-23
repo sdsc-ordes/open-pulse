@@ -181,3 +181,30 @@ def require_writable(
                 "this change."
             ),
         )
+
+
+def require_admin(
+    request: Request,
+    op_hub_session: Annotated[str | None, Cookie()] = None,
+) -> None:
+    """Admin-only gate for operator *pages* (Status, Services, Logs,
+    Resources, Stack, Quests, GrimoireLab Projects).
+
+    Unlike :func:`require_writable` this ignores ``HUB_READONLY`` — those
+    pages are read-only views an admin still needs on a locked-down deploy;
+    the distinction here is purely role (admin vs reader). Readers get a 403
+    so the operator surface is invisible to a viewer even by direct URL, not
+    just hidden in the nav.
+
+    Compose AFTER ``require_auth`` (which stamps ``request.state.user_role``);
+    falls back to the session cookie so it also works mounted alone.
+    """
+    role = getattr(request.state, "user_role", None) or session_role(op_hub_session)
+    if role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "This page is operator-only. Sign in with the admin password "
+                "to view it."
+            ),
+        )

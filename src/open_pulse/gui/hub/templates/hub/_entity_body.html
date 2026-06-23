@@ -258,6 +258,10 @@
     .src-graph { background: color-mix(in srgb, #22c55e 20%, var(--surface)); color: #4ade80; }
     .pill.pill-rdf { background: color-mix(in srgb, #a855f7 22%, var(--surface));
       color: #c084fc; border-color: color-mix(in srgb, #a855f7 35%, transparent); }
+    /* Compact metric band under the description; the small tiles wrap to
+       fill the row. Everything else (availability + sections) packs into the
+       masonry below. */
+    .entity-metrics { margin-bottom: 16px; }
   </style>
   <div class="entity-hero" style="background: {{ hero_gradient }};">
     <div class="entity-hero-emoji">{{ hero_emoji }}</div>
@@ -282,8 +286,32 @@
     </div>
   {% endif %}
 
+  {# ── Description first, then metrics + availability side by side beneath it.
+        The metric tiles fill the row; "Present in" sits narrower to its side. ── #}
+  {# The narrative is composed AFTER the body ships (see routes/hub.py) and
+     streamed into #entity-summary-text by the "narrative" SSE handler. We
+     render the card up-front with a spinner when one is pending so it keeps
+     its place at the top; if the agent returns nothing the handler removes
+     the card. #}
+  {% if entity.narrative or narrative_pending %}
+    <div class="card tone-info" id="entity-summary-card">
+      <div class="card-title">📝 Summary</div>
+      {% if entity.narrative %}
+        <p id="entity-summary-text" style="margin: 6px 0 0; line-height: 1.55;">{{ entity.narrative }}</p>
+      {% else %}
+        <p id="entity-summary-text" style="margin: 6px 0 0; line-height: 1.55; display: flex; align-items: center; gap: 10px;">
+          <span class="hub-spinner" aria-hidden="true"></span>
+          <span class="card-meta">composing summary with the agent…</span>
+        </p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {# Metric tiles — a compact, full-width band that wraps responsively so the
+     small frames rearrange to fill the row. Kept out of the masonry because a
+     column-masonry would stretch each tiny tile to full column width. #}
   {% if tiles %}
-    <div class="grid-stats">
+    <div class="grid-stats entity-metrics">
       {% for f in tiles %}
         <div class="card tone-info">
           <div class="card-title">{{ f.label.replace('_',' ') }}{{ fact_prov(f) }}</div>
@@ -293,16 +321,14 @@
     </div>
   {% endif %}
 
-  {# ── Summary pinned at the top, full width, right under the metric tiles. ── #}
-  {% if entity.narrative %}
-    <div class="card tone-info">
-      <div class="card-title">📝 Summary</div>
-      <p style="margin: 6px 0 0; line-height: 1.55;">{{ entity.narrative }}</p>
-    </div>
-  {% endif %}
-
-  {# ── Everything else flows into a masonry that re-packs by card height. ── #}
+  {# ── Everything else — availability + every section card — flows into ONE
+        height-balanced masonry so the blocks pack tightly and fill the space
+        (no dead column beside a tall card). ── #}
   <div class="entity-masonry">
+
+      {% if presence_rows %}
+        {% with rows = presence_rows %}{% include "hub/_presence_body.html" %}{% endwith %}
+      {% endif %}
 
       {# Facts split into thematic cards (Classification / Metrics / Timeline /
          Details) instead of one long table. #}

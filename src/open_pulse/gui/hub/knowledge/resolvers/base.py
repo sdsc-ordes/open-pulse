@@ -20,6 +20,7 @@ import hashlib
 import logging
 import re
 from collections.abc import Callable, Iterable
+from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any
 
@@ -36,6 +37,17 @@ log = logging.getLogger(__name__)
 # change inside a single hub session.
 _NARRATIVE_CACHE: dict[str, str] = {}
 _NARRATIVE_CACHE_MAX = 256
+
+# When set, ``build_entity`` skips the (slow, 1–30s) LLM narrative so the
+# page body can render immediately. The SSE endpoint sets this, ships the
+# body, then composes the narrative separately and streams it in. Defaults
+# off so non-streaming callers still get a narrative inline.
+_SKIP_NARRATIVE: ContextVar[bool] = ContextVar("skip_narrative", default=False)
+
+
+def set_skip_narrative(value: bool) -> None:
+    """Toggle deferral of the LLM narrative for the current context."""
+    _SKIP_NARRATIVE.set(bool(value))
 
 
 # Predicates we expand from short qnames to full IRIs in fact labels.
@@ -1050,7 +1062,11 @@ def build_entity(
     from ...auth import get_settings  # local import — keep settings load lazy
 
     settings = get_settings()
-    if (
+    if _SKIP_NARRATIVE.get():
+        # Deferred — the SSE endpoint will compose + stream it after the
+        # body lands, so the page doesn't wait on the LLM call.
+        pass
+    elif (
         (entity.facts or entity.mentions)
         and settings.llm_model
         and settings.llm_api_key
