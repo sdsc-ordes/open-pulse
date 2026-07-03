@@ -9,6 +9,14 @@ services:
     image: "${OPEN_PULSE_IMAGE:-ghcr.io/sdsc-ordes/open-pulse:latest}"
     container_name: open-pulse-cli
     restart: unless-stopped
+    # Run as the host operator (not root) so quest artifacts, logs and
+    # checkpoints written onto the repo bind-mount stay host-owned. The
+    # docker group grants access to the mounted socket for nested
+    # `docker compose` calls; HOME lives on the shared /data mount so
+    # ~/.quest-checkpoints survives container recreation.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-999}"
     depends_on:
       neo4j:
         condition: service_healthy
@@ -25,6 +33,7 @@ services:
       - path: ../.env
         required: false
     environment:
+      HOME: /data/cli-home
       WORKSPACE_DIR: "${OPEN_PULSE_HOST_PATH}"
       # Marker the CLI uses to detect it's running inside this container so
       # nested `docker compose` calls auto-include this overlay (avoids
