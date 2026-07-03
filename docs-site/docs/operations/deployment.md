@@ -486,8 +486,14 @@ and a `restarting (1)` loop.
 | Qdrant                 | `qdrant/qdrant:latest`               | `qdrant` (1000:1000)   |
 | GrimoireLab Postgres   | `postgres:16-alpine`                 | `postgres` (999:999)   |
 | sparql-proxy (Caddy)   | `caddy:2.8-alpine`                   | `root` (0:0)           |
-| Hub                    | `open-pulse:*`                       | (1000:1000)            |
+| Hub                    | `open-pulse:*`                       | host operator (`HOST_UID:HOST_GID`, default 1000:1000) |
+| CLI orchestrator       | `open-pulse:*`                       | host operator (`HOST_UID:HOST_GID`, default 1000:1000) |
 | Portainer              | `portainer/portainer-ce`             | `root` (0:0)           |
+
+The Hub and the CLI orchestrator run as the host operator's UID/GID
+(`HOST_UID` / `HOST_GID` in `infra/.env`, with `DOCKER_GID` granting
+access to the mounted docker socket), so quest artifacts, logs and hub
+state written onto the bind mounts stay owned by the host user.
 
 ### The helper script
 
