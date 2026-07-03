@@ -65,6 +65,8 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 # types, repo/DOI pointers) so the facts card shows readable text, not raw
 # URLs. Defined in the resolver base alongside the predicate humaniser.
 from ..knowledge.resolvers.base import human_url_label as _human_url_label  # noqa: E402
+from ..knowledge.resolvers.base import maybe_narrate as _maybe_narrate  # noqa: E402
+from ..knowledge.resolvers.base import set_skip_narrative as _set_skip_narrative  # noqa: E402
 
 templates.env.globals["human_url_label"] = _human_url_label
 
@@ -854,6 +856,13 @@ async def resolve_stream(
     # SPARQL probes. Harmless no-op when unset / malformed.
     stores.set_active_graph(graph)
 
+    # Defer the LLM narrative: build + ship the body first, then compose the
+    # narrative and stream it in (see the "narrative" event below). This is
+    # the single biggest cut to time-to-first-paint — the summary call is the
+    # slowest leg of the resolve. Set in this context so the worker thread
+    # inherits it.
+    _set_skip_narrative(True)
+
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
 
@@ -923,9 +932,31 @@ async def resolve_stream(
                     kind = ""
                     yield _sse_event("status", "No matches — queued in the wanted list")
                 else:
+                    # Availability ("Present in") is shown at the top of the
+                    # body, under the description — so it's computed here and
+                    # passed in rather than lazy-loaded as a trailing panel.
+                    # Shares the cache key with GET /api/hub/presence.
+                    presence_rows = qdrant.cached_panel(
+                        "presence",
+                        parsed.canonical_url,
+                        lambda: presence.gather(parsed),
+                    )
+                    # The narrative was deferred (see _set_skip_narrative);
+                    # tell the template to render a "composing…" Summary slot
+                    # when an agent is configured, which the streamed
+                    # ``narrative`` event below fills in.
+                    _s = get_settings()
+                    narrative_pending = bool(
+                        (entity.facts or entity.mentions)
+                        and _s.llm_model
+                        and _s.llm_api_key
+                        and not entity.narrative
+                    )
                     html = templates.get_template("hub/_entity_body.html").render(
                         entity=entity,
                         ref=parsed,
+                        presence_rows=presence_rows,
+                        narrative_pending=narrative_pending,
                         hero_emoji=catalog_mod.kind_emoji(entity.kind),
                         hero_gradient=catalog_mod.cover_gradient(
                             entity.ref_url or entity.title
@@ -947,9 +978,19 @@ async def resolve_stream(
                             "title": title,
                             "kind": kind,
                             "url": parsed.canonical_url,
+                            "narrative_pending": narrative_pending if found else False,
                         }
                     ),
                 )
+                # Body is on screen. Now compose the (deferred) narrative and
+                # stream it into the Summary slot. Cached per facts-hash, so
+                # repeat views resolve this instantly.
+                if found and narrative_pending:
+                    yield _sse_event("status", "Composing summary with the agent")
+                    narrative = await asyncio.to_thread(
+                        lambda: _maybe_narrate(entity).narrative
+                    )
+                    yield _sse_event("narrative", narrative or "")
                 return
         finally:
             task.cancel()

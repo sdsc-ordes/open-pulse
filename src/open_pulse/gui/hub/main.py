@@ -12,7 +12,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .auth import _COOKIE_NAME, clear_session, get_settings, require_auth
+from .auth import (
+    _COOKIE_NAME,
+    clear_session,
+    get_settings,
+    require_admin,
+    require_auth,
+)
 from .chaoss import routes as chaoss_routes
 from .routes import (
     admin,
@@ -219,14 +225,24 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/", response_class=HTMLResponse)
-def overview_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
-    """New Overview: time-series charts of the metrics the marquee tracks."""
+@app.get("/", response_model=None)
+def overview_page(
+    request: Request, _: None = Depends(require_auth)
+) -> HTMLResponse | RedirectResponse:
+    """Landing page. Admins get the Overview (metrics time-series); readers
+    are sent straight to the Hub — their home is the knowledge catalog, not
+    the operations dashboard."""
+    if getattr(request.state, "user_role", "admin") != "admin":
+        return RedirectResponse(url="/hub", status_code=307)
     return templates.TemplateResponse(request, "overview.html", {"page": "overview"})
 
 
 @app.get("/status", response_class=HTMLResponse)
-def status_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
+def status_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    __: None = Depends(require_admin),
+) -> HTMLResponse:
     """Status: current snapshot of services + quick links (the old Overview)."""
     settings = get_settings()
     return templates.TemplateResponse(
@@ -240,12 +256,20 @@ def status_page(request: Request, _: None = Depends(require_auth)) -> HTMLRespon
 
 
 @app.get("/services", response_class=HTMLResponse)
-def services_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
+def services_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    __: None = Depends(require_admin),
+) -> HTMLResponse:
     return templates.TemplateResponse(request, "services.html", {"page": "services"})
 
 
 @app.get("/projects", response_class=HTMLResponse)
-def projects_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
+def projects_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    __: None = Depends(require_admin),
+) -> HTMLResponse:
     settings = get_settings()
     return templates.TemplateResponse(
         request,
@@ -292,17 +316,29 @@ def agent_page(request: Request, _: None = Depends(require_auth)) -> HTMLRespons
 
 
 @app.get("/pipeline", response_class=HTMLResponse)
-def pipeline_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
+def pipeline_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    __: None = Depends(require_admin),
+) -> HTMLResponse:
     return templates.TemplateResponse(request, "pipeline.html", {"page": "pipeline"})
 
 
 @app.get("/stack", response_class=HTMLResponse)
-def stack_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
+def stack_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    __: None = Depends(require_admin),
+) -> HTMLResponse:
     return templates.TemplateResponse(request, "stack.html", {"page": "stack"})
 
 
 @app.get("/logs", response_class=HTMLResponse)
-def logs_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
+def logs_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    __: None = Depends(require_admin),
+) -> HTMLResponse:
     return templates.TemplateResponse(request, "logs.html", {"page": "logs"})
 
 
@@ -312,7 +348,11 @@ def settings_page(request: Request, _: None = Depends(require_auth)) -> HTMLResp
 
 
 @app.get("/admin", response_class=HTMLResponse)
-def admin_page(request: Request, _: None = Depends(require_auth)) -> HTMLResponse:
+def admin_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    __: None = Depends(require_admin),
+) -> HTMLResponse:
     """Resources dashboard — disk / RAM / CPU / docker. Polls every 15 min."""
     return templates.TemplateResponse(request, "admin.html", {"page": "admin"})
 

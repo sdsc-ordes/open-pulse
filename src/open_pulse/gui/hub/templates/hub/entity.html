@@ -69,23 +69,6 @@
 
   <div x-show="done" x-html="result"></div>
 
-  {# "Present in" — which stores hold this URL. Mounts on `done`
-     regardless of `found`, so an un-ingested URL still gets a clear
-     answer (every store shown absent) above the wanted-list form. #}
-  <template x-if="done">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "presence", "Present in")' x-init="load()"
-         x-show="loading || html.length > 0">
-      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
-        <span class="hub-spinner" aria-hidden="true"></span>
-        <div>
-          <div class="card-title" style="margin-bottom: 2px;">📍 Present in</div>
-          <div style="font-size: 14px;" class="card-meta">checking the stores…</div>
-        </div>
-      </div>
-      <div x-show="!loading && html.length > 0" x-html="html"></div>
-    </div>
-  </template>
-
   {# Three independent lazy panels — each fetches its own endpoint
      after the entity body lands. They only mount when the entity
      was actually found (otherwise the page shows the wanted-list
@@ -98,6 +81,11 @@
      derived works, related orgs, main developers, activity statistics.
      Each fetches its own endpoint after the entity body lands. #}
   <div class="entity-panels">
+
+  {# NB: "Present in" / availability now renders at the TOP of the entity
+     body (under the description, beside the metric tiles), computed
+     synchronously in the resolve-stream — it is no longer a trailing
+     lazy panel here. See hub/_entity_body.html + routes/hub.py. #}
 
   {# CHAOSS health — compact headline metrics for a software repo, with a
      link to the full per-repo dashboard. The endpoint returns an empty body
@@ -279,9 +267,11 @@ function hubStream(ref) {
         const raw = (window.opSecrets && window.opSecrets.get('rdf_graph')) || '';
         this.sel = raw.split(',').map(s => s.trim()).filter(Boolean);
       } catch (_) { this.sel = []; }
-      await this.loadGraphs();
-      this.initGraphSelect();
+      // Open the resolve stream IMMEDIATELY — don't await the graph list.
+      // The picker is optional chrome; loading it in parallel keeps it from
+      // delaying first paint (it used to block the whole page).
       this.connect();
+      this.loadGraphs().then(() => this.initGraphSelect());
     },
     async loadGraphs() {
       try {
@@ -296,7 +286,7 @@ function hubStream(ref) {
       if (!el || !this.graphs.length || typeof TomSelect === 'undefined' || this._ts) return;
       const options = this.graphs.map(g => ({
         value: g.iri,
-        label: `${g.label} · ${(g.count || 0).toLocaleString()} triples`,
+        label: g.count ? `${g.label} · ${g.count.toLocaleString()} triples` : g.label,
       }));
       this._ts = new TomSelect(el, {
         options, items: this.sel,
@@ -370,10 +360,36 @@ function hubStream(ref) {
           }
         }
         this.done = true;
+        // The Summary narrative streams in a follow-up `narrative` event,
+        // so keep the connection open when one is pending; otherwise close
+        // now. (Body is already on screen either way.)
+        if (!parsed || !parsed.narrative_pending) es.close();
+      });
+      // Deferred LLM summary — arrives after the body so first paint isn't
+      // blocked on the agent. Fill the placeholder slot in the rendered body;
+      // drop the Summary card if the agent returned nothing.
+      es.addEventListener('narrative', (e) => {
+        const txt = (e.data || '').trim();
+        const fill = (tries) => {
+          const slot = document.getElementById('entity-summary-text');
+          if (!slot) { if (tries > 0) setTimeout(() => fill(tries - 1), 60); return; }
+          if (txt) {
+            slot.style.display = '';
+            slot.style.gap = '';
+            slot.textContent = txt;
+          } else {
+            const card = document.getElementById('entity-summary-card');
+            if (card) card.remove();
+          }
+        };
+        this.$nextTick(() => fill(10));
         es.close();
       });
       es.addEventListener('error', () => {
-        this.error = 'Connection to the stream was lost. Reload to retry.';
+        // A normal end-of-stream close fires 'error' too. Once the body is
+        // rendered there's nothing to retry — a missing narrative just leaves
+        // its placeholder, so only surface an error before first paint.
+        if (!this.done) this.error = 'Connection to the stream was lost. Reload to retry.';
         es.close();
       });
     },
