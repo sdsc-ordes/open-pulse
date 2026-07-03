@@ -361,6 +361,45 @@ def lookup_for_ref(
     return mentions, facts
 
 
+def label_for_collection(collection: str) -> str:
+    """Friendly display label for a collection name (for the presence panel)."""
+    return _BACKLINK_LABELS.get(collection, collection.replace("_", " "))
+
+
+def collections_for_ref(ref: HubRef, *, budget: float = 9.0) -> list[str]:
+    """Which Qdrant collections hold a point for this entity's URL / ids.
+
+    Scrolls the high-value collections in parallel with the same payload
+    candidate-key filter the resolver uses, keeping only those that return
+    at least one matching point. The worker pool is sized to clear the
+    whole target set in ~two waves and the budget is generous, so a cold
+    Qdrant doesn't drop the entity's primary collection (the result is
+    cached by the caller, so a partial cold read would otherwise stick)."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    candidates = _candidate_keys(ref)
+    if not candidates:
+        return []
+    payload_filter = {"should": [{"key": f, "match": {"value": v}} for f, v in candidates]}
+    targets = [c for c, _ in _AUTOCOMPLETE_COLLECTIONS]
+    deadline = time.monotonic() + budget
+    present: list[str] = []
+    with ThreadPoolExecutor(max_workers=min(16, len(targets))) as pool:
+        futures = {pool.submit(_scroll, c, payload_filter, 1): c for c in targets}
+        for fut in as_completed(futures):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                points = fut.result(timeout=remaining)
+            except Exception:  # noqa: BLE001
+                continue
+            if points:
+                present.append(futures[fut])
+    return sorted(present)
+
+
 def _mention_from_payload(payload: dict[str, Any], collection: str) -> Mention:
     text = ""
     for f in _TEXT_FIELDS:
@@ -521,6 +560,7 @@ def _facts_from_payload(payload: dict[str, Any], collection: str) -> list[Fact]:
                 href=href,
                 value_list=items,
                 value_links=value_links,
+                source="index",
             )
         )
         seen_labels.add(label)
@@ -677,6 +717,48 @@ def _autocomplete_one(
     return list((payload.get("result") or {}).get("points") or [])
 
 
+def _emoji_for(collection: str) -> str:
+    """Type emoji for an autocomplete row — keyed on the collection name so
+    it's robust to the qdrant/duckdb naming differences (hf_models vs
+    huggingface_models, ror_* vs institutions, …)."""
+    c = (collection or "").lower()
+    if "repo" in c or "renku" in c:
+        return "📦"
+    if "model" in c:
+        return "🤖"
+    if "dataset" in c:
+        return "🗂️"
+    if "space" in c:
+        return "🚀"
+    if "article" in c or "work" in c or "publication" in c or "infoscience_art" in c:
+        return "📄"
+    if "zenodo" in c or "record" in c:
+        return "🗂️"
+    if "org" in c or "institution" in c or "ror" in c or "group" in c:
+        return "🏛️"
+    if "person" in c or "author" in c or "user" in c:
+        return "👤"
+    if "docker" in c or "image" in c:
+        return "🐳"
+    return "🔗"
+
+
+_SUBTITLE_FIELDS = (
+    "description", "summary", "abstract", "headline", "bio", "tagline",
+    "journal", "author", "owner", "company", "location", "country",
+)
+
+
+def _subtitle_for_point(payload: dict[str, Any]) -> str:
+    """A one-line context snippet under the suggestion title."""
+    for f in _SUBTITLE_FIELDS:
+        v = payload.get(f)
+        if isinstance(v, str) and v.strip():
+            s = " ".join(v.split())
+            return s[:110] + ("…" if len(s) > 110 else "")
+    return ""
+
+
 def autocomplete(q: str, *, limit: int = 10) -> list[dict[str, str]]:
     """Suggest hub entities matching the user's typed query.
 
@@ -722,6 +804,9 @@ def autocomplete(q: str, *, limit: int = 10) -> list[dict[str, str]]:
                 {
                     "title": label,
                     "kind": collection,
+                    "kind_label": _BACKLINK_LABELS.get(collection, collection.replace("_", " ")),
+                    "emoji": _emoji_for(collection),
+                    "subtitle": _subtitle_for_point(payload),
                     "source_type": _source_type_for(collection),
                     "hub_url": hub_url,
                     "external_url": canonical,
@@ -850,11 +935,18 @@ _BACKLINK_URL_FIELDS = (
 # Keyed by collection name, falls back to "" (no tag rendered).
 _SOURCE_TYPE_BY_COLLECTION: dict[str, str] = {
     "github_repos": "GitHub",
+    "github_users": "GitHub",
+    "github_organizations": "GitHub",
     "zenodo_records": "Zenodo",
+    "communities": "Zenodo",
     "hf_models": "HuggingFace",
     "hf_datasets": "HuggingFace",
     "hf_spaces": "HuggingFace",
     "hf_orgs": "HuggingFace",
+    "huggingface_models": "HuggingFace",
+    "huggingface_datasets": "HuggingFace",
+    "huggingface_spaces": "HuggingFace",
+    "huggingface_organizations": "HuggingFace",
     "ror_worldwide": "ROR",
     "ror_europe": "ROR",
     "ror_switzerland": "ROR",
@@ -1989,20 +2081,21 @@ def _items_for_github_slugs(slugs: list[str], *, limit: int) -> list[RelatedItem
     return items
 
 
-def cached_panel(name: str, canonical_url: str, fn: callable) -> Any:
+def cached_panel(name: str, canonical_url: str, fn: callable, *, force: bool = False) -> Any:
     """Memoise a lazy-panel computation by (name, canonical_url).
 
     The cache lives in the hub process — fine since the data plane is
     visibly slow and these are read-only lookups. Entries expire after
     ``_PANEL_CACHE_TTL`` seconds so backlinks can pick up newly-added
-    references on the next refresh.
+    references on the next refresh. ``force=True`` skips the read and
+    recomputes, refreshing the cached value (used by on-demand refresh).
     """
     import time
 
     key = (name, canonical_url)
     now = time.monotonic()
     hit = _PANEL_CACHE.get(key)
-    if hit is not None and (now - hit[0]) < _PANEL_CACHE_TTL:
+    if not force and hit is not None and (now - hit[0]) < _PANEL_CACHE_TTL:
         return hit[1]
     value = fn()
     # Drop arbitrary entries when bounded.

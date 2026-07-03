@@ -12,6 +12,105 @@
 {% set tiles = entity.facts | selectattr('label','in', headline) | list %}
 {% set rest  = entity.facts | rejectattr('label','in', headline) | list %}
 
+{# Provenance tags — which store(s) a fact / edge came from. Accepts both the
+   fact vocabulary (rdf/index/graph) and the neighbour vocabulary (RDF/Neo4j),
+   normalising each to one styled chip. A row carrying more than one source is
+   corroborated by every store listed. #}
+{% set SRC_MAP = {
+  'rdf':   ('RDF',   'rdf'),
+  'RDF':   ('RDF',   'rdf'),
+  'index': ('Index', 'index'),
+  'Index': ('Index', 'index'),
+  'graph': ('Neo4j', 'graph'),
+  'Neo4j': ('Neo4j', 'graph'),
+} %}
+{% macro prov_chips(sources) -%}
+  {%- for s in sources if s in SRC_MAP -%}
+    <span class="src-tag src-{{ SRC_MAP[s][1] }}" title="from the {{ SRC_MAP[s][0] }} store">{{ SRC_MAP[s][0] }}</span>
+  {%- endfor -%}
+{%- endmacro %}
+{# Fact → its provenance list (multi-source ``sources`` if the merge set it,
+   else the single ``source``). #}
+{% macro fact_prov(f) -%}{{ prov_chips(f.sources if f.sources else ([f.source] if f.source else [])) }}{%- endmacro %}
+
+{# Provenance chips for a graph edge, with a per-store tooltip: the Neo4j chip
+   names the raw relationship type, the RDF chip names the property. #}
+{% macro edge_prov(n) -%}
+  {%- set srcs = n.sources if n.sources else ([n.source_type] if n.source_type else []) -%}
+  {%- for s in srcs if s in SRC_MAP -%}
+    {%- set nm = SRC_MAP[s][0] -%}
+    {%- set tip = n.neo4j_rel if nm == 'Neo4j' else (n.rdf_predicate if nm == 'RDF' else '') -%}
+    <span class="src-tag src-{{ SRC_MAP[s][1] }}" title="{{ nm }} relation{% if tip %} · {{ tip }}{% endif %}">{{ nm }}</span>
+  {%- endfor -%}
+{%- endmacro %}
+
+{# A small source logo linking out to the value's external identity
+   (orcid.org, github.com, ror.org, …). Empty for non-URL values. #}
+{% macro src_logo(url) -%}
+  {%- if url and url.startswith('http') and source_logo(url) -%}
+    <a href="{{ url }}" rel="noopener" target="_blank" class="val-logo" title="{{ url_host(url) }} ↗"><img src="{{ source_logo(url) }}" alt="" loading="lazy"></a>
+  {%- endif -%}
+{%- endmacro %}
+
+{# True-ish (non-empty) when a URL points at a renderable image — a badge
+   (shields.io & friends), a plain image file (.svg/.png/.jpg/…), or an avatar
+   (githubusercontent / any 'avatar' URL, which carry no file extension). #}
+{% macro is_img(u) -%}
+  {%- set ul = (u or '')|lower -%}
+  {%- if ul.startswith('http') and (
+        ('.svg' in ul or '.png' in ul or '.jpg' in ul or '.jpeg' in ul or '.gif' in ul or '.webp' in ul)
+        or 'shields.io' in ul or 'badgen.net' in ul or 'badge' in ul or 'avatar' in ul) -%}1{%- endif -%}
+{%- endmacro %}
+
+{# A single value — a badge/avatar image (linked), or a humanised link prefixed
+   with its source logo, or plain text (ISO datetimes trimmed to the date). #}
+{% macro one_value(value, href) -%}
+  {%- set url = href if href else value -%}
+  {%- if is_img(url) -%}
+    <a href="{{ url }}" rel="noopener" target="_blank" title="{{ url_host(url) }} ↗"><img class="fact-img" src="{{ url }}" alt="" loading="lazy"></a>
+  {%- else -%}
+    {{ src_logo(href if href else value) }}{{ hub_or_external(value, href) }}
+  {%- endif -%}
+{%- endmacro %}
+
+{# One key/value fact row — multi-valued chips, grouped integers, badges, or a
+   humanised pointer link prefixed with its source logo. #}
+{% macro fact_row(f) -%}
+  <div class="fact">
+    <div class="fact-label">{{ f.label.replace('_',' ') }}{{ fact_prov(f) }}</div>
+    <div class="fact-value">
+      {% if f.badges %}
+        {# Rendered badge images — each linked to its target with the label as
+           a hover tooltip + alt text. #}
+        <div class="fact-chips">
+          {% for img, label, link in f.badges[:16] %}
+            <a href="{{ link or img }}" rel="noopener" target="_blank" title="{{ label }}"><img class="fact-img" src="{{ img }}" alt="{{ label }}" loading="lazy"></a>
+          {% endfor %}
+          {% if f.badges|length > 16 %}<span class="card-meta" style="align-self: center;">+{{ f.badges|length - 16 }} more</span>{% endif %}
+        </div>
+      {% elif f.value_links %}
+        <div class="fact-chips">
+          {% for label, url in f.value_links[:14] %}
+            {% if url and is_img(url) %}<a href="{{ url }}" rel="noopener" target="_blank"><img class="fact-img" src="{{ url }}" alt="{{ label }}" loading="lazy"></a>
+            {% elif url %}<a class="pill pill-info" href="{{ url }}" {% if url.startswith('http') %}rel="noopener" target="_blank"{% endif %} style="font-size: 12px; text-decoration: none;">{{ label }}</a>
+            {% else %}<span class="pill pill-neutral" style="font-size: 12px;">{{ label }}</span>{% endif %}
+          {% endfor %}
+          {% if f.value_links|length > 14 %}<span class="card-meta" style="align-self: center;">+{{ f.value_links|length - 14 }} more</span>{% endif %}
+        </div>
+      {% elif f.value_list %}
+        <div class="fact-chips">
+          {% for item in f.value_list[:14] %}<span class="pill pill-neutral" style="font-size: 12px;">{{ item }}</span>{% endfor %}
+          {% if f.value_list|length > 14 %}<span class="card-meta" style="align-self: center;">+{{ f.value_list|length - 14 }} more</span>{% endif %}
+        </div>
+      {% elif not f.href and f.value.replace(',','').isdigit() and f.value|length < 13 %}
+        <span class="mono">{{ '{:,}'.format(f.value.replace(',','') | int) }}</span>
+      {% else %}
+        {{ one_value(f.value, f.href) }}
+      {% endif %}
+    </div>
+  </div>
+{%- endmacro %}
+
 {% macro hub_link(url) -%}
   /hub/{{ url
     | replace('https://','')
@@ -20,15 +119,16 @@
 {%- endmacro %}
 
 {# Render a value that *might* be a URL.
- * If it's a URL, prefer the hub-internal link (walks the data plane)
- * and append a small ↗ to the external source. Otherwise plain text. #}
+ * If it's a URL, show a human-readable label (licence id, schema.org type,
+ * owner/repo, DOI) linked into the hub, with the full URL on hover and a
+ * small ↗ to the external source. Otherwise plain text. #}
 {% macro hub_or_external(value, href) -%}
   {% set url = href if href else (value if value.startswith('http') else '') %}
   {%- if url -%}
-    <a href="{{ hub_link(url) }}">{{ value }}</a>
-    <a href="{{ url }}" rel="noopener" target="_blank" class="card-meta" title="open at source" style="margin-left: 4px;">↗</a>
+    <a href="{{ hub_link(url) }}" class="fact-link" title="{{ value }}">{{ human_url_label(value) }}</a>
+    <a href="{{ url }}" rel="noopener" target="_blank" class="fact-ext" title="open at source">↗</a>
   {%- else -%}
-    {{ value }}
+    {{ short_date(value) }}
   {%- endif %}
 {%- endmacro %}
 
@@ -60,7 +160,7 @@
   {%- elif label == 'country_code' -%}
     <span class="mono">{{ value | upper }}</span>
   {%- else -%}
-    {{ value }}
+    {{ short_date(value) }}
   {%- endif %}
 {%- endmacro %}
 
@@ -69,6 +169,111 @@
   {# The top breadcrumb lives in the sticky page-chrome (rendered by
      entity.html). Only the footer copy stays inside the scrollable
      body — useful for visitors who've scrolled all the way down. #}
+
+  {# ── identity hero ── a generated gradient banner (matching the
+     catalog card cover), the type emoji, the title/kind, and a direct
+     "open at source" action. Gives the page a visual anchor instead of
+     opening straight into gray stat tiles. #}
+  <style>
+    .entity-hero { position: relative; display: flex; align-items: center; gap: 16px;
+      padding: 18px 20px; border-radius: 14px; overflow: hidden; color: #fff;
+      border: 1px solid var(--border); }
+    .entity-hero::after { content: ""; position: absolute; inset: 0;
+      background: linear-gradient(90deg, rgba(0,0,0,.34), rgba(0,0,0,.12)); }
+    .entity-hero > * { position: relative; z-index: 1; }
+    .entity-hero-emoji { font-size: 40px; line-height: 1; filter: drop-shadow(0 1px 3px rgba(0,0,0,.35)); }
+    .entity-hero-main { min-width: 0; flex: 1; }
+    .entity-hero-kind { font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
+      font-weight: 700; opacity: .9; }
+    .entity-hero-title { font-size: 22px; font-weight: 700; line-height: 1.2;
+      text-shadow: 0 1px 4px rgba(0,0,0,.3); word-break: break-word; }
+    .entity-hero-sub { font-size: 13px; opacity: .92; margin-top: 3px;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .entity-hero-link { flex-shrink: 0; align-self: flex-start; text-decoration: none;
+      font-size: 12.5px; font-weight: 600; color: #fff; white-space: nowrap;
+      padding: 7px 13px; border-radius: 9px; background: rgba(255,255,255,.18);
+      border: 1px solid rgba(255,255,255,.32); backdrop-filter: blur(3px); }
+    .entity-hero-link:hover { background: rgba(255,255,255,.28); }
+
+    /* ── masonry body — Summary + metrics pinned on top (rendered above),
+       every other card flows into a height-packed masonry that re-balances
+       across 2–3 columns by viewport width. ── */
+    .entity-masonry { column-gap: 16px; }
+    @media (min-width: 760px)  { .entity-masonry { column-count: 2; } }
+    @media (min-width: 1320px) { .entity-masonry { column-count: 3; } }
+    .entity-masonry > * { break-inside: avoid; margin-bottom: 16px; }
+
+    /* facts stack in a single column inside their (now narrower) masonry card */
+    .facts-grid { column-gap: 24px; }
+    .facts-grid .fact { break-inside: avoid; padding: 8px 0;
+      border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
+    .facts-grid .fact:hover .fact-label { color: var(--fg-muted); }
+    .fact-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--fg-faint); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .fact-value { font-size: 13.5px; word-break: break-word; line-height: 1.4; }
+    /* humanised pointer link + its small external-source affordance */
+    .fact-link { color: var(--accent); text-decoration: none; font-weight: 550; }
+    .fact-link:hover { text-decoration: underline; }
+    .fact-ext { color: var(--fg-faint); text-decoration: none; margin-left: 5px; font-size: 11px; }
+    .fact-ext:hover { color: var(--fg); }
+    /* aggregated multi-value facts → chips */
+    .fact-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+    .fact-chips .pill { transition: border-color .12s ease, background .12s ease; }
+    .fact-chips a.pill:hover { border-color: var(--accent); }
+    /* rendered status / version badge image (shields.io & friends) */
+    /* rendered badge / avatar / image fact value */
+    .fact-img { height: 20px; max-width: 100%; vertical-align: middle; border-radius: 4px;
+      display: inline-block; background: var(--surface); }
+
+    /* ── compact key/value list (cross-references) ── */
+    .kv { padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .kv:last-child { border-bottom: 0; }
+    .kv-k { font-size: 11px; color: var(--fg-muted); margin-bottom: 2px; }
+    .kv-v { font-size: 12.5px; }
+
+    /* ── graph relations (one card per category) ── */
+    .rel-count { font-size: 10px; font-weight: 700; color: var(--fg-faint);
+      background: var(--surface-sunk); border-radius: 8px; padding: 0 6px;
+      margin-left: 6px; }
+    .rel-list { margin: 0; padding: 0; list-style: none; display: flex;
+      flex-direction: column; gap: 7px; }
+    .rel-list li { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+    .rel-verb { font-size: 10.5px; text-transform: lowercase; color: var(--fg-faint);
+      white-space: nowrap; }
+    /* per-repo contribution rollup pill on a contributor row */
+    .rel-meta { font-size: 10px; color: var(--fg-muted); white-space: nowrap;
+      background: var(--surface-sunk); border-radius: 8px; padding: 1px 7px; }
+    /* source logo badge next to a value (orcid / github / ror / doi) */
+    .val-logo { display: inline-flex; flex-shrink: 0; }
+    .val-logo img { width: 15px; height: 15px; border-radius: 3px;
+      vertical-align: middle; display: block; background: #fff; }
+    .fact-value .val-logo { margin-right: 5px; }
+
+    /* ── provenance tags — which store a fact / edge came from ── */
+    .src-tag { font-size: 8.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .04em; padding: 1px 5px; border-radius: 5px;
+      vertical-align: middle; margin-left: 6px; white-space: nowrap; }
+    .src-rdf   { background: color-mix(in srgb, #a855f7 22%, var(--surface)); color: #c084fc; }
+    .src-index { background: color-mix(in srgb, #3b82f6 20%, var(--surface)); color: #60a5fa; }
+    .src-graph { background: color-mix(in srgb, #22c55e 20%, var(--surface)); color: #4ade80; }
+    .pill.pill-rdf { background: color-mix(in srgb, #a855f7 22%, var(--surface));
+      color: #c084fc; border-color: color-mix(in srgb, #a855f7 35%, transparent); }
+    /* Compact metric band under the description; the small tiles wrap to
+       fill the row. Everything else (availability + sections) packs into the
+       masonry below. */
+    .entity-metrics { margin-bottom: 16px; }
+  </style>
+  <div class="entity-hero" style="background: {{ hero_gradient }};">
+    <div class="entity-hero-emoji">{{ hero_emoji }}</div>
+    <div class="entity-hero-main">
+      {% if entity.kind %}<div class="entity-hero-kind">{{ entity.kind }}</div>{% endif %}
+      <div class="entity-hero-title">{{ entity.title or ref.display }}</div>
+      {% if entity.subtitle %}<div class="entity-hero-sub">{{ entity.subtitle }}</div>{% endif %}
+    </div>
+    {% if entity.ref_url %}
+      <a class="entity-hero-link" href="{{ entity.ref_url }}" rel="noopener" target="_blank">Open at source ↗</a>
+    {% endif %}
+  </div>
 
   {% if not entity.enriched %}
     <div class="card tone-warn">
@@ -81,147 +286,151 @@
     </div>
   {% endif %}
 
+  {# ── Description first, then metrics + availability side by side beneath it.
+        The metric tiles fill the row; "Present in" sits narrower to its side. ── #}
+  {# The narrative is composed AFTER the body ships (see routes/hub.py) and
+     streamed into #entity-summary-text by the "narrative" SSE handler. We
+     render the card up-front with a spinner when one is pending so it keeps
+     its place at the top; if the agent returns nothing the handler removes
+     the card. #}
+  {% if entity.narrative or narrative_pending %}
+    <div class="card tone-info" id="entity-summary-card">
+      <div class="card-title">📝 Summary</div>
+      {% if entity.narrative %}
+        <p id="entity-summary-text" style="margin: 6px 0 0; line-height: 1.55;">{{ entity.narrative }}</p>
+      {% else %}
+        <p id="entity-summary-text" style="margin: 6px 0 0; line-height: 1.55; display: flex; align-items: center; gap: 10px;">
+          <span class="hub-spinner" aria-hidden="true"></span>
+          <span class="card-meta">composing summary with the agent…</span>
+        </p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {# Metric tiles — a compact, full-width band that wraps responsively so the
+     small frames rearrange to fill the row. Kept out of the masonry because a
+     column-masonry would stretch each tiny tile to full column width. #}
   {% if tiles %}
-    <div class="grid-stats">
+    <div class="grid-stats entity-metrics">
       {% for f in tiles %}
         <div class="card tone-info">
-          <div class="card-title">{{ f.label.replace('_',' ') }}</div>
+          <div class="card-title">{{ f.label.replace('_',' ') }}{{ fact_prov(f) }}</div>
           <div class="stat-value" style="font-size: 22px;">{{ tile_value(f.label, f.value) | safe }}</div>
         </div>
       {% endfor %}
     </div>
   {% endif %}
 
-  {% if entity.narrative %}
-    <div class="card tone-info">
-      <div class="card-title">Summary</div>
-      {# Default whitespace handling — the LLM is instructed to output
-         a single paragraph, so any stray newlines collapse cleanly.
-         Previously ``white-space: pre-line`` was preserving them and
-         leaving visible vertical gaps. #}
-      <p style="margin: 6px 0 0; line-height: 1.55;">{{ entity.narrative }}</p>
-    </div>
-  {% endif %}
+  {# ── Everything else — availability + every section card — flows into ONE
+        height-balanced masonry so the blocks pack tightly and fill the space
+        (no dead column beside a tall card). ── #}
+  <div class="entity-masonry">
 
-  {% if entity.identifiers %}
-    <div class="card">
-      <div class="card-title">Cross-references</div>
-      <table class="data" style="margin-top: 8px;">
-        <tbody>
-        {% for f in entity.identifiers %}
-          <tr>
-            <td style="width: 200px; color: var(--fg-muted); white-space: nowrap;">{{ f.label }}</td>
-            <td class="mono" style="word-break: break-all;">
-              {{ hub_or_external(f.value, f.href) }}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
+      {% if presence_rows %}
+        {% with rows = presence_rows %}{% include "hub/_presence_body.html" %}{% endwith %}
+      {% endif %}
 
-  {% if rest %}
-    <div class="card">
-      <div class="card-title">Facts</div>
-      <table class="data" style="margin-top: 8px;">
-        <tbody>
-        {% for f in rest %}
-          <tr>
-            <td style="width: 200px; color: var(--fg-muted); white-space: nowrap; vertical-align: top;">{{ f.label.replace('_',' ') }}</td>
-            <td style="word-break: break-word; vertical-align: top;">
-              {% if f.value_links %}
-                {# Multi-valued fact with per-chip hub links — each
-                   chip navigates to the linked entity's hub page. #}
-                <div style="display: flex; flex-wrap: wrap; gap: 4px 6px;">
-                  {% for label, url in f.value_links[:12] %}
-                    {% if url %}
-                      <a class="pill pill-info" href="{{ url }}" style="font-size: 12px; text-decoration: none;">{{ label }}</a>
-                    {% else %}
-                      <span class="pill pill-neutral" style="font-size: 12px;">{{ label }}</span>
-                    {% endif %}
-                  {% endfor %}
-                  {% if f.value_links|length > 12 %}
-                    <span class="card-meta" style="align-self: center;">+{{ f.value_links|length - 12 }} more</span>
-                  {% endif %}
-                </div>
-              {% elif f.value_list %}
-                {# Multi-valued fact — render each item as a chip so
-                   commas inside individual items (e.g. "Physics, Fluids
-                   & Plasmas") don't fragment visually. #}
-                <div style="display: flex; flex-wrap: wrap; gap: 4px 6px;">
-                  {% for item in f.value_list[:12] %}
-                    <span class="pill pill-neutral" style="font-size: 12px;">{{ item }}</span>
-                  {% endfor %}
-                  {% if f.value_list|length > 12 %}
-                    <span class="card-meta" style="align-self: center;">+{{ f.value_list|length - 12 }} more</span>
-                  {% endif %}
-                </div>
-              {% else %}
-                {{ hub_or_external(f.value, f.href) }}
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
-
-  {% if entity.neighbours %}
-    <div class="card">
-      <div class="card-title">Graph neighbours</div>
-      <div class="card-meta" style="margin: 4px 0 10px;">
-        From the Neo4j crawl graph — repos, contributors, owning orgs/users, forks.
-      </div>
-      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px;">
-      {% for n in entity.neighbours %}
-        <li style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
-          {% if n.source_type %}
-            <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ n.source_type }}</span>
-          {% endif %}
-          <span class="pill pill-neutral" style="text-transform: lowercase; font-size: 11px;">{{ n.relation }}</span>
-          {% if n.kind %}<span class="card-meta" style="font-size: 11px;">{{ n.kind.lower() }}</span>{% endif %}
-          {% if n.hub_url %}
-            <a href="{{ n.hub_url }}" class="mono" style="word-break: break-all;">{{ n.label }}</a>
-            {% if n.external_url %}<a href="{{ n.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>{% endif %}
-          {% elif n.external_url %}
-            <a href="{{ n.external_url }}" rel="noopener" target="_blank">{{ n.label }}</a>
-          {% else %}
-            <span>{{ n.label }}</span>
-          {% endif %}
-        </li>
-      {% endfor %}
-      </ul>
-    </div>
-  {% endif %}
-
-  {# The Backlinks panel is rendered separately by the lazy fetch in
-     entity.html — keeps slow Qdrant scans off the critical render
-     path. See /api/hub/backlinks/{ref}. #}
-
-  {% if entity.mentions %}
-    <div class="card">
-      <div class="card-title">Mentions</div>
-      <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
-      {% for m in entity.mentions %}
-        <div style="border-left: 2px solid var(--border); padding: 4px 0 4px 10px;">
-          <div class="card-meta" style="margin-bottom: 4px;">
-            <span class="pill pill-info">{{ m.collection }}</span>
-            {% if m.source_label %}<span style="margin-left: 6px;">{{ m.source_label }}</span>{% endif %}
+      {# Facts split into thematic cards (Classification / Metrics / Timeline /
+         Details) instead of one long table. #}
+      {% set FACT_ICON = {'Classification': '🏷️', 'Metrics': '📊', 'Timeline': '🕰️', 'Details': '📋'} %}
+      {% for gname, gfacts in fact_groups(rest) %}
+        <div class="card">
+          <div class="card-title">{{ FACT_ICON.get(gname, '📋') }} {{ gname }}</div>
+          <div class="facts-grid" style="margin-top: 10px;">
+            {% for f in gfacts %}{{ fact_row(f) }}{% endfor %}
           </div>
-          {% if m.text %}<div style="line-height: 1.55;">{{ m.text[:600] }}{% if m.text|length > 600 %}…{% endif %}</div>{% endif %}
-          {% if m.source_url %}
-            <div class="card-meta" style="margin-top: 4px;">
-              <a href="{{ hub_link(m.source_url) }}">{{ m.source_url }}</a>
-              <a href="{{ m.source_url }}" rel="noopener" target="_blank" title="open at source">↗</a>
-            </div>
-          {% endif %}
         </div>
       {% endfor %}
-      </div>
-    </div>
-  {% endif %}
+
+      {% if entity.identifiers %}
+        <div class="card">
+          <div class="card-title">🔗 Cross-references</div>
+          <div style="margin-top: 8px;">
+          {% for f in entity.identifiers %}
+            <div class="kv">
+              <div class="kv-k">{{ f.label }}</div>
+              <div class="kv-v" style="word-break: break-all; display: flex; align-items: center; gap: 6px;">
+                {{ src_logo(f.href if f.href else f.value) }}<span>{{ hub_or_external(f.value, f.href) }}</span>
+              </div>
+            </div>
+          {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      {% if entity.neighbours %}
+        {# Each relation category becomes its own card. Verbs use the RDF
+           wording when available; the Neo4j / RDF chips carry the raw
+           relationship type / property in their tooltip. Contributors &
+           authors unify Neo4j "contributed by" with RDF "authored by"; orgs
+           include github orgs surfaced from RDF. #}
+        {% set REL_SECTIONS = [
+          ('people', '👤 Contributors &amp; authors'),
+          ('orgs',   '🏛️ Organizations &amp; owners'),
+          ('repos',  '📦 Repositories &amp; forks'),
+          ('works',  '📄 Cited works'),
+          ('other',  '🔗 Other links'),
+        ] %}
+        {% for sec, title in REL_SECTIONS %}
+          {% set items = entity.neighbours | selectattr('category','equalto', sec) | list %}
+          {% if items %}
+            <div class="card">
+              <div class="card-title">{{ title | safe }}<span class="rel-count">{{ items | length }}</span></div>
+              <ul class="rel-list" style="margin-top: 8px;">
+              {% for n in items %}
+                <li>
+                  {{ edge_prov(n) }}
+                  <span class="rel-verb">{{ n.relation }}</span>
+                  {{ src_logo(n.external_url) }}
+                  {% if n.hub_url %}
+                    <a href="{{ n.hub_url }}" style="word-break: break-word;">{{ n.label }}</a>
+                  {% elif n.external_url %}
+                    <a href="{{ n.external_url }}" rel="noopener" target="_blank">{{ n.label }}</a>
+                  {% else %}
+                    <span>{{ n.label }}</span>
+                  {% endif %}
+                  {# extra reference logos from the identity bridge: ORCID for a
+                     matched person, ROR (parent institution) for a github org. #}
+                  {% if n.orcid_url and n.orcid_url != n.external_url %}{{ src_logo(n.orcid_url) }}{% endif %}
+                  {% if n.ror_url and n.ror_url != n.external_url %}{{ src_logo(n.ror_url) }}{% endif %}
+                  {# per-repo contribution rollup for a contributor #}
+                  {% if n.contribution_count %}<span class="rel-meta" title="commits to this repository">{{ '{:,}'.format(n.contribution_count) }} commit{{ 's' if n.contribution_count != 1 }}{% if n.first_contribution %} · {{ n.first_contribution[:4] }}{% if n.last_contribution and n.last_contribution[:4] != n.first_contribution[:4] %}–{{ n.last_contribution[:4] }}{% endif %}{% endif %}</span>{% endif %}
+                </li>
+              {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+
+      {% if entity.mentions %}
+        <div class="card">
+          <div class="card-title">💬 Mentions</div>
+          <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
+          {% for m in entity.mentions %}
+            <div style="border-left: 2px solid var(--border); padding: 4px 0 4px 10px;">
+              <div class="card-meta" style="margin-bottom: 4px;">
+                <span class="pill pill-info">{{ m.collection }}</span>
+                {% if m.source_label %}<span style="margin-left: 6px;">{{ m.source_label }}</span>{% endif %}
+              </div>
+              {% if m.text %}<div style="line-height: 1.55;">{{ m.text[:600] }}{% if m.text|length > 600 %}…{% endif %}</div>{% endif %}
+              {% if m.source_url %}
+                <div class="card-meta" style="margin-top: 4px;">
+                  <a href="{{ hub_link(m.source_url) }}">{{ m.source_url }}</a>
+                  <a href="{{ m.source_url }}" rel="noopener" target="_blank" title="open at source">↗</a>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+  </div>{# /.entity-masonry #}
+
+  {# The Backlinks / Activity / Community / Related panels are rendered
+     separately by lazy fetches in entity.html — they tile into a
+     two-column masonry below the body. #}
 
   {% if entity.sources %}
     <div class="card-meta" style="display: flex; gap: 12px; flex-wrap: wrap; padding-top: 4px;">

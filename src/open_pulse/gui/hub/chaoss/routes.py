@@ -27,7 +27,12 @@ trail stays continuous.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import os
+import pickle
+import threading
+import time
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,8 +47,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
+from concurrent.futures import ThreadPoolExecutor
+
 from ..auth import maybe_require_auth
 from . import metrics as metrics_mod
+from . import projects as projects_mod
 
 
 def _md_inline(text: str | None) -> Markup:
@@ -75,29 +83,31 @@ log = logging.getLogger(__name__)
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE.parent / "templates"))
+# Render window lengths as years/months/days (e.g. 3650 → "10 years").
+templates.env.filters["window_label"] = metrics_mod.window_label
 templates.env.filters["md"] = _md_inline
 
 router = APIRouter(tags=["chaoss"])
 
 # Default time window for the time-based metrics. The page lets the
 # user override it via ?window=<days>.
-DEFAULT_WINDOW_DAYS = 365
+DEFAULT_WINDOW_DAYS = 3650  # max offered window (≈10y) — effectively all-time
 # 30 day / 90 day / 6 month / 1 year / 2 year / 5 year / 10 year — the
 # longer choices matter for older repos whose only contributors were
 # before the standard "last year" window.
 ALLOWED_WINDOWS = (30, 90, 180, 365, 730, 1825, 3650)
 
-# Topic axis: the official CHAOSS taxonomy used to browse the
-# catalogue at https://chaoss.community/kbtopic/. We surface the four
-# topics that have at least one open-pulse metric implemented. The
-# ``css`` field maps to the existing pill classes in app.css; the
-# ``url`` jumps the visitor straight to the CHAOSS catalogue's
-# corresponding topic page.
+# Presentation axis: three plain-language buckets that answer the
+# question a visitor actually has when they land on a repo. Each maps
+# onto several CHAOSS topics under the hood — the original CHAOSS topic
+# of a metric still lives on ``MetricSpec.category`` and links out to the
+# catalogue per-card. The ``css`` field maps to the existing pill classes
+# in app.css.
 CATEGORIES: tuple[dict[str, str], ...] = (
     {
-        "name": "Contributor",
+        "name": "Community",
         "css": "pill-info",
-        "blurb": "Who builds and maintains the project?",
+        "blurb": "Is the project alive & kicking?",
         "url": "https://chaoss.community/kbtopic/contributor/",
         # Two-person silhouette — keeps the icon readable at 18px.
         "icon": (
@@ -108,47 +118,109 @@ CATEGORIES: tuple[dict[str, str], ...] = (
         ),
     },
     {
-        "name": "Software",
+        "name": "Popularity",
         "css": "pill-accent",
-        "blurb": "What can users do with the code itself?",
+        "blurb": "Who sees, uses & reuses it?",
         "url": "https://chaoss.community/kbtopic/software/",
-        # Stacked package / box.
+        # Upward star / spark.
         "icon": (
-            "M12 3l9 4.5-9 4.5-9-4.5 9-4.5z M3 12l9 4.5 9-4.5 M3 16.5l9 4.5 9-4.5"
+            "M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.8 "
+            "5.9 21.4l1.4-6.8L2.2 9.9l6.9-.8L12 2z"
         ),
     },
     {
-        "name": "Lifecycle",
+        "name": "Quality",
         "css": "pill-warn",
-        "blurb": "How does work flow through the project?",
-        "url": "https://chaoss.community/kbtopic/lifecycle/",
-        # Circular arrow.
-        "icon": ("M21 12a9 9 0 1 1-3-6.7 M21 4v5h-5"),
-    },
-    {
-        "name": "Organization",
-        # ``pill-neutral`` is the styled gray variant — using just
-        # ``pill`` would render the chip without a background, since
-        # the base ``.pill`` rule alone has no colour fill.
-        "css": "pill-neutral",
-        "blurb": "How are contributors organised across orgs?",
-        "url": "https://chaoss.community/kbtopic/organization/",
-        # Office building.
-        "icon": ("M3 21V7l9-4 9 4v14 M9 21V13h6v8 M9 9h.01 M15 9h.01"),
+        "blurb": "Can others understand & reuse it?",
+        "url": "https://chaoss.community/kbtopic/common/",
+        # Shield-check.
+        "icon": ("M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z M9 12l2 2 4-4"),
     },
 )
+
+# Per-slug presentation bucket. The MetricSpec keeps its original CHAOSS
+# topic (Contributor / Software / Lifecycle / Organization) for the
+# per-card catalogue link; this maps each metric onto one of the three
+# visitor-facing buckets above. Anything not listed falls back to
+# "Community" via ``_category``.
+_SLUG_CATEGORY: dict[str, str] = {
+    # Popularity — who sees / uses / reuses the work.
+    "technical_fork": "Popularity",
+    "academic_impact": "Popularity",
+    "project_popularity": "Popularity",
+    # Quality — can others understand, review and legally reuse it.
+    "licenses_declared": "Quality",
+    "programming_languages": "Quality",
+    "code_lines": "Quality",
+    "self_merge": "Quality",
+    "bot_activity": "Quality",
+    "cr_reviews": "Quality",
+    "cr_accepted": "Quality",
+    "cr_declined": "Quality",
+    "upstream_dependencies": "Quality",
+    "docs_discoverability": "Quality",
+    "license_coverage": "Quality",
+    "test_coverage": "Quality",
+    "release_frequency": "Quality",
+    # Everything else (contributors, activity, responsiveness, issues,
+    # bus-factor, review duration) is Community — handled by the default.
+}
+
+
+def _category(spec) -> str:
+    """Visitor-facing bucket for a metric (Community / Popularity / Quality)."""
+    return _SLUG_CATEGORY.get(spec.slug, "Community")
 
 
 def _grouped(specs: list) -> list[dict[str, Any]]:
     """Re-shape the flat metrics registry into the order CATEGORIES
-    declares so templates can render one section per topic.
+    declares so templates can render one section per bucket.
     """
     out = []
     for cat in CATEGORIES:
-        bucket = [m for m in specs if m.category == cat["name"]]
+        bucket = [m for m in specs if _category(m) == cat["name"]]
         if bucket:
             out.append({**cat, "metrics": bucket})
     return out
+
+
+# The curated headline set surfaced first on the catalogue + repo dashboard.
+# Everything else in the registry falls into the collapsed "Advanced" section.
+# Slugs the product wanted but that aren't implemented yet (clones, downloads,
+# recommendability, skill-demand, a generic "change requests", contribution-type
+# split) are simply absent here — they join the featured set once they exist.
+_FEATURED_SLUGS = {
+    # Community
+    "activity_dates",
+    "contributors",
+    "new_contributors",
+    "committers",
+    "org_diversity",
+    "absence_factor",
+    "first_response",
+    "issue_response_time",
+    "closure_ratio",
+    # Popularity
+    "academic_impact",
+    "project_popularity",
+    "technical_fork",
+    # Quality
+    "cr_reviews",
+    "docs_discoverability",
+    "license_coverage",
+    "licenses_declared",
+    "programming_languages",
+    "release_frequency",
+    "test_coverage",
+    "upstream_dependencies",
+}
+
+
+def _featured_split(specs: list) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """``(featured_groups, advanced_groups)`` — each grouped by category."""
+    featured = [m for m in specs if m.slug in _FEATURED_SLUGS]
+    advanced = [m for m in specs if m.slug not in _FEATURED_SLUGS]
+    return _grouped(featured), _grouped(advanced)
 
 
 def _clamp_window(value: int) -> int:
@@ -183,6 +255,20 @@ def _open_in_databases(engine: str, query: str, mode: str | None = None) -> str:
     return "/databases#" + urllib.parse.urlencode(parts)
 
 
+# Engines the /databases console can actually run. Index reads (DuckDB)
+# are transparent in the trace but have no console tab, so they get no
+# "Run query" deep link.
+_CONSOLE_ENGINES = {"cypher", "sparql", "opensearch"}
+
+
+def _deep_link(engine: str, query: str, mode: str | None = None) -> str | None:
+    """Console deep link for a trace, or None when the engine isn't one
+    the /databases page can execute (e.g. ``duckdb`` index reads)."""
+    if engine not in _CONSOLE_ENGINES:
+        return None
+    return _open_in_databases(engine, query, mode)
+
+
 @router.get(
     "/chaoss", response_class=HTMLResponse, dependencies=[Depends(maybe_require_auth)]
 )
@@ -195,8 +281,33 @@ def chaoss_landing(request: Request) -> HTMLResponse:
             "page": "chaoss",
             "metrics": metrics_mod.REGISTRY,
             "groups": _grouped(metrics_mod.REGISTRY),
+            "featured_groups": _featured_split(metrics_mod.REGISTRY)[0],
+            "advanced_groups": _featured_split(metrics_mod.REGISTRY)[1],
             "categories": CATEGORIES,
             "window_choices": ALLOWED_WINDOWS,
+            "default_window": DEFAULT_WINDOW_DAYS,
+            "projects": projects_mod.list_projects(),
+        },
+    )
+
+
+@router.get(
+    "/chaoss/docs",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_docs(request: Request) -> HTMLResponse:
+    """Documentation — what each metric measures and which data sources
+    (Neo4j / SPARQL / GrimoireLab / GitHub index) it can be computed from."""
+    return templates.TemplateResponse(
+        request,
+        "chaoss/docs.html",
+        {
+            "page": "chaoss",
+            "groups": _grouped(metrics_mod.REGISTRY),
+            "sources": metrics_mod.metric_sources(),
+            "source_columns": metrics_mod.METRIC_SOURCE_COLUMNS,
+            "source_blurb": metrics_mod.METRIC_SOURCE_BLURB,
             "default_window": DEFAULT_WINDOW_DAYS,
         },
     )
@@ -230,6 +341,43 @@ def chaoss_repo(
             "canonical_url": f"https://github.com/{full}",
             "metrics": metrics_mod.REGISTRY,
             "groups": _grouped(metrics_mod.REGISTRY),
+            "featured_groups": _featured_split(metrics_mod.REGISTRY)[0],
+            "advanced_groups": _featured_split(metrics_mod.REGISTRY)[1],
+            "categories": CATEGORIES,
+            "window": window,
+            "window_choices": ALLOWED_WINDOWS,
+        },
+    )
+
+
+@router.get(
+    "/chaoss/projects/{project}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_project_dashboard(
+    request: Request,
+    project: str,
+    window: int = Query(DEFAULT_WINDOW_DAYS, ge=7, le=3650),
+) -> HTMLResponse:
+    """Project dashboard — CHAOSS metrics aggregated across a GrimoireLab
+    project's repos. Cards fill in from the JSON API (cached per project)."""
+    repos = projects_mod.resolve_project_repos(project)
+    if repos is None:
+        raise HTTPException(status_code=404, detail=f"unknown project: {project}")
+    window = _clamp_window(window)
+    title = next(
+        (p["title"] for p in projects_mod.list_projects() if p["project"] == project),
+        project,
+    )
+    return templates.TemplateResponse(
+        request,
+        "chaoss/project.html",
+        {
+            "page": "chaoss",
+            "project": project,
+            "title": title,
+            "repo_count": len(repos),
             "categories": CATEGORIES,
             "window": window,
             "window_choices": ALLOWED_WINDOWS,
@@ -283,7 +431,7 @@ def chaoss_metric_card(
                 "query": t.query,
                 "result_summary": t.result_summary,
                 "error": t.error,
-                "deep_link": _open_in_databases(t.engine, t.query, t.mode),
+                "deep_link": _deep_link(t.engine, t.query, t.mode),
             }
         )
     return templates.TemplateResponse(
@@ -337,11 +485,13 @@ def _spec_to_dict(spec: metrics_mod.MetricSpec) -> dict[str, Any]:
     return {
         "slug": spec.slug,
         "name": spec.name,
-        "category": spec.category,
+        "category": _category(spec),
+        # ``chaoss_topic`` keeps the underlying CHAOSS taxonomy term for
+        # anyone who wants it; the visitor-facing bucket is ``category``.
+        "chaoss_topic": spec.category,
         "question": spec.question,
         "description": spec.description,
         "chaoss_url": spec.chaoss_url,
-        "chaoss_level": spec.chaoss_level,
         "is_time_based": spec.is_time_based,
     }
 
@@ -355,7 +505,7 @@ def _trace_to_dict(t: metrics_mod.QueryTrace) -> dict[str, Any]:
         "query": t.query,
         "result_summary": t.result_summary,
         "error": t.error,
-        "deep_link": _open_in_databases(t.engine, t.query, t.mode),
+        "deep_link": _deep_link(t.engine, t.query, t.mode),
     }
 
 
@@ -410,13 +560,14 @@ def _compute_one(
     return spec, result
 
 
+@router.get("/api/v1/metrics/chaoss/topics", dependencies=[Depends(maybe_require_auth)])
 @router.get(
-    "/api/chaoss/v1/topics",
+    "/api/chaoss/v1/topics",  # deprecated alias
     dependencies=[Depends(maybe_require_auth)],
 )
 def chaoss_api_topics() -> dict[str, Any]:
-    """List the 4 CHAOSS topic groups (Contributor / Software /
-    Lifecycle / Organization) with metric counts."""
+    """List the 3 metric buckets (Community / Popularity / Quality)
+    with metric counts."""
     grouped = _grouped(metrics_mod.REGISTRY)
     by_name = {g["name"]: len(g["metrics"]) for g in grouped}
     return {
@@ -433,26 +584,30 @@ def chaoss_api_topics() -> dict[str, Any]:
     }
 
 
+@router.get("/api/v1/metrics/chaoss", dependencies=[Depends(maybe_require_auth)])
 @router.get(
-    "/api/chaoss/v1/metrics",
+    "/api/chaoss/v1/metrics",  # deprecated alias
     dependencies=[Depends(maybe_require_auth)],
 )
 def chaoss_api_metrics(
     category: str | None = Query(
         None,
-        description="Filter to one topic — Contributor / Software / Lifecycle / Organization.",
+        description="Filter to one bucket — Community / Popularity / Quality.",
     ),
 ) -> dict[str, Any]:
     """List every metric spec (catalogue). Pure static data — no
     upstream stores are touched. Optionally filtered by ``category``."""
     specs = metrics_mod.REGISTRY
     if category:
-        specs = [m for m in specs if m.category.lower() == category.lower()]
+        specs = [m for m in specs if _category(m).lower() == category.lower()]
     return {"metrics": [_spec_to_dict(m) for m in specs]}
 
 
 @router.get(
-    "/api/chaoss/v1/metrics/{slug}",
+    "/api/v1/metrics/chaoss/metrics/{slug}", dependencies=[Depends(maybe_require_auth)]
+)
+@router.get(
+    "/api/chaoss/v1/metrics/{slug}",  # deprecated alias
     dependencies=[Depends(maybe_require_auth)],
 )
 def chaoss_api_metric_spec(slug: str) -> dict[str, Any]:
@@ -464,7 +619,11 @@ def chaoss_api_metric_spec(slug: str) -> dict[str, Any]:
 
 
 @router.get(
-    "/api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics",
+    "/api/v1/metrics/chaoss/repositories/github.com/{owner}/{repo}/metrics",
+    dependencies=[Depends(maybe_require_auth)],
+)
+@router.get(
+    "/api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics",  # deprecated alias
     dependencies=[Depends(maybe_require_auth)],
 )
 def chaoss_api_repo_metrics(
@@ -495,7 +654,7 @@ def chaoss_api_repo_metrics(
     fields = _parse_include(include)
     specs = metrics_mod.REGISTRY
     if category:
-        specs = [m for m in specs if m.category.lower() == category.lower()]
+        specs = [m for m in specs if _category(m).lower() == category.lower()]
 
     metrics_out: list[dict[str, Any]] = []
     for spec in specs:
@@ -534,7 +693,11 @@ def chaoss_api_repo_metrics(
 
 
 @router.get(
-    "/api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics/{slug}",
+    "/api/v1/metrics/chaoss/repositories/github.com/{owner}/{repo}/metrics/{slug}",
+    dependencies=[Depends(maybe_require_auth)],
+)
+@router.get(
+    "/api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics/{slug}",  # alias
     dependencies=[Depends(maybe_require_auth)],
 )
 def chaoss_api_repo_metric_one(
@@ -559,4 +722,393 @@ def chaoss_api_repo_metric_one(
         "window_days": window,
         "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         **_result_to_dict(spec, result, fields),
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#         Project-scoped metrics · /api/v1/metrics/chaoss/projects/*
+# ═════════════════════════════════════════════════════════════════════════
+#
+# A GrimoireLab "project" (projects.json) is a named set of repos. We compute
+# the per-repo metric across every repo in the project (in parallel) and return
+# both the exact per-repo breakdown and a labelled roll-up.
+
+# Headline roll-up rule per metric. Default "sum" (additive counts); ratios
+# average. Distinct-people counts are summed but flagged ``approx`` — a
+# contributor active in N repos is counted N times (true dedup needs a
+# project-native query, a follow-up).
+_AGG_RULE: dict[str, str] = {
+    "closure_ratio": "mean",
+    "technical_fork": "mean",
+    # Avg direct deps per repo; donut-fraction metrics average to a share.
+    "upstream_dependencies": "mean",
+    "docs_discoverability": "mean",
+    "license_coverage": "mean",
+    "test_coverage": "mean",
+    "release_frequency": "mean",
+    # Median response time averages across repos; committers is a distinct
+    # head-count (summed, flagged approx below).
+    "issue_response_time": "mean",
+    "first_response": "mean",
+}
+_AGG_APPROX = {"contributors", "new_contributors", "org_diversity", "committers"}
+# Bound on fan-out per request; larger projects are truncated (reported)
+# until snapshot caching lands.
+_PROJECT_REPO_CAP = 150
+_PROJECT_WORKERS = 4
+
+
+def _metric_numeric(r: metrics_mod.MetricResult) -> float | None:
+    """Best-effort headline number from a MetricResult, for aggregation.
+    Prefers the structured ``visual`` payload; falls back to parsing the
+    display ``value``. None for non-numeric metrics (e.g. a license name)."""
+    v = r.visual or {}
+    kind = v.get("kind")
+    if kind == "stacked_bar":
+        nums = [s.get("value") for s in (v.get("segments") or [])
+                if isinstance(s.get("value"), (int, float))]
+        return float(sum(nums)) if nums else None
+    if kind == "rank_bars":
+        nums = [i.get("value") for i in (v.get("items") or [])
+                if isinstance(i.get("value"), (int, float))]
+        return float(sum(nums)) if nums else None
+    if kind == "donut" and isinstance(v.get("fraction"), (int, float)):
+        return float(v["fraction"])
+    s = (r.value or "").strip().replace(",", "")
+    if not s or s in {"—", "-", "n/a", "N/A"}:
+        return None
+    if s.endswith("%"):
+        try:
+            return float(s[:-1]) / 100.0
+        except ValueError:
+            return None
+    m = _re.match(r"-?\d+(?:\.\d+)?", s)
+    return float(m.group(0)) if m else None
+
+
+def _project_or_404(project: str) -> list[str]:
+    repos = projects_mod.resolve_project_repos(project)
+    if repos is None:
+        raise HTTPException(status_code=404, detail=f"unknown project: {project}")
+    if not repos:
+        raise HTTPException(
+            status_code=404, detail=f"project {project!r} has no github repositories"
+        )
+    return repos
+
+
+def _compute_repo_specs(full: str, window: int, specs: list) -> dict:
+    """Compute ``specs`` for one repo; per-metric failures become ``None``."""
+    out: dict[str, Any] = {}
+    canonical = f"https://github.com/{full}"
+    for spec in specs:
+        try:
+            out[spec.slug] = spec.compute(full, canonical, window)
+        except Exception:  # noqa: BLE001
+            log.exception("metric %s failed for %s", spec.slug, full)
+            out[spec.slug] = None
+    return out
+
+
+def _aggregate(slug: str, per_repo: list[tuple[str, float | None]]) -> dict[str, Any]:
+    """Roll up one metric's per-repo numbers into a labelled aggregate."""
+    nums = [n for _, n in per_repo if n is not None]
+    rule = _AGG_RULE.get(slug, "sum")
+    agg: dict[str, Any] = {
+        "rule": rule,
+        "n_repos": len(per_repo),
+        "n_with_value": len(nums),
+        "sum": sum(nums) if nums else None,
+        "mean": (sum(nums) / len(nums)) if nums else None,
+        "min": min(nums) if nums else None,
+        "max": max(nums) if nums else None,
+    }
+    agg["value"] = agg.get(rule)
+    if slug in _AGG_APPROX:
+        agg["approx"] = True
+        agg["approx_note"] = (
+            "summed per-repo distinct counts; someone active in N repos is "
+            "counted N times (true dedup needs a project-native query)"
+        )
+    return agg
+
+
+def _compute_project(window: int, repos: list[str], specs: list) -> list[tuple[str, dict]]:
+    """Compute ``specs`` for every repo in parallel. Returns ``[(full, {slug: result})]``."""
+    def _one(full: str) -> tuple[str, dict]:
+        return full, _compute_repo_specs(full, window, specs)
+
+    with ThreadPoolExecutor(max_workers=_PROJECT_WORKERS) as ex:
+        return list(ex.map(_one, repos))
+
+
+# In-process TTL cache for the (expensive) per-project compute, keyed by
+# (project, window, slugs). The lazy-loading UI re-hits the same project and
+# the all-metrics view re-runs on each visit, so repeats return instantly
+# within the TTL. A weekly warm job (scripts/chaoss_warm.sh) recomputes every
+# project with ?refresh=true, so the default TTL is 8 days — long enough that
+# the cache never lapses between weekly refreshes and UI clicks always hit it.
+# Tune/disable via ``CHAOSS_PROJECT_CACHE_TTL_S`` (0 = off).
+_PROJECT_CACHE_TTL = float(os.environ.get("CHAOSS_PROJECT_CACHE_TTL_S", "691200"))
+_PROJECT_CACHE: dict[tuple, tuple[float, Any]] = {}
+
+# Tier 2 — persist each cache entry under the host-mounted /data/hub so the
+# cache survives a hub container recreate/redeploy (the in-process dict alone is
+# lost on restart). One pickle per key: load-all on import, write-one on each
+# compute. Best-effort — any pickle error (e.g. after a MetricResult schema
+# change) is swallowed and that entry is simply recomputed. Override the dir
+# with CHAOSS_PROJECT_CACHE_DIR.
+_PROJECT_CACHE_DIR = Path(
+    os.environ.get("CHAOSS_PROJECT_CACHE_DIR", "/data/hub/chaoss-cache")
+)
+_PROJECT_CACHE_LOCK = threading.Lock()
+
+
+def _cache_file(key: tuple) -> Path:
+    digest = hashlib.sha1(repr(key).encode("utf-8")).hexdigest()[:16]
+    return _PROJECT_CACHE_DIR / f"{digest}.pkl"
+
+
+def _persist_cache_entry(key: tuple, ts: float, computed: Any) -> None:
+    """Write one cache entry to disk atomically (best-effort)."""
+    try:
+        with _PROJECT_CACHE_LOCK:
+            _PROJECT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            dest = _cache_file(key)
+            tmp = dest.with_suffix(".tmp")
+            with open(tmp, "wb") as fh:
+                pickle.dump({"key": key, "ts": ts, "computed": computed}, fh)
+            os.replace(tmp, dest)
+    except Exception:  # noqa: BLE001 — persistence must never break a request
+        log.exception("chaoss project cache: persist failed for %r", key)
+
+
+def _load_persisted_cache() -> None:
+    """Repopulate the in-memory cache from disk on startup (best-effort)."""
+    if not _PROJECT_CACHE_DIR.exists():
+        return
+    loaded = 0
+    for path in _PROJECT_CACHE_DIR.glob("*.pkl"):
+        try:
+            with open(path, "rb") as fh:
+                blob = pickle.load(fh)
+            _PROJECT_CACHE[tuple(blob["key"])] = (blob["ts"], blob["computed"])
+            loaded += 1
+        except Exception:  # noqa: BLE001 — skip a stale/corrupt entry
+            continue
+    if loaded:
+        log.info("chaoss project cache: loaded %d persisted entr(ies)", loaded)
+
+
+_load_persisted_cache()
+
+
+def _compute_project_cached(
+    project: str, window: int, repos: list[str], specs: list, *, refresh: bool = False
+) -> tuple[list[tuple[str, dict]], str | None]:
+    """``_compute_project`` behind a TTL cache (persisted to disk). Returns
+    ``(computed, cached_at)`` — ``cached_at`` is the cache timestamp on a hit,
+    else ``None``."""
+    if _PROJECT_CACHE_TTL <= 0:
+        return _compute_project(window, repos, specs), None
+    key = (project, window, tuple(s.slug for s in specs))
+    now = time.time()
+    hit = _PROJECT_CACHE.get(key)
+    if hit and not refresh and hit[0] + _PROJECT_CACHE_TTL > now:
+        return hit[1], datetime.fromtimestamp(hit[0], timezone.utc).isoformat(
+            timespec="seconds"
+        )
+    computed = _compute_project(window, repos, specs)
+    _PROJECT_CACHE[key] = (now, computed)
+    # Only persist the full dashboard set (the slow, all-metrics request the UI
+    # loads). Single-metric drill-downs are cheap to recompute and would
+    # otherwise spawn thousands of tiny pkl files (one per project×window×slug).
+    if len(specs) >= len(metrics_mod.REGISTRY):
+        _persist_cache_entry(key, now, computed)
+    if len(_PROJECT_CACHE) > 256:  # crude size bound — evict the oldest
+        for k, _ in sorted(_PROJECT_CACHE.items(), key=lambda kv: kv[1][0])[:64]:
+            _PROJECT_CACHE.pop(k, None)
+    return computed, None
+
+
+@router.get(
+    "/api/v1/metrics/chaoss/projects", dependencies=[Depends(maybe_require_auth)]
+)
+def chaoss_api_projects() -> dict[str, Any]:
+    """List GrimoireLab projects (projects.json) with their github repo counts."""
+    return {"projects": projects_mod.list_projects()}
+
+
+@router.get(
+    "/api/v1/metrics/chaoss/repos", dependencies=[Depends(maybe_require_auth)]
+)
+def chaoss_api_repos() -> dict[str, list[str]]:
+    """Repos the landing picker should suggest — those in the GrimoireLab git
+    index or any project (so the dashboard always has data)."""
+    return {"repos": projects_mod.available_repos()}
+
+
+@router.get(
+    "/api/v1/metrics/chaoss/overview", dependencies=[Depends(maybe_require_auth)]
+)
+def chaoss_api_overview(
+    limit: int = Query(25, ge=1, le=100),
+    scope: str = Query("all", pattern="^(all|epfl)$"),
+) -> dict[str, Any]:
+    """Top repos for the landing comparison. ``scope=all`` (default) ranks
+    the GrimoireLab-indexed repos by commits; ``scope=epfl`` ranks
+    EPFL-owned repos by GitHub stars. Returns a self-describing
+    ``{scope, columns, repos}`` so the table renders generically."""
+    if scope == "epfl":
+        return {
+            "scope": "epfl",
+            "columns": [
+                {"key": "stars", "label": "Stars", "bar": True},
+                {"key": "forks", "label": "Forks"},
+                {"key": "language", "label": "Language", "text": True},
+            ],
+            "repos": projects_mod.epfl_top_repos(limit),
+        }
+    return {
+        "scope": "all",
+        "columns": [
+            {"key": "commits", "label": "Commits", "bar": True},
+            {"key": "contributors", "label": "Contributors"},
+            {"key": "last_activity", "label": "Last activity", "text": True},
+        ],
+        "repos": projects_mod.repo_overview(limit),
+    }
+
+
+@router.get(
+    "/api/v1/metrics/chaoss/projects/{project}/metrics",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_api_project_metrics(
+    project: str,
+    window: int = Query(DEFAULT_WINDOW_DAYS, ge=7, le=3650),
+    category: str | None = Query(None, description="Compute only this topic."),
+    refresh: bool = Query(False, description="Bypass the project metric cache."),
+) -> dict[str, Any]:
+    """Every CHAOSS metric aggregated across a GrimoireLab project's repos."""
+    repos = _project_or_404(project)
+    truncated = len(repos) > _PROJECT_REPO_CAP
+    repos = repos[:_PROJECT_REPO_CAP]
+    window = _clamp_window(window)
+    specs = metrics_mod.REGISTRY
+    if category:
+        specs = [m for m in specs if _category(m).lower() == category.lower()]
+    computed, cached_at = _compute_project_cached(
+        project, window, repos, specs, refresh=refresh
+    )
+    metrics_out: list[dict[str, Any]] = []
+    for spec in specs:
+        per_repo = [(full, _metric_numeric(by[spec.slug]) if by.get(spec.slug) else None)
+                    for full, by in computed]
+        metrics_out.append({**_spec_to_dict(spec), "aggregate": _aggregate(spec.slug, per_repo)})
+    return {
+        "project": project,
+        "repo_count": len(repos),
+        "truncated": truncated,
+        "window_days": window,
+        "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "cached_at": cached_at,
+        "metric_count": len(metrics_out),
+        "metrics": metrics_out,
+    }
+
+
+@router.get(
+    "/api/v1/metrics/chaoss/projects/{project}/metrics/{slug}",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_api_project_metric_one(
+    project: str,
+    slug: str,
+    window: int = Query(DEFAULT_WINDOW_DAYS, ge=7, le=3650),
+    refresh: bool = Query(False, description="Bypass the project metric cache."),
+) -> dict[str, Any]:
+    """One CHAOSS metric across a project: aggregate + per-repo breakdown."""
+    spec = metrics_mod.spec_for(slug)
+    if spec is None:
+        raise HTTPException(status_code=404, detail=f"unknown metric: {slug}")
+    repos = _project_or_404(project)
+    truncated = len(repos) > _PROJECT_REPO_CAP
+    repos = repos[:_PROJECT_REPO_CAP]
+    window = _clamp_window(window)
+    computed, cached_at = _compute_project_cached(
+        project, window, repos, [spec], refresh=refresh
+    )
+    per_repo: list[tuple[str, float | None]] = []
+    rows: list[dict[str, Any]] = []
+    for full, by in computed:
+        res = by.get(slug)
+        num = _metric_numeric(res) if res else None
+        per_repo.append((full, num))
+        rows.append({"repo": full, "value": res.value if res else "—", "numeric": num})
+    rows.sort(key=lambda r: (r["numeric"] is None, -(r["numeric"] or 0)))
+    return {
+        "project": project,
+        **_spec_to_dict(spec),
+        "window_days": window,
+        "repo_count": len(repos),
+        "truncated": truncated,
+        "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "cached_at": cached_at,
+        "aggregate": _aggregate(slug, per_repo),
+        "repositories": rows,
+    }
+
+
+@router.get(
+    "/api/v1/metrics/chaoss/projects/{project}/repositories",
+    dependencies=[Depends(maybe_require_auth)],
+)
+def chaoss_api_project_repositories(
+    project: str,
+    slug: str | None = Query(None, description="One metric (default: all)."),
+    window: int = Query(DEFAULT_WINDOW_DAYS, ge=7, le=3650),
+    category: str | None = Query(None),
+    refresh: bool = Query(False, description="Bypass the project metric cache."),
+) -> dict[str, Any]:
+    """Per-repo metric matrix for a project — for ranking / comparison."""
+    repos = _project_or_404(project)
+    truncated = len(repos) > _PROJECT_REPO_CAP
+    repos = repos[:_PROJECT_REPO_CAP]
+    window = _clamp_window(window)
+    if slug:
+        spec = metrics_mod.spec_for(slug)
+        if spec is None:
+            raise HTTPException(status_code=404, detail=f"unknown metric: {slug}")
+        specs = [spec]
+    else:
+        specs = metrics_mod.REGISTRY
+        if category:
+            specs = [m for m in specs if _category(m).lower() == category.lower()]
+    computed, cached_at = _compute_project_cached(
+        project, window, repos, specs, refresh=refresh
+    )
+    rows = [
+        {
+            "repo": full,
+            "metrics": [
+                {
+                    "slug": spec.slug,
+                    "value": by[spec.slug].value if by.get(spec.slug) else "—",
+                    "numeric": _metric_numeric(by[spec.slug]) if by.get(spec.slug) else None,
+                }
+                for spec in specs
+            ],
+        }
+        for full, by in computed
+    ]
+    return {
+        "project": project,
+        "repo_count": len(repos),
+        "truncated": truncated,
+        "window_days": window,
+        "computed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "cached_at": cached_at,
+        "metrics": [_spec_to_dict(s) for s in specs],
+        "repositories": rows,
     }

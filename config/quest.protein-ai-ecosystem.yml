@@ -1,0 +1,139 @@
+# open-pulse quest — Research Software Infrastructure for the Age of Generative Biology
+#
+# Ecosystem analysis of scientific infrastructure formation in AI-native
+# protein design.  By Aruni P. Senaratne & Carlos Vivar Rios.
+#
+# Samples 5 ecosystem archetypes (layers) of the protein-design landscape
+# rather than treating all repos as equivalent "projects". The crawl captures
+# how scientific influence spreads through software reuse, forks, workflows,
+# APIs and community adoption (issues / PRs / contributors / dependencies) so
+# CHAOSS metrics can be computed downstream over the layered graph.
+#
+# Seed list "Revised May 29, 2026" (30 software → 26 crawlable seeds).
+# Resolved + verified against GitHub on 2026-06-01. Dropped, off-GitHub:
+#   - AbMPNN       : antibody fine-tune of ProteinMPNN; weights on Zenodo, no repo
+#   - ProteinCrow  : FutureHouse agentic tool, no authoritative public repo
+#   - PyRosetta    : source lives inside RosettaCommons/rosetta, no standalone repo
+# ESM2 + ESMFold collapse to one repo (facebookresearch/esm) → deduplicated.
+#
+# Pass with::
+#
+#     open-pulse quest start --config config/quest.protein-ai-ecosystem.yml
+
+quest:
+  name: protein-ai-ecosystem
+  description: |
+    Layered ecosystem crawl of 26 protein-AI software across 5 infrastructure
+    archetypes (first-wave structure prediction, frontier foundation models,
+    generative design, workflows/pipelines, core scoring substrate), with
+    issues + PRs + contributors + dependencies enabled for CHAOSS analysis.
+    crawler → neo4j_upload → metadata_extractor (v2, rule_based) → sparql_upload.
+
+  retry:
+    max_attempts: 2
+    backoff_seconds: 30
+
+  logging:
+    level: INFO
+    file: logs/quest-protein-ai.log
+
+  # Container-network endpoints (this quest runs inside open-pulse-cli on the
+  # open-pulse-stack_default network). crawler-loop = the 3.0.0 develop crawler
+  # (schema v3), matching the neo4j uploader's subkind/platform/URL handling.
+  services:
+    crawler:
+      endpoint: "http://crawler-loop:8000"
+      api_token_env: "CRAWLER_API_TOKEN"
+    neo4j:
+      endpoint: "bolt://neo4j-open-pulse:7687"
+      auth_env: "NEO4J_AUTH"
+    metadata_extractor:
+      endpoint: "http://git-metadata-extractor:1234"
+    sparql_store:
+      endpoint: "http://oxigraph-open-pulse:7878"
+      auth_env: "SPARQL_AUTH"
+
+  steps:
+    crawler:
+      enabled: true
+      use_graphql: true
+      # 26 verified-crawlable seeds, grouped by ecosystem archetype.
+      seeds:
+        # ── 1. First-wave structure prediction (foundational ecosystems) ──
+        - google-deepmind/alphafold              # AlphaFold 2
+        - RosettaCommons/RoseTTAFold             # RoseTTAFold
+        - aqlaboratory/openfold                  # OpenFold
+        - HeliXonProtein/OmegaFold               # OmegaFold
+        - sokrypton/ColabFold                    # ColabFold
+        # ── 2. Frontier foundation models / platform biology AI ──
+        - google-deepmind/alphafold3             # AlphaFold 3
+        - chaidiscovery/chai-lab                 # Chai-1
+        - jwohlwend/boltz                        # Boltz-2 (shared Boltz-1/2 repo)
+        - facebookresearch/esm                   # ESM2 + ESMFold (shared, archived)
+        - evolutionaryscale/esm                  # ESM3
+        - westlake-repl/SaProt                   # SAProt
+        # ── 3. Generative protein design ──
+        - RosettaCommons/RFdiffusion             # RFdiffusion
+        - baker-laboratory/rf_diffusion_all_atom # RFdiffusion All-Atom
+        - dauparas/ProteinMPNN                   # ProteinMPNN
+        - dauparas/LigandMPNN                    # LigandMPNN
+        - generatebio/chroma                     # Chroma
+        - ProteinDesignLab/protpardelle          # Protpardelle
+        - jasonkyuyim/se3_diffusion              # FrameDiff (method name; repo = se3_diffusion)
+        # ── 4. Protein design workflows & pipelines (orchestration layer) ──
+        - martinpacesa/BindCraft                 # BindCraft
+        - sokrypton/ColabDesign                  # ColabDesign
+        - NatLabRockies/EvoProtGrad              # EvoProtGrad (org renamed from NREL)
+        - RosettaCommons/protein_generator       # ProteinGenerator
+        - DunbrackLab/IPSAE                       # ipSAE pipeline
+        # ── 5. Core scoring & scientific infrastructure (substrate) ──
+        - RosettaCommons/rosetta                 # Rosetta (verify size/license on first run)
+        - biopython/biopython                    # Biopython
+        - oxpig/ImmuneBuilder                    # ImmuneBuilder
+      max_rounds: 2                  # BFS depth: seeds + their contributors/orgs/deps
+      crawl_dependencies: true       # software-reuse edges (central to the thesis)
+      crawl_dependents: true         # downstream adoption (note: GitHub dependents are
+                                     #   sparse/noisy for research repos — see crawler devs)
+      crawl_issues: true             # issue authors + commenters → CHAOSS activity
+      crawl_prs: true                # PR authors + commenters + reviewers → CHAOSS
+      issue_max: 100                 # cap issues scanned per repo
+      pr_max: 100                    # cap PRs scanned per repo
+      min_stars: 0
+      max_dependents: null
+      # max_contributors left unset → crawler caps its cached contributor list at
+      # the internal default (~10) without marking repos skipped_high_contributors.
+      # Bound round-2 fan-out by setting an explicit number if the crawl is too heavy.
+      max_contributors: null
+      output_dir: .quest-artifacts/crawler-json-protein-ai
+      output_filename: crawler-graph.json
+      poll_interval_seconds: 5.0
+      timeout_seconds: 7200.0        # large seeds (alphafold/biopython) — generous wall
+
+    frontier_extend:
+      enabled: false
+
+    neo4j_upload:
+      enabled: true
+      input_dir: .quest-artifacts/crawler-json-protein-ai
+      input_filename: crawler-graph.json
+
+    metadata_extractor:
+      enabled: true
+      mode: v2
+      v2_agent_runtime: rule_based   # no LLM; fast + deterministic JSON-LD
+      max_workers: 1                 # GME runs EXTRACTOR_WORKERS=1; >1 here only
+                                     # thrashes its single worker (connection
+                                     # resets, no throughput gain). Match it = 1.
+      v2_poll_interval_seconds: 2.0
+      v2_timeout_seconds: 600.0
+      input_dir: .quest-artifacts/crawler-json-protein-ai
+      input_filename: crawler-graph.json
+      output_dir: .quest-artifacts/metadata-json-protein-ai
+      skip_existing: true
+      force_refresh: false
+      max_repos: 0                   # 0 = all repos in the graph
+
+    sparql_upload:
+      enabled: true
+      input_dir: .quest-artifacts/metadata-json-protein-ai
+      named_graph: null              # default graph; set a URI to isolate this study

@@ -6,15 +6,14 @@ slug: /operations/deployment
 # Deployment
 
 This is the canonical end-to-end deployment guide for Open Pulse on a fresh
-Linux host. It captures every gotcha and recovery procedure we learned from
-the first production-style bring-up: image auth, port remapping,
-bind-mount permissions, env-file layout, and the smoke tests that prove
-the stack is actually working.
+Linux host. It covers image authentication, port allocation, env-file
+layout, bind-mount permissions, the verification smoke tests, and
+recovery procedures for the most common failure modes.
 
 If this is your first time touching the project, read
 [Getting Started](../getting-started/index.md) first — it covers the same
-flow at a much shallower level. This page is for the operator who needs to
-get the stack working on a real host without surprises.
+flow in condensed form. This page is for the operator who needs to get
+the stack working on a production host.
 
 :::tip Audience
 You are an operator deploying the full Open Pulse stack on a Linux host
@@ -30,7 +29,7 @@ fill out `<repo>/.env` and use the package directly.
 
 ### Host operating system
 
-- **Ubuntu 24.04 LTS** is the reference host (this is what we deploy on).
+- **Ubuntu 24.04 LTS** is the reference host.
 - Any recent Linux distribution with Docker and the Compose plugin will work.
 - Windows / macOS via Docker Desktop are supported for development but are
   **not** the target of this guide; some path conventions documented here
@@ -57,8 +56,8 @@ docker --version
 docker compose version
 ```
 
-Add your operator user to the `docker` group if you don't want to type
-`sudo` for every command:
+Add your operator user to the `docker` group to avoid typing `sudo`
+for every command:
 
 ```bash
 sudo usermod -aG docker "$USER"
@@ -115,10 +114,10 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ## 2. Port allocation
 
 Container ports inside the compose network are fixed. Host-published
-ports are configurable via `infra/env/.env`. The defaults are
-developer-friendly but tend to collide with other things on a shared
-host. The mapping below is the **firewall-friendly EPFL layout** we
-landed on:
+ports are configurable via `infra/.env`. The defaults suit a
+single-purpose host; on a shared host, remap them into a contiguous,
+firewall-friendly range. The reference deployment uses the following
+layout:
 
 | Host port | Container               | Internal port | Env var              |
 | --------- | ----------------------- | ------------- | -------------------- |
@@ -132,15 +131,16 @@ landed on:
 | **7509**  | `portainer`             | 9000          | `PORTAINER_PORT`     |
 
 Ports **80 + 443** are only published when the `edge` profile is active.
-The hub itself stays reachable on **7507** for operators on the EPFL net
-/ VPN; **80 + 443** are what end users hit at `https://<HUB_PUBLIC_HOST>/`
-with a Let's Encrypt cert auto-issued via HTTP-01 challenge on `:80`.
+The hub itself stays reachable on its direct port (**7507** in this
+layout) for operators on the internal network / VPN; **80 + 443** are
+what end users hit at `https://<HUB_PUBLIC_HOST>/` with a Let's Encrypt
+cert auto-issued via HTTP-01 challenge on `:80`.
 
 To pick different ports, edit the corresponding env var in
-`infra/env/.env`:
+`infra/.env`:
 
 ```bash
-# infra/env/.env
+# infra/.env
 NEO4J_HTTP_PORT=7503
 NEO4J_BOLT_PORT=7504
 SPARQL_PROXY_PORT=7502
@@ -154,7 +154,7 @@ the browser can navigate to them via the firewall). These do **not**
 auto-follow `*_PORT` changes — you must update them by hand:
 
 ```bash
-# infra/env/.env  (use the host's public hostname or IP)
+# infra/.env  (use the host's public hostname or IP)
 HUB_NEO4J_BROWSER_URL=http://<host>:7503
 HUB_SPARQL_BROWSER_URL=http://<host>:7502
 ```
@@ -168,7 +168,7 @@ The GrimoireLab nginx port is hard-coded in
 `infra/open-pulse-stack/docker-compose.grimoirelab.yml`
 (`7508:8000`). If 7508 is already in use, edit that file directly —
 `PORTAINER_PORT` defaults to 7508 in `.env.example` and **must** be
-moved to avoid the collision (we use 7509).
+moved to avoid the collision (this layout uses 7509).
 
 ---
 
@@ -177,7 +177,7 @@ moved to avoid the collision (we use 7509).
 There are two env files in the repo, and they serve different purposes.
 Mixing them up is the most common bring-up mistake.
 
-### `infra/env/.env` — the deployment env
+### `infra/.env` — the deployment env
 
 This is the authoritative config for the local stack. **Compose loads
 only this file.** Every service in `docker-compose.yml`,
@@ -202,41 +202,18 @@ a **client** against external infrastructure (someone else's Neo4j,
 SPARQL store, crawler). **Compose never loads it.** If you are bringing
 infra up locally, this file is irrelevant — ignore it.
 
-:::warning Critical gotcha: the env-file path mismatch
-The compose files reference `../.env` (i.e. `infra/.env`), but the
-canonical file in this repo lives at `infra/env/.env`. The first
-`docker compose up` will fail with:
-
-```
-env file /open-pulse/open-pulse/infra/.env not found: stat
-  /open-pulse/open-pulse/infra/.env: no such file or directory
-```
-
-Fix once, before the first up: symlink it.
-
-```bash
-cd /open-pulse/open-pulse/infra
-ln -s env/.env .env
-ls -l .env   # → .env -> env/.env
-```
-
-This makes both `--env-file infra/.env` (host-side compose invocation)
-and the in-compose `env_file: ../.env` directives resolve to the same
-file. The same trick exposes `infra/.env.example` cleanly to anyone who
-wants to bootstrap from the template.
-:::
-
 ### Seeding from the example
 
 If you are starting fresh:
 
 ```bash
-cp /open-pulse/open-pulse/infra/.env.example /open-pulse/open-pulse/infra/env/.env
-ln -s env/.env /open-pulse/open-pulse/infra/.env
-$EDITOR /open-pulse/open-pulse/infra/env/.env
+cp infra/.env.example infra/.env
+$EDITOR infra/.env
 ```
 
-Then work through sections 4 and 5 below before bringing the stack up.
+(`op deploy up` also auto-seeds `infra/.env` from the template on first
+run.) Then work through sections 4 and 5 below before bringing the
+stack up.
 
 ---
 
@@ -278,7 +255,7 @@ pull.
 :::note Pin the tags
 `:latest` is not published for these two images. The shipped defaults
 already pin `:develop`. If you want a reproducible deploy, override
-both via `CRAWLER_IMAGE` / `EXTRACTOR_IMAGE` in `infra/env/.env`.
+both via `CRAWLER_IMAGE` / `EXTRACTOR_IMAGE` in `infra/.env`.
 :::
 
 ### 4.2 The Open Pulse image (CLI + hub)
@@ -296,10 +273,10 @@ cd /open-pulse/open-pulse
 docker build -f tools/images/Dockerfile-open-pulse -t open-pulse:local .
 ```
 
-Then pin the local tag in `infra/env/.env`:
+Then pin the local tag in `infra/.env`:
 
 ```bash
-# infra/env/.env
+# infra/.env
 OPEN_PULSE_IMAGE=open-pulse:local
 ```
 
@@ -314,10 +291,10 @@ docker build -t open-pulse-applier:local \
   /open-pulse/open-pulse/infra/open-pulse-stack/grimoirelab/applier
 ```
 
-Then pin it in `infra/env/.env`:
+Then pin it in `infra/.env`:
 
 ```bash
-# infra/env/.env
+# infra/.env
 OPEN_PULSE_APPLIER_IMAGE=open-pulse-applier:local
 ```
 
@@ -332,8 +309,9 @@ repository does not exist or may require 'docker login'
 
 ## 5. Linux-only env corrections
 
-`infra/env/.env` ships with Windows / Docker Desktop dev defaults. On a
-real Linux host, three keys must be changed before the first up:
+The `infra/.env` template ships development defaults for Docker Desktop
+on Windows. On a Linux host, three keys must be changed before the
+first up:
 
 ### 5.1 `OPEN_PULSE_DATA_DIR`
 
@@ -343,7 +321,7 @@ Set this to an **absolute Linux path** under which all persistent data
 will live:
 
 ```bash
-# infra/env/.env
+# infra/.env
 OPEN_PULSE_DATA_DIR=/open-pulse/open-pulse/data
 # or, for a separate disk:
 # OPEN_PULSE_DATA_DIR=/srv/open-pulse/data
@@ -366,7 +344,7 @@ so that nested `docker compose` bind paths inside the orchestrator
 resolve to the same place on the host:
 
 ```bash
-# infra/env/.env
+# infra/.env
 OPEN_PULSE_HOST_PATH=/open-pulse/open-pulse
 ```
 
@@ -391,7 +369,7 @@ Set the cache path to a location inside the writable `/app/data`
 bind-mount:
 
 ```bash
-# infra/env/.env
+# infra/.env
 V2_PROVIDER_CACHE_PATH=/app/data/.cache/v2/providers.db
 ```
 
@@ -508,8 +486,14 @@ and a `restarting (1)` loop.
 | Qdrant                 | `qdrant/qdrant:latest`               | `qdrant` (1000:1000)   |
 | GrimoireLab Postgres   | `postgres:16-alpine`                 | `postgres` (999:999)   |
 | sparql-proxy (Caddy)   | `caddy:2.8-alpine`                   | `root` (0:0)           |
-| Hub                    | `open-pulse:*`                       | (1000:1000)            |
+| Hub                    | `open-pulse:*`                       | host operator (`HOST_UID:HOST_GID`, default 1000:1000) |
+| CLI orchestrator       | `open-pulse:*`                       | host operator (`HOST_UID:HOST_GID`, default 1000:1000) |
 | Portainer              | `portainer/portainer-ce`             | `root` (0:0)           |
+
+The Hub and the CLI orchestrator run as the host operator's UID/GID
+(`HOST_UID` / `HOST_GID` in `infra/.env`, with `DOCKER_GID` granting
+access to the mounted docker socket), so quest artifacts, logs and hub
+state written onto the bind mounts stay owned by the host user.
 
 ### The helper script
 
@@ -548,7 +532,7 @@ clone Caddy starts up with:
 Error: ... reading import file /etc/caddy/users: read /etc/caddy/users: is a directory
 ```
 
-The wrapper generates the file from `SPARQL_AUTH` in `infra/env/.env`
+The wrapper generates the file from `SPARQL_AUTH` in `infra/.env`
 and patches the Caddyfile if it still imports the directory directly
 (it should import `/etc/caddy/users/*` — the helper migrates the
 single-line form to the glob form automatically):
@@ -577,14 +561,14 @@ mandatory; without them every request returns 401.**
 # config/quest.example.yml (excerpt)
 services:
   crawler:
-    base_url: http://crawler:8000
+    endpoint: http://crawler:8000
     api_token_env: "CRAWLER_API_TOKEN"   # MANDATORY when bearer auth is on
   metadata_extractor:
-    base_url: http://git-metadata-extractor:1234
+    endpoint: http://git-metadata-extractor:1234
     api_token_env: "EXTRACTOR_API_TOKEN" # MANDATORY when bearer auth is on
 ```
 
-The env vars themselves come from `infra/env/.env` via the cli
+The env vars themselves come from `infra/.env` via the cli
 container's `env_file:` directive. If you change a token, restart
 `open-pulse-cli` so the new value is read into its environment.
 
@@ -683,11 +667,15 @@ proxied URL — they never have to paste an upstream PAT into Swagger's
 
 ### 9.4 The SPARQL proxy
 
-```bash
-# Read (no auth required) — should return SPARQL XML / JSON.
-curl -s 'http://<host>:7502/query?query=SELECT%20*%20WHERE%20%7B%3Fs%20%3Fp%20%3Fo%7D%20LIMIT%201'
+Reads are auth-gated by default (`SPARQL_READ_AUTH_PATHS=/ /query /query/*`
+in `infra/.env`; set it to `__off__` for a public read endpoint):
 
-# Write (auth required) — should return 200.
+```bash
+# Read (Basic auth by default) — should return SPARQL XML / JSON.
+curl -s -u openpulse:<SPARQL_PASS> \
+  'http://<host>:7502/query?query=SELECT%20*%20WHERE%20%7B%3Fs%20%3Fp%20%3Fo%7D%20LIMIT%201'
+
+# Write (auth always required) — should return 200.
 curl -s -u openpulse:<SPARQL_PASS> -X POST \
   -H 'Content-Type: application/sparql-update' \
   --data 'INSERT DATA { <http://example/test> <http://example/p> "v" }' \
@@ -712,17 +700,17 @@ xdg-open http://<host>:7503
 | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `unauthorized` / `denied` from `ghcr.io` on pull                              | Crawler / extractor images are private; daemon has no GHCR credentials             | `sudo docker login ghcr.io -u <gh-user>` with a PAT that has `read:packages` scope (section 4.1)             |
 | `pull access denied for open-pulse-applier`                                   | Applier sidecar image is not published                                             | Build locally: `docker build -t open-pulse-applier:local infra/open-pulse-stack/grimoirelab/applier` (4.3)   |
-| `env file ... infra/.env not found`                                           | Compose `env_file: ../.env` expects `infra/.env`, but real file is `infra/env/.env`| `ln -s env/.env /open-pulse/open-pulse/infra/.env` (section 3)                                               |
-| Extractor returns HTTP 500 on `/v2/extract`; logs show `.cache/v2/providers.db` | `V2_PROVIDER_CACHE_PATH` is relative; lands in root-owned `/app/.cache`            | Set `V2_PROVIDER_CACHE_PATH=/app/data/.cache/v2/providers.db` in `infra/env/.env` (section 5.3)              |
+| `env file ... infra/.env not found`                                           | `infra/.env` was never created                                                  | `cp infra/.env.example infra/.env` and edit it (section 3)                                                    |
+| Extractor returns HTTP 500 on `/v2/extract`; logs show `.cache/v2/providers.db` | `V2_PROVIDER_CACHE_PATH` is relative; lands in root-owned `/app/.cache`            | Set `V2_PROVIDER_CACHE_PATH=/app/data/.cache/v2/providers.db` in `infra/.env` (section 5.3)              |
 | Extractor returns HTTP 401 on every quest request                             | Quest YAML missing `api_token_env`                                                 | Add `api_token_env: "EXTRACTOR_API_TOKEN"` under `services.metadata_extractor` (section 8)                   |
 | Crawler returns HTTP 401 on every quest request                               | Quest YAML missing `api_token_env` for the crawler                                 | Add `api_token_env: "CRAWLER_API_TOKEN"` under `services.crawler` (section 8)                                |
 | OpenSearch unhealthy; logs show `AccessDeniedException: data/nodes`           | `data/grimoirelab/opensearch-data` auto-created as root; opensearch user is UID 1000| `sudo chown -R 1000:1000 data/grimoirelab/opensearch-data` (or run `fix-data-perms.sh --restart`)            |
 | SortingHat exits 1; logs show `PermissionError: '/opt/venv/.../sortinghat/static'`| Static dir auto-created as root; sortinghat user is UID 999                    | `sudo chown -R 999:999 data/grimoirelab/sortinghat` (or run `fix-data-perms.sh --restart`)                   |
 | Mordred restart loop; logs show `PermissionError: '/home/grimoire/logs'`      | mordred bind dirs auto-created as root; grimoire user is UID 1000                  | `sudo chown -R 1000:1000 data/grimoirelab/mordred data/grimoirelab/projects-conf` (or `fix-data-perms.sh`)    |
-| Qdrant healthy but every collection appears empty                             | Pre-loaded Qdrant snapshot ended up at the old path `data/extractor/qdrant/storage`| Move it: `mv data/extractor/qdrant/storage/* data/qdrant/storage/ && docker restart gme-qdrant`              |
+| Qdrant healthy but every collection appears empty                             | Qdrant data restored under `data/extractor/qdrant/storage` instead of `data/qdrant/storage` | Move it: `mv data/extractor/qdrant/storage/* data/qdrant/storage/ && docker restart gme-qdrant`              |
 | `sparql-proxy` restart loop; logs show `Could not import /etc/caddy/users: is a directory` | Caddy users file missing; Caddy is importing the dir, not a file                | `sudo bash scripts/fix-data-perms.sh --sparql-users` (section 7)                                             |
-| `open-pulse-cli` won't start; `working_dir: required key OPEN_PULSE_HOST_PATH is not set` | Linux-uncorrected env file still has the empty / Windows default                 | Set `OPEN_PULSE_HOST_PATH=/open-pulse/open-pulse` in `infra/env/.env` (section 5.2)                          |
-| `MYSQL_ROOT_PASSWORD` errors on first MariaDB start                           | OpenSearch / MariaDB strong-password requirements not met                          | Use `Replace-Me-1!`-style passwords (upper + lower + digit + special, ≥ 8 chars) in `infra/env/.env`         |
+| `open-pulse-cli` won't start; `working_dir: required key OPEN_PULSE_HOST_PATH is not set` | Linux-uncorrected env file still has the empty / Windows default                 | Set `OPEN_PULSE_HOST_PATH=/open-pulse/open-pulse` in `infra/.env` (section 5.2)                          |
+| `MYSQL_ROOT_PASSWORD` errors on first MariaDB start                           | OpenSearch / MariaDB strong-password requirements not met                          | Use `Replace-Me-1!`-style passwords (upper + lower + digit + special, ≥ 8 chars) in `infra/.env`         |
 | Hub `/api/projects/*` always returns 502                                      | `HUB_APPLIER_URL` resolves to a service that doesn't exist (no `--with-grimoire`)   | Either bring the grimoire stack up (`--with-grimoire`) or unset `HUB_APPLIER_URL`                            |
 
 ---
@@ -744,7 +732,7 @@ Bind-mount data under `${OPEN_PULSE_DATA_DIR}` is **never** removed by
 
 ### Rotating secrets
 
-1. Edit `infra/env/.env`.
+1. Edit `infra/.env`.
 2. Restart affected containers:
 
    ```bash
@@ -802,8 +790,9 @@ a full stop is too high.
   higher level
 - [Architecture overview](../architecture/index.md) — what each service
   does and how they wire together
-- [Services](../services/index.md) — per-service deployment assets and
-  configuration knobs
+- [The Hub](../hub/index.md) — the dashboard the stack serves
+- [Quest Pipeline](../pipeline/index.md) — running analyses on the
+  deployed stack
 - [Release checklist](./release-checklist.md) — what to verify before
   cutting a release
 - [Branch model](./branch-model.md) — `docs` vs `main` responsibilities
@@ -817,4 +806,3 @@ Source files referenced by this guide:
 - `scripts/op` — host-side wrapper that `docker exec`s into the cli container
 - `scripts/fix-data-perms.sh` — bind-mount UID fixer
 - `scripts/extractor-test.sh` — extractor smoke test
-- `AGENTS.md` — project map and command reference

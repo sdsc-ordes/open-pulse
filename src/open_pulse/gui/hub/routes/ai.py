@@ -16,32 +16,86 @@ Future surfaces can add their own keys without changing the wire format.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 import time
-from typing import Any
+from pathlib import Path
+from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..auth import get_settings, require_auth
-from .ai_tools import MAX_TOOL_TURNS, TOOLS_SPEC, ToolError, run_tool
+from .ai_tools import (
+    AGENT_FILES_DIR,
+    MAX_TOOL_TURNS,
+    MAX_TOOL_TURNS_CEILING,
+    ToolError,
+    run_tool,
+    runtime_tools_spec,
+)
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 log = logging.getLogger(__name__)
 
 _MODELS_TIMEOUT = 10.0
 _CHAT_TIMEOUT = 600.0
+
+# Curated chat-model shortlist. The upstream endpoint lists 260+ entries
+# (embeddings, rerankers, OCR, dtype variants) — far too many for a picker.
+# We surface only these, in this order, and only those the endpoint actually
+# offers right now (intersected with the live ``/models`` list). The field
+# still accepts any id the user types, so power users aren't boxed in.
+#
+# These are the **always-resident (24/7)** models — most of the catalogue is
+# spun up on demand and cold-starts for minutes on first use, which makes for
+# a poor default. The set was determined by probing /chat/completions (the
+# 24/7 ones answer in ~0.1s; on-demand ones time out). Re-probe and update if
+# RCP changes its always-on roster. Spread: the hub default, a big flagship
+# (Kimi-K2.6, ~1T MoE — warm and strong at tool use), two Swiss/EPFL models
+# (a 70B and a fast 8B), a Mistral and a Qwen.
+_CHAT_MODELS: tuple[str, ...] = (
+    "openai/gpt-oss-120b",
+    "moonshotai/Kimi-K2.6",
+    "swiss-ai/Apertus-70B-Instruct-2509",
+    "swiss-ai/Apertus-8B-Instruct-2509",
+    "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+    "Qwen/Qwen3-30B-A3B-Instruct-2507",
+)
+# Cadence of SSE keepalive comments emitted while a tool runs, so a long
+# (e.g. ~20s gme_search) round-trip never leaves the connection idle long
+# enough for an intermediary proxy to drop it with a 502.
+_HEARTBEAT_SECONDS = 10.0
 _SCHEMA_CACHE_TTL = 600.0  # 10 min — store schema changes on quest runs, not minutes
 _SCHEMA_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
-def _headers() -> dict[str, str]:
+def _resolve_key(override: str | None = None) -> str:
+    """The API key to send upstream, in precedence order:
+
+    1. ``override`` — a per-request "bring your own key" supplied by the
+       browser (never logged, never persisted server-side).
+    2. ``agent_llm_api_key`` — an env key dedicated to the agent / hub
+       assistants (``HUB_AGENT_LLM_API_KEY``), so the interactive agent can
+       run on a separate / rate-limited key from the rest of the hub.
+    3. ``llm_api_key`` — the hub's shared key (HUB_LLM_API_KEY / RCP_TOKEN).
+    """
     settings = get_settings()
+    return (
+        (override or "").strip()
+        or settings.agent_llm_api_key
+        or settings.llm_api_key
+    )
+
+
+def _headers(override_key: str | None = None) -> dict[str, str]:
     h = {"Content-Type": "application/json"}
-    if settings.llm_api_key:
-        h["Authorization"] = f"Bearer {settings.llm_api_key}"
+    key = _resolve_key(override_key)
+    if key:
+        h["Authorization"] = f"Bearer {key}"
     return h
 
 
@@ -60,18 +114,27 @@ def _base_url() -> str:
 
 
 @router.get("/models", dependencies=[Depends(require_auth)])
-def list_models() -> dict[str, Any]:
-    """Return the model catalog from the configured LLM endpoint.
+def list_models(
+    x_op_llm_key: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """Return the curated chat-model shortlist for the picker.
+
+    The configured endpoint (EPFL RCP) lists 260+ models — embeddings,
+    rerankers, OCR, dtype variants — which overwhelm the picker. We fetch
+    the live catalog, then narrow it to :data:`_CHAT_MODELS` (intersected
+    with what's actually offered), so the UI shows only a handful of strong,
+    available chat models. The chat field still accepts any id typed by hand.
 
     Some endpoints (RCP, OpenAI) gate the model list behind auth; others
-    (Ollama, vLLM unauthenticated) don't. We pass our configured key
-    when present and fall through to ``{"data": []}`` on any failure
+    (Ollama, vLLM unauthenticated) don't. We pass the resolved key (a
+    browser-supplied ``X-OP-LLM-Key`` wins, so the picker reflects that
+    key's allowlist) and fall through to ``{"data": []}`` on any failure
     so the UI can still render a "no models" hint.
     """
     base = _base_url()
     url = f"{base}/models"
     try:
-        resp = httpx.get(url, headers=_headers(), timeout=_MODELS_TIMEOUT)
+        resp = httpx.get(url, headers=_headers(x_op_llm_key), timeout=_MODELS_TIMEOUT)
     except httpx.HTTPError as exc:
         log.info("models proxy: %s", exc)
         return {"data": [], "error": str(exc)}
@@ -84,9 +147,20 @@ def list_models() -> dict[str, Any]:
         body = resp.json()
     except ValueError:
         return {"data": [], "error": "non-JSON response from upstream"}
-    # Pass through verbatim — the UI handles both ``{"data":[…]}``
-    # (OpenAI-style) and bare lists (some self-hosted servers).
-    return body
+    # The UI handles both ``{"data":[…]}`` (OpenAI-style) and bare lists
+    # (some self-hosted servers); normalise to a list of model dicts.
+    raw = body.get("data") if isinstance(body, dict) else body
+    raw = raw if isinstance(raw, list) else []
+    available = {
+        (m.get("id") if isinstance(m, dict) else m): m for m in raw
+    }
+    # Narrow to the curated shortlist, keeping only those the endpoint
+    # currently offers, in our preferred order. Fall back to the full list
+    # if none of the shortlist is available (mis-set endpoint / renamed
+    # models) so the picker is never mysteriously empty.
+    picked = [available[mid] for mid in _CHAT_MODELS if mid in available]
+    data = picked or raw
+    return {"data": [m if isinstance(m, dict) else {"id": m} for m in data]}
 
 
 # ── Schema introspection ──────────────────────────────────────────────
@@ -299,10 +373,21 @@ _SYSTEM_PROMPT = (
     "tabular data, ``**bold**`` for emphasis, ``- `` for lists. The "
     "chat renderer supports tables, lists, headings, blockquotes, "
     "task lists, and inline ``code``.\n"
+    "* To VISUALISE data, emit a ```vega-lite fenced block containing a "
+    "JSON Vega-Lite spec (or ```vega for full Vega) — the agent chat "
+    "renders it as a live chart. You may also emit a ```html block "
+    "(shown in a sandboxed iframe on demand) and Markdown images. When "
+    "the user asks to plot / chart / visualise, prefer a vega-lite chart "
+    "(embed the actual rows as inline ``data.values``) over an ASCII table. "
+    "For a network / relationship graph use a full ```vega force-directed "
+    "spec (not vega-lite); Vega's many-body (repulsion) force is named "
+    "``nbody`` and the edge force is ``link`` — D3 names like ``charge`` are "
+    "rejected.\n"
     "* Keep responses tight: 1-2 sentence preamble, the code block, "
     "then a 1-2 sentence follow-up if useful. The chat panel is "
     "420px wide so very long paragraphs hurt readability.\n\n"
-    "Agentic mode: when tools (``run_sparql`` / ``run_cypher``) are "
+    "Agentic mode: when tools (``run_sparql`` / ``run_cypher`` / "
+    "``run_opensearch`` / ``run_duckdb``) are "
     "exposed in this turn, prefer calling them to verify your answer "
     "before quoting numbers. Use the result rows to refine the query "
     "if needed — you can chain up to a handful of tool calls before "
@@ -353,6 +438,23 @@ def _build_messages(
             parts.append("```json")
             parts.append(json.dumps(rows, indent=2, default=str)[:4000])
             parts.append("```")
+        note = context.get("note")
+        if note:
+            parts.append("User-provided context note:")
+            parts.append(str(note)[:4000])
+        files = context.get("files") or []
+        if files:
+            parts.append(
+                "Files the user attached (read them with the ``read_file`` / "
+                "``list_files`` tools, or query tabular ones with run_duckdb's "
+                "``read_csv`` / ``read_parquet`` on the path):"
+            )
+            for f in files[:20]:
+                if isinstance(f, dict):
+                    parts.append(
+                        f"- `{f.get('name', '')}` "
+                        f"({f.get('size', '?')} bytes) → `{f.get('path', '')}`"
+                    )
         out.append({"role": "system", "content": "\n\n".join(parts)})
     out.extend(user_messages)
     return out
@@ -481,6 +583,7 @@ def _format_schema_block(schema: dict[str, Any]) -> str:
 @router.post("/chat", dependencies=[Depends(require_auth)])
 async def chat(
     payload: dict[str, Any] = Body(default_factory=dict),
+    x_op_llm_key: Annotated[str | None, Header()] = None,
 ) -> StreamingResponse:
     """Stream a chat completion via SSE.
 
@@ -510,6 +613,25 @@ async def chat(
     # that just renders text) keeps working unchanged. The agent path
     # only kicks in when the client opts in.
     tools_enabled = bool(payload.get("tools_enabled", False))
+    # Optional per-tool selection — the "tools checkpoints" in the agent UI.
+    # A list exposes only those tools; absent → all of TOOLS_SPEC; an empty
+    # list disables tools for this turn.
+    tool_names = payload.get("tool_names")
+    if isinstance(tool_names, list):
+        allow = {str(n) for n in tool_names}
+    else:
+        allow = None
+    # Build the spec per-request so descriptions carry live context (e.g. the
+    # real OpenSearch index names) — keeps the model from inventing indices.
+    active_tools = runtime_tools_spec(allow)
+    # How many chained tool rounds the agent may take this reply. Client
+    # can raise/lower it in the UI; clamped to a hard ceiling so a runaway
+    # loop can't melt the LLM budget.
+    try:
+        max_turns = int(payload.get("max_tool_turns") or MAX_TOOL_TURNS)
+    except (TypeError, ValueError):
+        max_turns = MAX_TOOL_TURNS
+    max_turns = max(1, min(max_turns, MAX_TOOL_TURNS_CEILING))
     messages = _build_messages(user_messages, context)
 
     async def event_source():
@@ -521,22 +643,25 @@ async def chat(
         # can render them), append the assistant + tool messages, and
         # re-call the LLM. Bounded by ``MAX_TOOL_TURNS`` to keep a
         # runaway loop from melting the LLM budget.
+        # Flush an initial comment so the proxy commits the 200 and starts
+        # streaming immediately, before the first model token arrives.
+        yield ": connected\n\n"
         try:
             async with httpx.AsyncClient(timeout=_CHAT_TIMEOUT) as client:
-                for turn in range(MAX_TOOL_TURNS + 1):
+                for turn in range(max_turns + 1):
                     body = {
                         "model": model,
                         "messages": messages,
                         "temperature": temperature,
                         "stream": True,
                     }
-                    if tools_enabled:
-                        body["tools"] = TOOLS_SPEC
+                    if tools_enabled and active_tools:
+                        body["tools"] = active_tools
                         body["tool_choice"] = "auto"
                     async with client.stream(
                         "POST",
                         f"{base}/chat/completions",
-                        headers=_headers(),
+                        headers=_headers(x_op_llm_key),
                         json=body,
                     ) as resp:
                         if resp.status_code != 200:
@@ -592,12 +717,14 @@ async def chat(
                         or not accumulated_tool_calls
                     ):
                         return  # plain text reply (or final turn) — done
-                    if turn >= MAX_TOOL_TURNS:
+                    if turn >= max_turns:
                         yield (
                             'data: {"error":'
                             + json.dumps(
-                                f"Tool-loop budget exhausted after {MAX_TOOL_TURNS} "
-                                "turns. The model is still asking to call tools."
+                                f"Tool-step budget exhausted after {max_turns} "
+                                "rounds. The model is still asking to call tools — "
+                                "raise 'Max tool steps' in ⚙ Agent & tools if you "
+                                "need a longer chain."
                             )
                             + "}\n\n"
                         )
@@ -616,7 +743,25 @@ async def chat(
                         }
                     )
                     for tc in accumulated_tool_calls:
-                        result = _execute_tool_safely(tc)
+                        # Tools make blocking DB/HTTP calls (Neo4j, SPARQL,
+                        # OpenSearch, DuckDB, GME). Run them off the event
+                        # loop so a single-worker hub stays responsive — a
+                        # synchronous call here freezes every other request
+                        # (and the reverse proxy 502s) for the tool's whole
+                        # duration. While it runs (gme_search can take ~20s),
+                        # emit SSE keepalive comments so the connection never
+                        # goes idle long enough for an intermediary proxy to
+                        # drop it with a 502.
+                        task = asyncio.ensure_future(
+                            asyncio.to_thread(_execute_tool_safely, tc)
+                        )
+                        while not task.done():
+                            done, _ = await asyncio.wait(
+                                {task}, timeout=_HEARTBEAT_SECONDS
+                            )
+                            if not done:
+                                yield ": keepalive\n\n"
+                        result = task.result()
                         messages.append(
                             {
                                 "role": "tool",
@@ -638,3 +783,71 @@ async def chat(
             "Cache-Control": "no-cache",
         },
     )
+
+
+# ── Attached files (Agent chat) ─────────────────────────────────────────────
+# Uploads land in AGENT_FILES_DIR (under /tmp — ephemeral). The agent reads
+# them back through the read_file / list_files tools, or queries tabular ones
+# with run_duckdb's read_csv / read_parquet on the returned path.
+
+_MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB / file
+
+
+def _sanitize_filename(name: str) -> str:
+    base = re.sub(r"[^A-Za-z0-9._-]", "_", Path(name or "").name).strip("._")
+    return (base or "file")[:120]
+
+
+@router.get("/files", dependencies=[Depends(require_auth)])
+def list_agent_files() -> dict[str, Any]:
+    """List the files attached to the agent chat (scratch dir under /tmp)."""
+    files: list[dict[str, Any]] = []
+    if AGENT_FILES_DIR.is_dir():
+        for p in sorted(AGENT_FILES_DIR.iterdir()):
+            if p.is_file():
+                files.append(
+                    {"name": p.name, "size": p.stat().st_size, "path": str(p)}
+                )
+    return {"files": files, "dir": str(AGENT_FILES_DIR)}
+
+
+@router.post("/files", dependencies=[Depends(require_auth)])
+async def upload_agent_file(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Save an uploaded file to the agent scratch dir, streaming to disk."""
+    AGENT_FILES_DIR.mkdir(parents=True, exist_ok=True)
+    name = _sanitize_filename(file.filename or "file")
+    target = AGENT_FILES_DIR / name
+    # Don't clobber a different existing upload — suffix the stem.
+    if target.exists():
+        stem = target.stem
+        suffix = target.suffix
+        i = 1
+        while target.exists():
+            name = f"{stem}-{i}{suffix}"
+            target = AGENT_FILES_DIR / name
+            i += 1
+    size = 0
+    try:
+        with target.open("wb") as out:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > _MAX_FILE_BYTES:
+                    raise HTTPException(
+                        status_code=413, detail="File too large (max 25 MB)."
+                    )
+                out.write(chunk)
+    except HTTPException:
+        target.unlink(missing_ok=True)
+        raise
+    return {"name": name, "size": size, "path": str(target)}
+
+
+@router.delete("/files/{name}", dependencies=[Depends(require_auth)])
+def delete_agent_file(name: str) -> dict[str, str]:
+    """Remove one attached file (name is confined to the scratch dir)."""
+    base = AGENT_FILES_DIR.resolve()
+    target = (base / Path(name).name).resolve()
+    if base not in target.parents:
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+    target.unlink(missing_ok=True)
+    return {"status": "deleted", "name": target.name}

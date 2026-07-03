@@ -32,6 +32,8 @@
   --bad-soft:      #fbe8e8;
   --bad-border:    #f0b9b6;
   --kbd-bg:        #f3f3f5;
+  --scrollbar-thumb:       rgba(0, 0, 0, 0.18);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.34);
 
   /* ── Code rendering palette ──────────────────────────────────────
    * One palette feeds every <code class="hljs"> block on the hub —
@@ -51,9 +53,9 @@
   --code-meta:      #4078f2;
   --code-literal:   #986801;
   --code-title:     #e45649;    /* function names */
-  --code-ln-bg:     rgba(0, 0, 0, 0.035);
-  --code-ln-fg:     rgba(70, 80, 95, 0.55);
-  --code-ln-border: rgba(0, 0, 0, 0.08);
+  --code-ln-bg:     rgba(0, 0, 0, 0.04);
+  --code-ln-fg:     rgba(70, 80, 95, 0.74);
+  --code-ln-border: rgba(0, 0, 0, 0.10);
 
   --shadow-sm:     0 1px 2px rgba(15,23,42,.05);
   --shadow:        0 4px 16px rgba(15,23,42,.06);
@@ -86,6 +88,8 @@
   --bad-soft:      rgba(239,68,68,.15);
   --bad-border:    rgba(239,68,68,.30);
   --kbd-bg:        #1e293b;
+  --scrollbar-thumb:       rgba(148, 163, 184, 0.28);
+  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.48);
 
   /* Code rendering palette — dark variant (see light theme above). */
   --code-bg:        #1a1d21;
@@ -93,16 +97,16 @@
   --code-keyword:   #c678dd;
   --code-string:    #98c379;
   --code-number:    #d19a66;
-  --code-comment:   #5c6370;
+  --code-comment:   #828b9e;   /* was #5c6370 — too dim to read on the panel */
   --code-symbol:    #61afef;
   --code-variable:  #e5c07b;
   --code-attribute: #56b6c2;
   --code-meta:      #56b6c2;
   --code-literal:   #d19a66;
   --code-title:     #e06c75;
-  --code-ln-bg:     rgba(0, 0, 0, 0.18);
-  --code-ln-fg:     rgba(160, 168, 180, 0.42);
-  --code-ln-border: rgba(255, 255, 255, 0.06);
+  --code-ln-bg:     rgba(0, 0, 0, 0.22);
+  --code-ln-fg:     rgba(178, 188, 204, 0.68);   /* was 0.42 — barely visible */
+  --code-ln-border: rgba(255, 255, 255, 0.08);
 
   --shadow-sm:     0 1px 2px rgba(0,0,0,.4);
   --shadow:        0 8px 32px rgba(0,0,0,.5);
@@ -125,6 +129,30 @@ body {
   font-feature-settings: "ss01", "cv11";
 }
 
+/* ── Scrollbars ─────────────────────────────────────────────────────────
+   Theme the native scrollbars so every scroll area (transcript, code
+   blocks, tables, modals, the page itself) reads as part of the UI rather
+   than the OS default bright bar. Firefox uses scrollbar-width/-color
+   (inherited from the root); WebKit/Blink use the ::-webkit-* pseudos. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  /* transparent border = padding, so the thumb reads as a slim pill */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner { background: transparent; }
+
 /* ── Marquee ──────────────────────────────────────────────────────────── */
 .marquee {
   position: sticky;
@@ -138,6 +166,49 @@ body {
   overflow: hidden;
   height: 36px;
 }
+/* Fixed "developed by" attribution pinned right; the stats scroll behind it. */
+.marquee-credit {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 26px;
+  background: var(--surface-opaque);
+}
+.marquee-credit::before {
+  /* soft fade so the scrolling text dissolves into the credit's background */
+  content: "";
+  position: absolute;
+  left: -26px; top: 0; bottom: 0; width: 26px;
+  background: linear-gradient(to right, transparent, var(--surface-opaque));
+  pointer-events: none;
+}
+.marquee-credit-label {
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.marquee-credit-amp {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.marquee-logo-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 3px 6px;
+  box-sizing: border-box;
+  background: #fff;          /* white chip so the colour marks read on any theme */
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+.marquee-logo-chip img { height: 14px; width: auto; display: block; }
+@media (max-width: 720px) { .marquee-credit-label { display: none; } }
+@media (max-width: 460px) { .marquee-credit { display: none; } }
 .marquee-track {
   display: inline-flex;
   align-items: center;
@@ -811,6 +882,18 @@ svg.chaoss-topic-icon {
   color: var(--fg-muted);
 }
 
+/* ─── "All / Advanced" disclosure (featured-first metrics layout) ─── */
+.chaoss-advanced { border-top: 1px solid var(--border); }
+.chaoss-advanced-summary {
+  display: flex; align-items: center; gap: 8px;
+  list-style: none; cursor: pointer;
+  padding: 12px 6px; margin: 0; border-radius: 8px;
+  font-weight: 600; color: var(--fg);
+}
+.chaoss-advanced-summary::-webkit-details-marker { display: none; }
+.chaoss-advanced-summary:hover { background: var(--surface-sunk); }
+.chaoss-advanced[open] > .chaoss-advanced-summary .chaoss-trace-chevron { transform: rotate(90deg); }
+
 /* ─── CHAOSS query-trace block (under "How we compute this") ───── */
 
 /* "How we compute this" — the in-card button that opens the modal.
@@ -1191,6 +1274,7 @@ button.chaoss-trace-head:hover { background: var(--surface); }
 button.chaoss-trace-head.is-open {
   background: var(--surface);
   border-bottom-color: var(--border);
+  box-shadow: inset 3px 0 0 var(--chaoss-tone-info, var(--accent));
 }
 .chaoss-trace-chevron {
   display: inline-flex;
@@ -1224,7 +1308,7 @@ button.chaoss-trace-head.is-open {
 }
 .chaoss-trace-summary-line.is-error { color: var(--chaoss-tone-danger, #c43); }
 
-.chaoss-trace-body { /* x-show toggles display */ }
+.chaoss-trace-body { padding: 10px; }   /* inset the code panel + actions */
 .chaoss-trace-body-enter            { transition: opacity .14s ease; }
 .chaoss-trace-body-enter-start      { opacity: 0; }
 .chaoss-trace-body-enter-end        { opacity: 1; }
@@ -1248,11 +1332,26 @@ button.chaoss-trace-head.is-open {
   background: var(--code-bg);
   border-top: 1px solid var(--border);
 }
+/* Inside a trace expander the code is an inset, rounded panel so it reads
+   as a distinct codeblock rather than bleeding into the card. (The recipe
+   block keeps its own flush chrome via .chaoss-recipe .chaoss-trace-pre.) */
+.chaoss-trace-body .chaoss-trace-pre {
+  border: 1px solid var(--code-ln-border);
+  border-radius: 8px;
+}
+/* Inside the methodology modal, let code blocks grow to their full height
+   and let the modal body be the single scroll container — no cramped
+   scroll-within-a-scroll. (overflow-x stays auto for long lines.) */
+.chaoss-modal .chaoss-trace-pre {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 .chaoss-trace-pre code {
   display: block;
   padding: 12px 0;
-  font-size: 12.5px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.6;
   background: transparent !important;
   color: var(--code-fg);
 }
@@ -1265,36 +1364,39 @@ table.hljs-ln {
   border-spacing: 0;
   width: 100%;
 }
-td.hljs-ln-numbers {
+/* NB: the line-numbers plugin injects its own <style> at runtime with
+   `.hljs-ln td { padding: 0 }` — same specificity as a bare `td.hljs-ln-*`
+   but later in the cascade, so it zeroes our padding and glues the numbers
+   to the code. Qualifying with the `.hljs-ln` ancestor (0,2,1) outranks it. */
+.hljs-ln td.hljs-ln-numbers {
   user-select: none;
   -webkit-user-select: none;
   text-align: right;
   vertical-align: top;
   color: var(--code-ln-fg);
-  padding: 0 14px 0 16px;
+  padding: 0 16px 0 14px;
   border-right: 1px solid var(--code-ln-border);
   background: var(--code-ln-bg);
   width: 1%;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-td.hljs-ln-code {
-  padding-left: 14px;
-  padding-right: 14px;
+.hljs-ln td.hljs-ln-code {
+  padding-left: 18px;   /* clear gap between the gutter and the code */
+  padding-right: 16px;
   white-space: pre;
 }
 @media (max-width: 720px) {
   /* Allow wrap on narrow screens so visitors don't have to
      scroll horizontally over long SPARQL filters. */
-  td.hljs-ln-code { white-space: pre-wrap; word-break: break-word; }
+  .hljs-ln td.hljs-ln-code { white-space: pre-wrap; word-break: break-word; }
 }
 
 .chaoss-trace-actions {
   display: flex;
   gap: 6px;
-  padding: 8px 12px;
-  background: var(--surface-sunk);
-  border-top: 1px solid var(--border);
+  padding: 10px 2px 2px;
+  background: transparent;
 }
 
 /* ── Token colours — universal so any <code class="hljs"> anywhere

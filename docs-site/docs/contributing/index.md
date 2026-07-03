@@ -13,13 +13,11 @@ runs, and shipping a change. Repository conventions
 the source-of-truth architectural map for the codebase is
 [`AGENTS.md`](https://github.com/sdsc-ordes/open-pulse/blob/main/AGENTS.md).
 
-Open Pulse lives as a **monorepo** — the CLI, the FastAPI hub, the
+Open Pulse is a **monorepo** — the CLI, the FastAPI hub, the
 service clients, the quest pipeline and the docs site all live in
 [`sdsc-ordes/open-pulse`](https://github.com/sdsc-ordes/open-pulse).
-There are no longer separate `open-pulse-graph-classifier`,
-`git-metadata-extractor` or `open-pulse-grimoirelab` repositories to
-clone — they are either folded into this repo or pulled in as service
-images.
+External services such as the crawler and the metadata extractor are
+consumed as container images; there is nothing else to clone.
 
 ## Prerequisites
 
@@ -123,10 +121,10 @@ A high-level orientation; the authoritative map is
 | `infra/open-pulse-stack/`           | `docker-compose.yml` + overlays (`cli`, `grimoirelab`) and GrimoireLab assets.                   |
 | `infra/services/`                   | Single-service deployment references (Neo4j, Oxigraph, sparql-proxy, …).                         |
 | `tools/images/Dockerfile-open-pulse`| The unified image used as cli / orchestrator / hub.                                              |
-| `docs-site/`                        | This Docusaurus site (you are here).                                                             |
+| `docs-site/`                        | This Docusaurus documentation site.                                                              |
 | `docs/`                             | Static landing + the `node-builder` and `env-wizard` browser apps.                               |
 | `scripts/op`                        | Host-side wrapper that `docker exec`s into `open-pulse-cli`.                                     |
-| `tests/`                            | Pytest suites — unit + integration.                                                              |
+| `tests/`                            | Pytest suites (mock-based; no live-container integration tests yet).                             |
 
 ## Sharing analyses, data, or research
 

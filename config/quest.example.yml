@@ -1,8 +1,11 @@
 # open-pulse quest — canonical example with every field shown and its default.
 #
-# Copy this to a working `quest.yml` and tweak. Anything left unset uses the
-# value shown in the comment next to it. Pass with `open-pulse quest start
-# --config <file>`.
+# config/ holds only committed EXAMPLE templates like this one. Copy this to
+# the gitignored run-quest folder — ``data/quests/<name>.yml`` (override the
+# folder with ``OPEN_PULSE_QUEST_DIR``) — tweak it, and run with a bare name:
+#   open-pulse quest start -c <name>     # → $OPEN_PULSE_QUEST_DIR/<name>.yml
+# An explicit ``--config path/to.yml`` is still honoured verbatim. Anything
+# left unset uses the value shown in the comment next to it.
 #
 # When running the CLI from *inside* a docker container (e.g. the
 # devcontainer), replace `localhost` with `host.docker.internal` so the

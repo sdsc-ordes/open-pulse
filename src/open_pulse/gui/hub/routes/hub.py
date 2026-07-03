@@ -21,7 +21,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -36,11 +39,15 @@ from fastapi.responses import (
 from fastapi.templating import Jinja2Templates
 
 from ..auth import get_settings, maybe_require_auth
+from ..knowledge import catalog as catalog_mod
+from ..knowledge import facets as facets_mod
 from ..knowledge import duckdb_browser
 from ..knowledge import enrich as enrich_mod
 from ..knowledge import (
+    manifest,
     normalize,
     opensearch,
+    presence,
     qdrant,
     registry,
     relations,
@@ -54,20 +61,63 @@ log = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+# Human-readable label for URL/IRI fact values (licence URLs, schema.org
+# types, repo/DOI pointers) so the facts card shows readable text, not raw
+# URLs. Defined in the resolver base alongside the predicate humaniser.
+from ..knowledge.resolvers.base import human_url_label as _human_url_label  # noqa: E402
+from ..knowledge.resolvers.base import maybe_narrate as _maybe_narrate  # noqa: E402
+from ..knowledge.resolvers.base import set_skip_narrative as _set_skip_narrative  # noqa: E402
+
+templates.env.globals["human_url_label"] = _human_url_label
 
 
-# Featured / example URLs surfaced on the landing page. Picked so a
-# visitor can click straight into a working entity even before they
-# know what to search for.
+def _url_host(url: str) -> str:
+    """Bare host of a URL (``https://orcid.org/0000-… `` → ``orcid.org``),
+    or ``""`` for a non-URL. Used to badge a value with its source."""
+    m = re.match(r"^https?://([^/]+)", (url or "").strip(), re.I)
+    return m.group(1).lower().lstrip("www.") if m else ""
+
+
+def _source_logo(url: str) -> str:
+    """A small source logo for a URL's host (ORCID / GitHub / ROR / DOI / …),
+    reusing the catalog's per-host overrides + favicon fallback. ``""`` when
+    the value isn't a URL so the template can skip the icon."""
+    host = _url_host(url)
+    if not host:
+        return ""
+    meta = _SOURCE_METADATA.get(host, {})
+    return meta.get("logo_url") or _logo_for_host(host)
+
+
+templates.env.globals["url_host"] = _url_host
+templates.env.globals["source_logo"] = _source_logo
+
+
+def _short_date(value: str) -> str:
+    """Trim an ISO datetime to just its date (``2022-12-07T10:19:30Z`` →
+    ``2022-12-07``); pass anything else through unchanged."""
+    s = str(value or "")
+    return s[:10] if re.match(r"^\d{4}-\d{2}-\d{2}[T ]", s) else s
+
+
+templates.env.globals["short_date"] = _short_date
+
+# Thematic grouping of the Facts card into separate cards (Classification /
+# Metrics / Timeline / Details).
+from ..knowledge.resolvers.base import fact_groups as _fact_groups  # noqa: E402
+
+templates.env.globals["fact_groups"] = _fact_groups
+
+
+# Featured / example URLs surfaced on the landing page. A small, diverse
+# set of SDSC entities so a visitor can click straight into a working
+# entity — software, dataset, model, deposit — before they know what to
+# search for.
 _HOME_EXAMPLES: tuple[tuple[str, str], ...] = (
-    ("github.com/LuckySB/s6-overlay", "GitHub repository"),
-    ("zenodo.org/records/4905618", "Zenodo deposit"),
-    ("ror.org/02s6k3f65", "EPFL (ROR)"),
-    ("huggingface.co/bigscience/bloom", "HuggingFace model"),
-    (
-        "infoscience.epfl.ch/entities/publication/fced83fa-5977-4b2e-b7b1-dad4ee87a8e1",
-        "EPFL publication",
-    ),
+    ("github.com/sdsc-ordes/gimie", "Software"),
+    ("huggingface.co/datasets/SDSC/digiwild-dataset", "Dataset"),
+    ("huggingface.co/SDSC/open-pulse-graph-classifier", "Model"),
+    ("zenodo.org/records/17225715", "Zenodo deposit"),
 )
 
 # Per-source presentation: homepage link + short description used
@@ -127,6 +177,27 @@ _SOURCE_METADATA: dict[str, dict[str, str]] = {
         "homepage": "https://graphsearch.epfl.ch",
         "description": "EPFL's category graph — disciplines and concepts.",
     },
+    "hub.docker.com": {
+        "homepage": "https://hub.docker.com",
+        "description": "Docker Hub — container images, namespaces, pulls.",
+    },
+    "gitlab.epfl.ch": {
+        "homepage": "https://gitlab.epfl.ch",
+        "description": "EPFL's GitLab — projects, groups, and users.",
+    },
+    "gitlab.ethz.ch": {
+        "homepage": "https://gitlab.ethz.ch",
+        "description": "ETH Zürich's GitLab — projects, groups, and users.",
+    },
+    "gitlab.datascience.ch": {
+        "homepage": "https://gitlab.datascience.ch",
+        "description": "SDSC DataScience GitLab — projects, groups, and users.",
+        # Per request: show the SDSC brand mark on the DataScience tiles
+        # instead of the generic GitLab tanuki. Pinned to a first-party
+        # static asset (the SDSC webclip logo) so it doesn't depend on an
+        # external favicon service.
+        "logo_url": "/static/img/gitlab-datascience.png",
+    },
 }
 
 
@@ -145,11 +216,23 @@ def _logo_for_host(host: str) -> str:
 # the raw qdrant names are uppercase-y / under-scored.
 _COLLECTION_LABELS: dict[str, tuple[str, str]] = {
     "github_repos": ("GitHub repositories", "github.com"),
+    "github_users": ("GitHub users", "github.com"),
+    "github_organizations": ("GitHub organizations", "github.com"),
     "zenodo_records": ("Zenodo records", "zenodo.org"),
+    "communities": ("Zenodo communities", "zenodo.org"),
+    # Dedicated DuckDB-only store (GME v3 split-store layout). Surfaced as
+    # a tile via the federated manifest's surface_as_source allowlist
+    # rather than a Qdrant collection — see _compute_collection_stats.
+    "zenodo_communities": ("Zenodo communities", "zenodo.org"),
     "hf_models": ("HuggingFace models", "huggingface.co"),
     "hf_datasets": ("HuggingFace datasets", "huggingface.co"),
     "hf_spaces": ("HuggingFace spaces", "huggingface.co"),
     "hf_orgs": ("HuggingFace organizations", "huggingface.co"),
+    # Split HuggingFace stores (GME 3.0.0rc1 layout) — same brand, new names.
+    "huggingface_models": ("HuggingFace models", "huggingface.co"),
+    "huggingface_datasets": ("HuggingFace datasets", "huggingface.co"),
+    "huggingface_spaces": ("HuggingFace spaces", "huggingface.co"),
+    "huggingface_organizations": ("HuggingFace organizations", "huggingface.co"),
     "ror_worldwide": ("ROR organizations (world)", "ror.org"),
     "ror_europe": ("ROR organizations (Europe)", "ror.org"),
     "ror_switzerland": ("ROR organizations (CH)", "ror.org"),
@@ -197,12 +280,28 @@ _COLLECTION_LABELS: dict[str, tuple[str, str]] = {
     # OAM Monitor: publications carry openalex IDs as URLs, organisations
     # carry ROR URLs — both surface as clickable samples via the
     # entity_id-is-a-URL fallback in qdrant._canonical_url_for_point.
-    # Journals + publishers carry internal numeric IDs / slugged names
-    # with no canonical landing page, so their cards just stay text.
+    # Journals + publishers carry internal numeric IDs with no canonical
+    # landing page, but the OA Monitor corpus is OpenAlex-derived, so we
+    # point their host at openalex.org for a recognisable tile logo.
     "oamonitor_publications": ("OAM Monitor publications", "openalex.org"),
     "oamonitor_organisations": ("OAM Monitor organisations", "ror.org"),
-    "oamonitor_journals": ("OAM Monitor journals", ""),
-    "oamonitor_publishers": ("OAM Monitor publishers", ""),
+    "oamonitor_journals": ("OAM Monitor journals", "openalex.org"),
+    "oamonitor_publishers": ("OAM Monitor publishers", "openalex.org"),
+    # DockerHub container registry.
+    "dockerhub": ("DockerHub images", "hub.docker.com"),
+    # HuggingFace Daily Papers (arXiv-linked).
+    "huggingface_papers": ("HuggingFace papers", "huggingface.co"),
+    # GitLab instances — one set of stores per host (groups / projects /
+    # users). EPFL, ETH Zürich, and the SDSC DataScience GitLab.
+    "gitlab_epfl_groups": ("GitLab EPFL groups", "gitlab.epfl.ch"),
+    "gitlab_epfl_projects": ("GitLab EPFL projects", "gitlab.epfl.ch"),
+    "gitlab_epfl_users": ("GitLab EPFL users", "gitlab.epfl.ch"),
+    "gitlab_ethz_groups": ("GitLab ETHZ groups", "gitlab.ethz.ch"),
+    "gitlab_ethz_projects": ("GitLab ETHZ projects", "gitlab.ethz.ch"),
+    "gitlab_ethz_users": ("GitLab ETHZ users", "gitlab.ethz.ch"),
+    "gitlab_datascience_groups": ("GitLab DataScience groups", "gitlab.datascience.ch"),
+    "gitlab_datascience_projects": ("GitLab DataScience projects", "gitlab.datascience.ch"),
+    "gitlab_datascience_users": ("GitLab DataScience users", "gitlab.datascience.ch"),
 }
 
 # Tiny module-level cache for the collection stats. The home page is
@@ -210,26 +309,109 @@ _COLLECTION_LABELS: dict[str, tuple[str, str]] = {
 _STATS_CACHE: dict[str, object] = {"at": 0.0, "rows": []}
 _STATS_TTL_SECONDS = 60.0
 
+# Coalesce concurrent recomputes of the collection stats. The home page
+# now lazy-loads the Sources grid, so a single page view fires the shell
+# GET /hub *and* the fragment GET /api/hub/collections; on a cold or
+# TTL-expired cache, both would otherwise run the full count gather at
+# once. The lock makes the losers wait and pick up the winner's freshly
+# cached rows instead of duplicating the serial DuckDB/Qdrant scan.
+_STATS_REFRESH_LOCK = threading.Lock()
+# Thread-pool width for the per-collection count fan-out below. Mirrors
+# the autocomplete scroll pool in qdrant.py.
+_STATS_COUNT_WORKERS = 8
 
-def _collection_stats() -> list[dict[str, object]]:
+
+def _cached_collection_stats() -> list[dict[str, object]] | None:
+    """Return the memoised rows if still within the TTL, else ``None``."""
     now = time.monotonic()
     if now - float(_STATS_CACHE["at"]) < _STATS_TTL_SECONDS and _STATS_CACHE["rows"]:
         return list(_STATS_CACHE["rows"])  # type: ignore[arg-type]
+    return None
 
-    names = qdrant.list_collections()
+
+def _collection_stats() -> list[dict[str, object]]:
+    # Fast path: serve memoised rows without taking the refresh lock.
+    cached = _cached_collection_stats()
+    if cached is not None:
+        return cached
+
+    # Slow path: single-flight. Only one thread runs the gather; the rest
+    # block on the lock, then return the now-fresh cache on the re-check.
+    with _STATS_REFRESH_LOCK:
+        cached = _cached_collection_stats()
+        if cached is not None:
+            return cached
+        rows = _compute_collection_stats()
+        _STATS_CACHE["at"] = time.monotonic()
+        _STATS_CACHE["rows"] = rows
+        return list(rows)
+
+
+# DuckDB-only stores to show on the home grid even when they have no
+# Qdrant collection yet (no vectors). Listed explicitly so we surface only
+# these intentional ones — e.g. the GitLab user stores, which are created
+# by the GitLab ingest but stay empty until the user-crawl step runs; the
+# operator still wants them visible (tiling with a 0 count) rather than
+# hidden. They click through to the (currently empty) row browser.
+_ALWAYS_SURFACE: tuple[str, ...] = (
+    "gitlab_epfl_users",
+    "gitlab_ethz_users",
+    "gitlab_datascience_users",
+)
+
+
+def _compute_collection_stats() -> list[dict[str, object]]:
+    """Gather per-collection counts + presentation metadata (uncached).
+
+    The per-collection counts are the expensive bit — a cold DuckDB
+    ``COUNT(*)`` (some over joins / filtered scans) or a Qdrant
+    ``/points/count`` fallback. They're independent and I/O-bound, so we
+    fan them out across a small thread pool (mirroring the autocomplete /
+    backlinks scrolls in ``qdrant.py``) rather than summing them serially.
+    Each DuckDB count opens its own read-only connection and runs a plain
+    ``COUNT(*)``, so concurrent reads are safe.
+    """
+    names = list(qdrant.list_collections())
+    _seen = set(names)
+    # Append the intentionally-surfaced DuckDB-only stores (e.g. GitLab
+    # users) that aren't in Qdrant yet, so they tile even with 0 rows.
+    for extra in _ALWAYS_SURFACE:
+        if extra not in _seen and duckdb_browser.is_browsable(extra):
+            names.append(extra)
+            _seen.add(extra)
+    # Manifest-driven extra tiles: DuckDB-only stores the GME explicitly
+    # allowlists (surface_as_source) that have no Qdrant collection — e.g.
+    # zenodo_communities. Best-effort: an empty/unreachable manifest leaves
+    # the grid Qdrant-only (see knowledge/manifest.py).
+    for _store in manifest.surfaced_duckdb_stores():
+        if _store["name"] not in _seen:
+            names.append(_store["name"])
+            _seen.add(_store["name"])
+
+    def _count_for(name: str) -> int | None:
+        # Prefer the source-of-truth DuckDB row count over Qdrant
+        # ``count_points`` when the collection has a registered backing.
+        # Qdrant points include text chunks (a single repo with a long
+        # README becomes 3+ points), which inflates the tile number 3-4×
+        # and confuses visitors who then click into the row browser and
+        # see a smaller table. Collections with no DuckDB backing fall
+        # back to the Qdrant count as before.
+        ddb_count = duckdb_browser.row_count_for(name)
+        if ddb_count is not None:
+            return ddb_count
+        return qdrant.count_points(name)
+
+    counts: list[int | None] = []
+    if names:
+        with ThreadPoolExecutor(
+            max_workers=min(_STATS_COUNT_WORKERS, len(names))
+        ) as pool:
+            counts = list(pool.map(_count_for, names))
+
     rows: list[dict[str, object]] = []
-    for name in names:
+    for name, count in zip(names, counts):
         label, host = _COLLECTION_LABELS.get(name, (name, ""))
         meta = _SOURCE_METADATA.get(host, {})
-        # Prefer the source-of-truth DuckDB row count over Qdrant
-        # ``count_points`` when the collection has a registered
-        # backing. Qdrant points include text chunks (a single repo
-        # with a long README becomes 3+ points), which inflates the
-        # tile number 3-4× and confuses visitors who then click into
-        # the row browser and see a smaller table. Collections with
-        # no DuckDB backing fall back to the Qdrant count as before.
-        ddb_count = duckdb_browser.row_count_for(name)
-        count = ddb_count if ddb_count is not None else qdrant.count_points(name)
         rows.append(
             {
                 "name": name,
@@ -261,10 +443,13 @@ def _collection_stats() -> list[dict[str, object]]:
     # Heat-tier per tile: bucket the per-collection counts by their
     # log10 position relative to the deployment's largest collection.
     # Tiles get t1 (coldest, near-empty) → t4 (hottest, top decile).
+    # Computed across the whole set (needs the global max), which is why
+    # the lazy fragment renders all tiles in one server-side pass rather
+    # than fanning out one fetch per tile.
     import math
 
-    counts = [int(r["count"] or 0) for r in rows if r.get("count")]
-    log_max = math.log10(max(counts) + 1) if counts else 1.0
+    present = [int(r["count"] or 0) for r in rows if r.get("count")]
+    log_max = math.log10(max(present) + 1) if present else 1.0
     for r in rows:
         c = int(r["count"] or 0)
         frac = math.log10(c + 1) / log_max if log_max > 0 else 0.0
@@ -280,9 +465,7 @@ def _collection_stats() -> list[dict[str, object]]:
         else:
             r["heat_tier"] = 1
 
-    _STATS_CACHE["at"] = now
-    _STATS_CACHE["rows"] = rows
-    return list(rows)
+    return rows
 
 
 @router.get(
@@ -324,8 +507,11 @@ def hub_top_stats(request: Request, topic: str) -> HTMLResponse:
     response_class=HTMLResponse,
     dependencies=[Depends(maybe_require_auth)],
 )
-def hub_collection(request: Request, name: str) -> HTMLResponse:
+def hub_collection(request: Request, name: str, q: str = "") -> HTMLResponse:
     """Collection landing page — label, count, and sample entries.
+
+    ``q`` pre-fills the row browser's search box (used by cross-table links
+    that jump here from another collection with a value to filter on).
 
     Each sample resolves to a hub URL the visitor can click straight
     into. Declared BEFORE the catch-all ``/hub/{ref:path}`` so the
@@ -369,8 +555,9 @@ def hub_collection(request: Request, name: str) -> HTMLResponse:
         request,
         "hub/collection.html",
         {
-            "page": "hub",
+            "page": "sources",
             "collection_name": name,
+            "initial_q": q,
             "label": label,
             "host": host,
             "count": count,
@@ -382,6 +569,70 @@ def hub_collection(request: Request, name: str) -> HTMLResponse:
             "browsable": duckdb_browser.is_browsable(name),
         },
     )
+
+
+# ── Sources — per-store index cards + network leaderboards ─────────────────
+# Declared before the catch-all ``/hub/{ref:path}`` so ``/hub/sources`` is
+# reserved for this page.
+@router.get(
+    "/hub/sources",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_sources(request: Request) -> HTMLResponse:
+    """Sources landing — the per-collection index cards (lazy
+    ``/api/hub/collections``) and the "Top across the network"
+    leaderboards. Collection detail lives at ``/hub/c/<name>``."""
+    return templates.TemplateResponse(request, "hub/sources.html", {"page": "sources"})
+
+
+# The catalog now lives on the Hub home (under the search). Keep the old
+# URL working for bookmarks / deep links — redirect to /hub.
+@router.get("/hub/catalog", include_in_schema=False)
+def hub_catalog() -> RedirectResponse:
+    return RedirectResponse(url="/hub", status_code=307)
+
+
+def _csv(v: str) -> list[str]:
+    """Split a comma-separated multi-select param into a clean list."""
+    return [p.strip() for p in (v or "").split(",") if p.strip()]
+
+
+@router.get("/api/hub/catalog", dependencies=[Depends(maybe_require_auth)])
+def api_catalog(
+    type: str = "", source: str = "", q: str = "", sort: str = "",
+    lang: str = "", graph: str = "", page: int = 1,
+) -> dict[str, Any]:
+    """A page of normalised catalog items across the in-scope stores.
+
+    ``type`` / ``source`` / ``lang`` are comma-separated multi-selects.
+    ``graph`` is a JSON ``{facet_key: [values]}`` of GME graph-property
+    selections (licence / owner / discipline / repository type / cited works).
+    """
+    try:
+        graph_sel = json.loads(graph) if graph else {}
+        if not isinstance(graph_sel, dict):
+            graph_sel = {}
+    except (ValueError, TypeError):
+        graph_sel = {}
+    return catalog_mod.browse(
+        types=_csv(type), sources=_csv(source), q=q, sort=sort,
+        langs=_csv(lang), graph=graph_sel, page=page,
+    )
+
+
+@router.get("/api/hub/catalog/featured", dependencies=[Depends(maybe_require_auth)])
+def api_catalog_featured() -> dict[str, Any]:
+    """Curated research highlights, grouped into themed featured strips."""
+    return {"sections": catalog_mod.featured()}
+
+
+@router.get("/api/hub/facets", dependencies=[Depends(maybe_require_auth)])
+def api_facets(refresh: bool = False) -> dict[str, Any]:
+    """Cached top values of the main GME properties — powers the catalog
+    Filters modal (licenses, languages, repo types, owners, disciplines,
+    citations, ROR orgs, ORCID people). ``refresh=1`` recomputes on demand."""
+    return {"facets": facets_mod.gather(refresh=refresh)}
 
 
 @router.get(
@@ -475,15 +726,42 @@ def hub_collection_stats(name: str) -> dict[str, Any]:
     dependencies=[Depends(maybe_require_auth)],
 )
 def hub_home(request: Request) -> HTMLResponse:
-    """Front-door for the knowledge surface — search + examples + stats."""
+    """Front-door for the knowledge surface — search + the visual catalog.
+
+    The search box + examples render immediately; the catalog section
+    (featured strips + browse grid) lazy-loads its cards client-side. The
+    per-source index cards and network leaderboards live on the Sources
+    page (see :func:`hub_sources`).
+    """
     return templates.TemplateResponse(
         request,
         "hub/home.html",
         {
             "page": "hub",
             "examples": _HOME_EXAMPLES,
-            "collections": _collection_stats(),
+            "facets": catalog_mod.facets(),
         },
+    )
+
+
+@router.get(
+    "/api/hub/collections",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_collections(request: Request) -> HTMLResponse:
+    """Render the Sources grid as a standalone fragment.
+
+    Fetched lazily by the hub home after first paint. Returns the whole
+    ranked tile set in one response (the heat-tier math needs the global
+    max across all collections), or the "Qdrant unreachable" warn card
+    when the count gather came back empty. Counts are memoised for
+    ``_STATS_TTL_SECONDS`` so repeat hits are sub-100 ms.
+    """
+    return templates.TemplateResponse(
+        request,
+        "hub/_sources_body.html",
+        {"collections": _collection_stats()},
     )
 
 
@@ -552,17 +830,38 @@ def hub_entity(request: Request, ref: str) -> HTMLResponse:
     "/api/hub/resolve-stream/{ref:path}",
     dependencies=[Depends(maybe_require_auth)],
 )
-async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
+async def resolve_stream(
+    request: Request, ref: str, graph: str = ""
+) -> StreamingResponse:
     """Stream resolution progress as Server-Sent Events.
 
     The resolver itself is synchronous (calls into SPARQL / Neo4j /
     Qdrant clients with their own blocking I/O), so we run it in a
     worker thread and bridge status callbacks back to the asyncio
     event loop via :func:`loop.call_soon_threadsafe`.
+
+    ``graph`` (query param) pins the RDF named graph the SPARQL probes
+    scope to — set per-browser from Settings. It travels as a query
+    param (not a header) because the client is an EventSource, which
+    can't send custom headers. Validated + applied via
+    :func:`stores.set_active_graph`; an empty / unknown value keeps the
+    store's default-graph behaviour.
     """
     parsed = normalize.parse_ref(ref)
     if not parsed.is_known_host:
         raise HTTPException(status_code=400, detail="hub URLs must include a host")
+
+    # Pin the graph in *this* async context so the copy that
+    # ``asyncio.to_thread`` hands the worker carries it into the
+    # SPARQL probes. Harmless no-op when unset / malformed.
+    stores.set_active_graph(graph)
+
+    # Defer the LLM narrative: build + ship the body first, then compose the
+    # narrative and stream it in (see the "narrative" event below). This is
+    # the single biggest cut to time-to-first-paint — the summary call is the
+    # slowest leg of the resolve. Set in this context so the worker thread
+    # inherits it.
+    _set_skip_narrative(True)
 
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
@@ -575,6 +874,14 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
     async def run_resolver() -> None:
         try:
             entity = await asyncio.to_thread(registry.resolve, parsed, on_status)
+            if entity is None:
+                # No resolver knew this URL — fall back to a basic page
+                # built straight from the catalog's DuckDB row, if any
+                # (Docker images, GitLab projects, datasets, …).
+                on_status("No resolver match — checking the catalog index")
+                entity = await asyncio.to_thread(
+                    catalog_mod.entity_from_ref, parsed.host, parsed.path
+                )
         except Exception as exc:  # noqa: BLE001
             log.exception("resolve stream failed for %s", parsed.canonical_url)
             loop.call_soon_threadsafe(
@@ -625,8 +932,35 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
                     kind = ""
                     yield _sse_event("status", "No matches — queued in the wanted list")
                 else:
+                    # Availability ("Present in") is shown at the top of the
+                    # body, under the description — so it's computed here and
+                    # passed in rather than lazy-loaded as a trailing panel.
+                    # Shares the cache key with GET /api/hub/presence.
+                    presence_rows = qdrant.cached_panel(
+                        "presence",
+                        parsed.canonical_url,
+                        lambda: presence.gather(parsed),
+                    )
+                    # The narrative was deferred (see _set_skip_narrative);
+                    # tell the template to render a "composing…" Summary slot
+                    # when an agent is configured, which the streamed
+                    # ``narrative`` event below fills in.
+                    _s = get_settings()
+                    narrative_pending = bool(
+                        (entity.facts or entity.mentions)
+                        and _s.llm_model
+                        and _s.llm_api_key
+                        and not entity.narrative
+                    )
                     html = templates.get_template("hub/_entity_body.html").render(
-                        entity=entity, ref=parsed
+                        entity=entity,
+                        ref=parsed,
+                        presence_rows=presence_rows,
+                        narrative_pending=narrative_pending,
+                        hero_emoji=catalog_mod.kind_emoji(entity.kind),
+                        hero_gradient=catalog_mod.cover_gradient(
+                            entity.ref_url or entity.title
+                        ),
                     )
                     found = True
                     title = entity.title or parsed.display
@@ -644,9 +978,19 @@ async def resolve_stream(request: Request, ref: str) -> StreamingResponse:
                             "title": title,
                             "kind": kind,
                             "url": parsed.canonical_url,
+                            "narrative_pending": narrative_pending if found else False,
                         }
                     ),
                 )
+                # Body is on screen. Now compose the (deferred) narrative and
+                # stream it into the Summary slot. Cached per facts-hash, so
+                # repeat views resolve this instantly.
+                if found and narrative_pending:
+                    yield _sse_event("status", "Composing summary with the agent")
+                    narrative = await asyncio.to_thread(
+                        lambda: _maybe_narrate(entity).narrative
+                    )
+                    yield _sse_event("narrative", narrative or "")
                 return
         finally:
             task.cancel()
@@ -1157,6 +1501,124 @@ def hub_activity(request: Request, ref: str) -> HTMLResponse:
         request,
         "hub/_activity_body.html",
         {"stats": stats, "ref": parsed},
+    )
+
+
+# Compact CHAOSS headline set for the software-page panel — one per axis
+# (community / popularity / quality). The full 20-metric dashboard lives at
+# /chaoss/github.com/<owner>/<repo>; this is the at-a-glance teaser.
+_CHAOSS_PANEL_SLUGS = (
+    "contributors",
+    "project_popularity",
+    "technical_fork",
+    "academic_impact",
+    "release_frequency",
+    "licenses_declared",
+)
+_CHAOSS_PANEL_WINDOW = 3650  # match the dashboard default (≈all-time)
+_CHAOSS_PANEL_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+@router.get(
+    "/api/hub/chaoss/{ref:path}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+async def hub_chaoss(request: Request, ref: str) -> HTMLResponse:
+    """Compact CHAOSS health panel for a github repository URL.
+
+    Computes a small headline set of metrics (concurrently) and links to the
+    full per-repo dashboard. Non-repo URLs get an empty body so the lazy slot
+    hides itself.
+    """
+    parsed = normalize.parse_ref(ref)
+    is_repo = parsed.host == "github.com" and parsed.path.count("/") == 1
+    if not is_repo:
+        return templates.TemplateResponse(
+            request, "hub/_chaoss_body.html",
+            {"metrics": [], "full": "", "window": _CHAOSS_PANEL_WINDOW, "window_label": ""},
+        )
+
+    from ..chaoss import metrics as chaoss_metrics  # lazy — heavy import
+
+    full = parsed.path
+    canonical = parsed.canonical_url
+
+    metrics = _CHAOSS_PANEL_CACHE.get(canonical)
+    if metrics is None:
+        def _compute(slug: str) -> dict[str, Any] | None:
+            spec = chaoss_metrics.spec_for(slug)
+            if spec is None:
+                return None
+            try:
+                r = spec.compute(full, canonical, _CHAOSS_PANEL_WINDOW)
+            except Exception as exc:  # noqa: BLE001
+                log.info("chaoss panel metric %s failed for %s: %s", slug, full, exc)
+                return None
+            return {
+                "slug": slug, "name": spec.name, "category": spec.category,
+                "value": r.value, "label": r.label,
+                "secondary": r.secondary, "tone": r.headline_tone or "",
+            }
+
+        results = await asyncio.gather(
+            *(asyncio.to_thread(_compute, s) for s in _CHAOSS_PANEL_SLUGS)
+        )
+        metrics = [m for m in results if m]
+        if len(_CHAOSS_PANEL_CACHE) > 256:
+            _CHAOSS_PANEL_CACHE.clear()
+        _CHAOSS_PANEL_CACHE[canonical] = metrics
+
+    return templates.TemplateResponse(
+        request, "hub/_chaoss_body.html",
+        {
+            "metrics": metrics, "full": full,
+            "window": _CHAOSS_PANEL_WINDOW,
+            "window_label": chaoss_metrics.window_label(_CHAOSS_PANEL_WINDOW),
+        },
+    )
+
+
+@router.get("/api/hub/graphs", dependencies=[Depends(maybe_require_auth)])
+def hub_graphs() -> dict[str, Any]:
+    """List the SPARQL store's named graphs for the hub graph picker.
+
+    Each entry: ``{iri, count, label}`` where ``label`` is the compact
+    part after ``/graph/``. Cached briefly via the panel cache."""
+    def _gather() -> list[dict[str, Any]]:
+        out = []
+        for g in stores.list_named_graphs():
+            iri = g["iri"]
+            label = iri.split("/graph/", 1)[-1] if "/graph/" in iri else iri
+            out.append({"iri": iri, "count": g["count"], "label": label})
+        return out
+
+    graphs = qdrant.cached_panel("graphs", "*", _gather)
+    # The panel cache also caches empties — a transient SPARQL blip (e.g. just
+    # after a restart) would otherwise hide the graph picker for the whole TTL.
+    # Recompute once when the cache is empty so the picker self-heals.
+    if not graphs:
+        graphs = qdrant.cached_panel("graphs", "*", _gather, force=True)
+    return {"graphs": graphs}
+
+
+@router.get(
+    "/api/hub/presence/{ref:path}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(maybe_require_auth)],
+)
+def hub_presence(request: Request, ref: str) -> HTMLResponse:
+    """Render the "Present in" panel — which data-plane stores hold this
+    URL (RDF named graphs, Neo4j, OpenSearch, Qdrant). Mounts even when the
+    entity didn't resolve, so a not-yet-ingested URL gets a clear answer."""
+    parsed = normalize.parse_ref(ref)
+    if not parsed.is_known_host:
+        raise HTTPException(status_code=400, detail="hub URLs must include a host")
+    rows = qdrant.cached_panel(
+        "presence", parsed.canonical_url, lambda: presence.gather(parsed)
+    )
+    return templates.TemplateResponse(
+        request, "hub/_presence_body.html", {"rows": rows, "ref": parsed}
     )
 
 

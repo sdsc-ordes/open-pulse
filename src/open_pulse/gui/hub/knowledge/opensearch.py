@@ -69,6 +69,32 @@ def _post(path: str, body: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
+_PRESENCE_INDEX_PATTERN = "git_*_enriched,github_*_enriched"
+
+
+def index_presence(canonical_url: str) -> list[dict[str, Any]]:
+    """Which OpenSearch (GrimoireLab) indices carry docs for this URL.
+
+    Returns ``[{"index": name, "count": n}, ...]`` (empty when the repo
+    isn't ingested). One aggregation call over the git + github enriched
+    indices, bucketed by ``_index`` so the "Present in" panel can list
+    each index and its doc count."""
+    body = {
+        "size": 0,
+        "query": {"term": {"origin": canonical_url}},
+        "aggs": {"idx": {"terms": {"field": "_index", "size": 20}}},
+    }
+    result = _post(f"/{_PRESENCE_INDEX_PATTERN}/_search", body)
+    if result is None:
+        return []
+    buckets = ((result.get("aggregations") or {}).get("idx") or {}).get("buckets") or []
+    return [
+        {"index": b.get("key", ""), "count": int(b.get("doc_count") or 0)}
+        for b in buckets
+        if b.get("doc_count")
+    ]
+
+
 def repo_activity(canonical_url: str) -> ActivityStats | None:
     """Return commit-level activity for a repository URL.
 
@@ -83,7 +109,9 @@ def repo_activity(canonical_url: str) -> ActivityStats | None:
         "size": 0,
         "query": {"term": {"origin": canonical_url}},
         "aggs": {
-            "contributors": {"cardinality": {"field": "author_name.keyword"}},
+            # author_uuid is GrimoireLab's identity-merged contributor key;
+            # author_name.keyword doesn't exist here (cardinality → 0).
+            "contributors": {"cardinality": {"field": "author_uuid"}},
             "first": {"min": {"field": "grimoire_creation_date"}},
             "last": {"max": {"field": "grimoire_creation_date"}},
             "by_month": {

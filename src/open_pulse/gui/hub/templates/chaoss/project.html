@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}CHAOSS · {{ project }}{% endblock %}
+{% block heading %}CHAOSS · {{ title }}{% endblock %}
+{% block subheading %}
+  Community-health metrics aggregated across the GrimoireLab project
+  <span class="mono">{{ project }}</span> — <strong>{{ repo_count }}</strong>
+  repositories, computed over the last
+  <span x-text="window"></span> days against Neo4j / SPARQL / OpenSearch.
+  <a href="/api/v1/metrics/chaoss/projects/{{ project }}/metrics"
+     target="_blank" rel="noopener">JSON ↗</a>
+{% endblock %}
+{% block headeractions %}
+  <a class="btn btn-ghost" href="/chaoss">← CHAOSS</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .chaoss-proj-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .chaoss-proj-card { padding: 14px 16px; }
+  .chaoss-proj-card .cv {
+    font-size: 30px; font-weight: 700; line-height: 1.1; margin: 4px 0 2px;
+  }
+  .chaoss-proj-card .cv.warn { color: var(--tone-warn, #b45309); }
+  .chaoss-proj-cat { margin: 6px 0 22px; }
+  .chaoss-proj-cat h3 { margin: 0 0 10px; font-size: 15px; }
+  .chaoss-approx {
+    font-size: 10px; padding: 0 5px; border-radius: 4px;
+    background: var(--surface-2, rgba(180,83,9,0.12)); color: var(--tone-warn, #b45309);
+    cursor: help;
+  }
+  .chaoss-proj-card { position: relative; }
+  .chaoss-proj-help {
+    position: absolute; top: 8px; right: 8px;
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--surface-sunk);
+    color: var(--fg-muted); font-size: 12px; line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .chaoss-proj-help:hover { border-color: var(--accent); color: var(--fg); }
+  /* per-repo distribution bars in the modal */
+  .chaoss-dist-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; font-size: 12px; padding: 3px 0; }
+  .chaoss-dist-bar { height: 6px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 55%, var(--surface-sunk)); min-width: 2px; }
+  .chaoss-dist-track { background: var(--surface-sunk); border-radius: 4px; overflow: hidden; }
+  .chaoss-dist-repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+  .chaoss-dist-val { color: var(--fg-muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+  .chaoss-proj-how {
+    background: var(--surface-sunk); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px; font-size: 13px;
+  }
+</style>
+
+<div x-data='chaossProject({{ {"project": project, "window": window} | tojson }})'
+     x-init="load()" style="display:flex; flex-direction:column; gap:14px;">
+
+  <div x-show="loading" x-cloak class="card card-meta" style="padding:14px;">
+    Computing {{ repo_count }} repositories × every metric across the stores…
+    <span x-show="{{ repo_count }} > 30"> this can take a few seconds the first time (then it's cached).</span>
+  </div>
+  <div x-show="error" x-cloak class="card tone-bad" style="padding:14px;" x-text="error"></div>
+
+  <div x-show="cachedAt" x-cloak class="card-meta" style="font-size:11px;">
+    served from cache · computed <span x-text="cachedAt"></span>
+    · <a href="#" @click.prevent="load(true)">refresh</a>
+  </div>
+
+  <template x-for="cat in categories" :key="cat.name">
+    <div class="chaoss-proj-cat" x-show="byCat(cat.name).length" x-cloak>
+      <h3 x-text="cat.name + ' metrics'"></h3>
+      <div class="chaoss-proj-grid">
+        <template x-for="m in byCat(cat.name)" :key="m.slug">
+          <div class="card chaoss-proj-card" :title="m.question">
+            <button type="button" class="chaoss-proj-help"
+                    @click="openMetric(m)" title="How is this computed?">?</button>
+            <div class="card-title" style="margin:0; font-size:13px;" x-text="m.name"></div>
+            <div class="cv" :class="m.aggregate.approx ? 'warn' : ''" x-text="fmt(m.aggregate.value)"></div>
+            <div class="card-meta" style="font-size:11px;">
+              <span x-text="m.aggregate.rule"></span>
+              · <span x-text="m.aggregate.n_with_value + '/' + m.aggregate.n_repos"></span> repos
+              <span class="chaoss-approx" x-show="m.aggregate.approx"
+                    :title="m.aggregate.approx_note">approx</span>
+            </div>
+            <div class="card-meta" style="font-size:11px;" x-show="m.aggregate.rule === 'sum' && m.aggregate.mean !== null">
+              mean <span x-text="fmt1(m.aggregate.mean)"></span>
+              · max <span x-text="fmt(m.aggregate.max)"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </template>
+
+  {# ── Metric transparency modal — how the project aggregate was obtained ── #}
+  <template x-teleport="body">
+    <div class="chaoss-modal-backdrop" x-show="detail" x-cloak
+         x-transition.opacity.duration.150ms
+         @click.self="closeMetric()" @keydown.escape.window="closeMetric()">
+      <div class="chaoss-modal" @click.stop x-show="detail">
+        <header class="chaoss-modal-header">
+          <div class="chaoss-modal-title">
+            <span class="pill" style="font-size:10px;" x-text="detail && detail.category"></span>
+            <h3 x-text="detail ? detail.name + ' — how we compute this' : ''"></h3>
+          </div>
+          <button type="button" class="chaoss-modal-close" @click="closeMetric()" aria-label="close">×</button>
+        </header>
+        <div class="chaoss-modal-body" x-show="detail">
+          <p class="chaoss-modal-question" x-text="detail && detail.question"></p>
+
+          <section class="chaoss-modal-section chaoss-modal-method">
+            <h4 class="chaoss-modal-section-title">What it measures</h4>
+            <p class="chaoss-modal-prose" x-text="detail && detail.description"></p>
+          </section>
+
+          <section class="chaoss-modal-section">
+            <h4 class="chaoss-modal-section-title">How this project number is obtained</h4>
+            <div class="chaoss-proj-how" x-show="detail">
+              <p style="margin:0 0 6px;">
+                We compute <strong x-text="detail && detail.name"></strong> for
+                <strong x-text="detail && detail.aggregate.n_repos"></strong> repositories in
+                <span class="mono" x-text="project"></span>, then combine them by
+                <strong x-text="detail && detail.aggregate.rule"></strong>
+                (<span x-text="detail && detail.aggregate.rule === 'mean' ? 'average across repos' : 'sum across repos'"></span>).
+                <span x-text="detail && detail.aggregate.n_with_value"></span> of
+                <span x-text="detail && detail.aggregate.n_repos"></span> repos returned a value.
+              </p>
+              <p class="card-meta" style="margin:0;" x-show="detail && detail.aggregate.approx"
+                 x-text="detail && detail.aggregate.approx_note"></p>
+              <p class="card-meta" style="margin:6px 0 0;"
+                 x-show="detail && detail.is_time_based"
+                 x-text="'Time-based — measured over the last ' + window + ' days.'"></p>
+            </div>
+          </section>
+
+          <section class="chaoss-modal-section">
+            <h4 class="chaoss-modal-section-title">
+              Per-repository breakdown
+              <span class="chaoss-modal-section-count" x-show="detailRows.length" x-text="detailRows.length"></span>
+            </h4>
+            <p class="chaoss-modal-prose chaoss-modal-prose-muted">
+              The per-repo values that roll up into the headline — so you can see which repos drive it.
+            </p>
+            <div x-show="detailLoading" class="card-meta">loading per-repo values…</div>
+            <div x-show="detailErr" class="card-meta tone-bad" x-text="detailErr"></div>
+            <div x-show="!detailLoading && !detailErr">
+              <template x-for="r in detailRows.slice(0, 20)" :key="r.repo">
+                <div class="chaoss-dist-row">
+                  <div style="min-width:0;">
+                    <a class="chaoss-dist-repo" :href="'/chaoss/github.com/' + r.repo + '?window=' + window"
+                       x-text="r.repo" :title="'Open ' + r.repo"></a>
+                    <div class="chaoss-dist-track" x-show="r.numeric !== null">
+                      <div class="chaoss-dist-bar" :style="'width:' + barPct(r.numeric) + '%'"></div>
+                    </div>
+                  </div>
+                  <span class="chaoss-dist-val" x-text="r.value"></span>
+                </div>
+              </template>
+              <div class="card-meta" x-show="detailRows.length > 20" style="margin-top:6px;"
+                   x-text="'+ ' + (detailRows.length - 20) + ' more repositories'"></div>
+            </div>
+          </section>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
+            <button class="btn btn-tiny" @click="copyValue()" x-text="copied === 'val' ? 'copied!' : 'Copy value'"></button>
+            <button class="btn btn-tiny" @click="copyJson()" x-text="copied === 'json' ? 'copied!' : 'Copy JSON'"></button>
+            <a class="btn btn-tiny" :href="detailApiUrl()" target="_blank" rel="noopener">View raw JSON ↗</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>
+
+<script>
+function chaossProject(init) {
+  return {
+    project: init.project,
+    window: init.window,
+    loading: true,
+    error: '',
+    cachedAt: null,
+    metrics: [],
+    categories: {{ categories | tojson }},
+    async load(refresh) {
+      this.loading = true; this.error = ''; this.cachedAt = null;
+      try {
+        const qs = new URLSearchParams({ window: String(this.window) });
+        if (refresh) qs.set('refresh', '1');
+        const r = await fetch(
+          `/api/v1/metrics/chaoss/projects/${encodeURIComponent(this.project)}/metrics?${qs}`
+        );
+        if (!r.ok) { this.error = `HTTP ${r.status}`; return; }
+        const j = await r.json();
+        this.metrics = j.metrics || [];
+        this.cachedAt = j.cached_at || null;
+      } catch (e) {
+        this.error = String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+    byCat(name) { return this.metrics.filter(m => m.category === name); },
+    fmt(v) {
+      if (v === null || v === undefined) return '—';
+      if (typeof v !== 'number') return v;
+      return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2);
+    },
+    fmt1(v) { return (v === null || v === undefined) ? '—' : Number(v).toFixed(1); },
+
+    // ── transparency modal ──────────────────────────────────────────
+    detail: null,            // the metric whose modal is open
+    detailRows: [],          // per-repo breakdown
+    detailLoading: false,
+    detailErr: '',
+    detailMax: 0,
+    copied: '',
+    detailApiUrl() {
+      if (!this.detail) return '#';
+      return `/api/v1/metrics/chaoss/projects/${encodeURIComponent(this.project)}/metrics/${this.detail.slug}?window=${this.window}&include=traces`;
+    },
+    barPct(n) {
+      if (n === null || !this.detailMax) return 0;
+      return Math.max(2, Math.round((Math.abs(n) / this.detailMax) * 100));
+    },
+    async openMetric(m) {
+      this.detail = m;
+      this.detailRows = []; this.detailErr = ''; this.detailMax = 0;
+      this.detailLoading = true;
+      document.body.classList.add('chaoss-modal-lock');
+      try {
+        const r = await fetch(
+          `/api/v1/metrics/chaoss/projects/${encodeURIComponent(this.project)}/metrics/${m.slug}?window=${this.window}`,
+          { credentials: 'include' }
+        );
+        if (!r.ok) { this.detailErr = `HTTP ${r.status}`; return; }
+        const j = await r.json();
+        this.detailRows = j.repositories || [];
+        const nums = this.detailRows.map(x => x.numeric).filter(n => typeof n === 'number');
+        this.detailMax = nums.length ? Math.max(...nums.map(Math.abs)) : 0;
+      } catch (e) {
+        this.detailErr = String(e);
+      } finally {
+        this.detailLoading = false;
+      }
+    },
+    closeMetric() {
+      this.detail = null;
+      document.body.classList.remove('chaoss-modal-lock');
+    },
+    _flash(which) { this.copied = which; setTimeout(() => { if (this.copied === which) this.copied = ''; }, 1200); },
+    copyValue() {
+      if (!this.detail) return;
+      navigator.clipboard.writeText(String(this.fmt(this.detail.aggregate.value)));
+      this._flash('val');
+    },
+    copyJson() {
+      if (!this.detail) return;
+      navigator.clipboard.writeText(JSON.stringify({
+        project: this.project, window_days: this.window,
+        metric: this.detail.slug, name: this.detail.name,
+        aggregate: this.detail.aggregate,
+        repositories: this.detailRows,
+      }, null, 2));
+      this._flash('json');
+    },
+  };
+}
+</script>
+{% endblock %}
