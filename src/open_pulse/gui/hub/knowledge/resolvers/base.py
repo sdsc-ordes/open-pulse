@@ -327,7 +327,14 @@ _RDF_NEIGHBOUR_CAP = 40
 # per badge. The human-readable info lives in ``latest_version`` / ``git_tags``
 # and ``badge_image_urls`` respectively. ``badge_count`` is redundant once the
 # badges render.
-_NOISE_PREDICATES = frozenset({"releases", "badges", "badge_count"})
+_NOISE_PREDICATES = frozenset(
+    {"releases", "badges", "badge_count", "publiccode"}
+)
+# NB: ``publiccode`` here is the GME ``gme:publiccode`` content-hash/fingerprint
+# of the repo's publiccode.yml — an opaque id, not display content. The readable
+# fields live under the distinct ``publiccode.tools/*`` predicates
+# (softwareVersion, developmentStatus, softwareType, platforms, url), which keep
+# their own local names and are unaffected by this suppression.
 
 
 def facts_from_bindings(bindings: Iterable[dict]) -> list[Fact]:
@@ -672,6 +679,84 @@ def _is_numeric(value: str) -> bool:
     return value.replace(",", "").replace(".", "", 1).isdigit()
 
 
+# Repo-metadata facts arrive under different labels from RDF (humanized) and the
+# DuckDB index (raw column names) — e.g. RDF "Stars" vs index "stars", RDF
+# "Last push" vs index "pushed_at". Map every variant to one canonical display
+# label so the page shows a single corroborated row, not two near-duplicates.
+_FACT_LABEL_CANON = {
+    # Each canonical target also keys to itself (lower-cased) so the RDF label
+    # AND the index variant land in the same group — otherwise the RDF row
+    # passes through ungrouped and re-duplicates downstream.
+    "name": "Name",
+    "owner": "Owner",
+    "primary language": "Primary language",
+    "primary_language": "Primary language",
+    "programming language": "Primary language",
+    "stars": "Stars",
+    "forks": "Forks",
+    "forks (network)": "Forks",
+    "last push": "Last push",
+    "pushed_at": "Last push",
+    "updated at": "Updated at",
+    "updated_at": "Updated at",
+    "archived": "Archived",
+    "is_archived": "Archived",
+    "license": "License",
+    "license name": "License",
+    "license url": "License",
+    "license_spdx": "License",
+}
+# Internal flags / IRI-typed predicates that add no reader value (the entity's
+# kind already shows in the hero; ``stub`` is an extraction bookkeeping flag).
+_NOISE_FACT_LABELS = frozenset({"stub", "type", "repository type"})
+
+
+def _best_fact(group: list[Fact]) -> Fact:
+    """One representative fact for a concept, unioning provenance tags. Numeric
+    concepts keep the max (e.g. the real ``forks_count`` over a stale value);
+    others prefer a readable (non-URL) RDF value."""
+    srcs: list[str] = []
+    for f in group:
+        srcs += list(f.sources) or ([f.source] if f.source else [])
+    uniq = tuple(dict.fromkeys(s for s in srcs if s))
+    if all(_is_numeric(f.value or "") for f in group):
+        best = max(group, key=lambda f: float((f.value or "0").replace(",", "")))
+    else:
+        readable = [f for f in group if not (f.value or "").startswith("http")]
+        pool = readable or group
+        best = next(
+            (f for f in pool if "rdf" in (f.sources or ((f.source,) if f.source else ()))),
+            pool[0],
+        )
+    return replace(best, sources=uniq, source=uniq[0] if uniq else best.source)
+
+
+def _canonicalize_facts(facts: list[Fact]) -> list[Fact]:
+    """Drop noise facts, canonicalize variant labels (RDF vs index), and
+    collapse same-concept facts into one corroborated row. First-seen order is
+    preserved; non-canonical facts pass through unchanged."""
+    groups: dict[str, list[Fact]] = {}
+    for f in facts:
+        canon = _FACT_LABEL_CANON.get((f.label or "").strip().lower())
+        if canon:
+            groups.setdefault(canon, []).append(replace(f, label=canon))
+    merged = {c: _best_fact(g) for c, g in groups.items()}
+    out: list[Fact] = []
+    emitted: set[str] = set()
+    for f in facts:
+        low = (f.label or "").strip().lower()
+        if low in _NOISE_FACT_LABELS:
+            continue
+        canon = _FACT_LABEL_CANON.get(low)
+        if canon:
+            if canon not in emitted:
+                out.append(merged[canon])
+                emitted.add(canon)
+        else:
+            out.append(f)
+    return out
+
+
 def _aggregate_facts(facts: list[Fact]) -> list[Fact]:
     """Collapse same-label multi-value facts into a single chip row.
 
@@ -999,6 +1084,10 @@ def build_entity(
     # carries them; differing values for the same label stay as distinct rows
     # so a real conflict surfaces instead of being silently dropped.
     facts = _merge_facts([*facts, *qdrant_facts])
+    # Collapse the RDF-vs-index label variants (Stars/stars, Last push/pushed_at,
+    # License/license_spdx, …) and drop noise (Stub, IRI-typed Type) so the page
+    # shows one corroborated row per concept instead of near-duplicates.
+    facts = _canonicalize_facts(facts)
 
     # Warm Wikidata labels for any discipline-style entity values so the facts
     # card can show human names (e.g. Q428691 → "computer engineering") instead
