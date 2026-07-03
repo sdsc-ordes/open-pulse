@@ -16,12 +16,14 @@ const sidebars = {
     "hub/index",
     "pipeline/index",
     "reference/chaoss-api",
+    "reference/access-control",
     "use-cases/index",
     {
       type: "category",
       label: "Operations",
       items: [
         "operations/deployment",
+        "operations/activity-tracking",
         "operations/register-a-node",
         "operations/release-checklist",
         "operations/branch-model"
