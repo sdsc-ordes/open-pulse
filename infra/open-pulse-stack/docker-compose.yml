@@ -425,6 +425,13 @@ services:
     profiles:
       - hub
     restart: unless-stopped
+    # Run as the host operator (not root) so everything written to the
+    # bind-mounted data dir stays host-owned. The docker group grants
+    # access to the mounted socket; HOME points at the writable mount so
+    # runtime caches (e.g. DuckDB extensions) persist.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-999}"
     ports:
       - "${HUB_PORT:-9090}:8000"
     # Pull the deployment env so any per-service knob set in infra/.env
@@ -433,6 +440,7 @@ services:
       - path: ../.env
         required: false
     environment:
+      HOME: /data/hub
       HUB_AUTH: "${HUB_AUTH:?HUB_AUTH must be set in infra/.env (e.g. openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
       HUB_DATA_DIR: /data/hub
       HUB_APPLIER_URL: "${HUB_APPLIER_URL:-http://projects-applier:8000}"
