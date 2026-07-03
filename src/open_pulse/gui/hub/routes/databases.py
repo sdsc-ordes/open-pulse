@@ -17,7 +17,7 @@ from typing import Any
 
 import duckdb
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from ..auth import get_settings, require_auth
 from ..db_examples import by_engine as db_examples_by_engine
@@ -216,9 +216,15 @@ async def sparql_query(
 
 @router.post("/cypher/query", dependencies=[Depends(require_auth)])
 def cypher_query(
+    request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    """Run a Cypher statement against Neo4j and return result rows."""
+    """Run a Cypher statement against Neo4j and return result rows.
+
+    Admins get the full console (reads + writes). Readers (and the global
+    HUB_READONLY switch) run inside a Neo4j READ transaction, so any write
+    clause is rejected server-side — the graph stays immutable for them.
+    """
     settings = get_settings()
     query = (payload.get("query") or "").strip()
     if not query:
@@ -238,16 +244,43 @@ def cypher_query(
     except ImportError as e:  # pragma: no cover - hub image bundles it
         raise HTTPException(status_code=500, detail=f"neo4j driver missing: {e}") from e
 
+    # Only admins (and only when the hub isn't globally read-only) may run
+    # write Cypher. Everyone else runs in a read transaction Neo4j refuses to
+    # write through.
+    is_admin = (
+        getattr(request.state, "user_role", None) == "admin"
+        and not settings.read_only
+    )
+
+    def _read_tx(tx: Any) -> tuple[list[str], list[list[Any]]]:
+        res = tx.run(query)
+        ks = list(res.keys())
+        return ks, [[rec.get(k) for k in ks] for rec in res]
+
     try:
         driver = GraphDatabase.driver(settings.neo4j_url, auth=(user, pw))
         with driver.session() as s:
-            result = s.run(query)
-            keys = list(result.keys())
-            rows = [[record.get(k) for k in keys] for record in result]
+            if is_admin:
+                result = s.run(query)
+                keys = list(result.keys())
+                rows = [[record.get(k) for k in keys] for record in result]
+            else:
+                keys, rows = s.execute_read(_read_tx)
         driver.close()
     except Exception as e:
         _log_history("cypher", query, row_count=None, error=str(e))
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        # A reader's write attempt surfaces as a Neo4j access-mode error;
+        # return a clear 403 instead of a cryptic 400.
+        msg = str(e)
+        if not is_admin and "write" in msg.lower():
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Read-only access: write Cypher (CREATE / MERGE / DELETE / "
+                    "SET) is not permitted for this account."
+                ),
+            ) from e
+        raise HTTPException(status_code=400, detail=msg) from e
 
     _log_history("cypher", query, row_count=len(rows), error=None)
     return {
@@ -365,17 +398,133 @@ def _shape_sql_response(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _agg_key(bucket: dict[str, Any]) -> Any:
+    """Bucket label: date_histogram exposes ``key_as_string``; terms uses ``key``."""
+    v = bucket.get("key_as_string")
+    return v if v is not None else bucket.get("key")
+
+
+def _metric_value(node: dict[str, Any]) -> Any:
+    """Scalar value of a metric sub-agg (cardinality/sum/avg/value_count/…)."""
+    if "value_as_string" in node:
+        return node["value_as_string"]
+    return node.get("value")
+
+
+def _shape_aggregations(
+    aggs: dict[str, Any],
+) -> tuple[list[str], list[list[Any]]] | None:
+    """Flatten an OpenSearch ``aggregations`` block into ``(columns, rows)``.
+
+    ``size: 0`` aggregation queries return no hits, so without this their
+    buckets only ever reached the UI as an opaque JSON dump. Flattening
+    them into a real table lets the row browser — and the chart layer —
+    use them directly. Shapes handled (covering every curated example):
+
+    * ``date_histogram`` / ``terms`` buckets   → ``[key, doc_count]``
+    * bucket agg + metric sub-aggs (sum/avg/…)  → ``[key, doc_count, m1, m2…]``
+    * bucket agg + a nested bucket sub-agg      → cross-tab ``[parent, child, doc_count]``
+    * a bare top-level metric agg (no buckets)  → one row of metric values
+
+    Returns ``None`` when nothing is bucketable/metric, so the caller keeps
+    the raw-dump fallback rather than inventing an empty table.
+    """
+    if not isinstance(aggs, dict):
+        return None
+
+    # First named agg that has buckets wins; remember bare metric aggs as
+    # a fallback for the no-buckets case.
+    bucket_name: str | None = None
+    bucket_node: dict[str, Any] | None = None
+    metric_only: list[tuple[str, Any]] = []
+    for name, node in aggs.items():
+        if not isinstance(node, dict):
+            continue
+        if isinstance(node.get("buckets"), list):
+            bucket_name, bucket_node = name, node
+            break
+        if "value" in node or "value_as_string" in node:
+            metric_only.append((name, _metric_value(node)))
+
+    if bucket_node is None:
+        if metric_only:
+            return [n for n, _ in metric_only], [[v for _, v in metric_only]]
+        return None
+
+    buckets = bucket_node.get("buckets") or []
+    # Friendly key column: ``by_month`` → ``month``, ``by_author`` → ``author``.
+    key_col = bucket_name[3:] if bucket_name.startswith("by_") else bucket_name
+
+    sample = buckets[0] if buckets else {}
+    nested_name = next(
+        (
+            k
+            for k, v in sample.items()
+            if isinstance(v, dict) and isinstance(v.get("buckets"), list)
+        ),
+        None,
+    )
+
+    # Cross-tab: parent bucket × child bucket → [parent, child, doc_count].
+    if nested_name is not None:
+        child_col = (
+            nested_name[3:] if nested_name.startswith("by_") else nested_name
+        )
+        cols = [key_col, child_col, "doc_count"]
+        rows: list[list[Any]] = []
+        for b in buckets:
+            parent = _agg_key(b)
+            for cb in (b.get(nested_name) or {}).get("buckets") or []:
+                rows.append([parent, _agg_key(cb), int(cb.get("doc_count") or 0)])
+        return cols, rows
+
+    # Metric sub-aggs → extra numeric columns (stable first-seen union).
+    metric_names: list[str] = []
+    for b in buckets:
+        for k, v in b.items():
+            if k in ("key", "key_as_string", "doc_count"):
+                continue
+            if isinstance(v, dict) and ("value" in v or "value_as_string" in v):
+                if k not in metric_names:
+                    metric_names.append(k)
+
+    cols = [key_col, "doc_count", *metric_names]
+    rows = []
+    for b in buckets:
+        row: list[Any] = [_agg_key(b), int(b.get("doc_count") or 0)]
+        for m in metric_names:
+            sub = b.get(m)
+            row.append(_metric_value(sub) if isinstance(sub, dict) else None)
+        rows.append(row)
+    return cols, rows
+
+
 def _shape_dsl_response(body: dict[str, Any]) -> dict[str, Any]:
     """Reshape a `_search` response: hits + scalar columns from _source.
 
     For each hit we emit one row; columns are the flattened union of all
     ``_source`` top-level keys plus ``_id`` / ``_index`` / ``_score`` so
-    you always have the document identity. Aggregations are returned in
-    ``raw`` so the UI can still surface them.
+    you always have the document identity. For aggregation-only responses
+    (``size: 0``) the buckets are flattened into a real table via
+    :func:`_shape_aggregations`; ``raw`` still carries the untouched
+    aggregations as a fallback.
     """
     hits_block = body.get("hits") or {}
     hits = hits_block.get("hits") or []
     aggs = body.get("aggregations")
+
+    # Aggregation-only response: turn the buckets into a table the row
+    # browser + chart layer can consume, instead of an opaque JSON dump.
+    if aggs and not hits:
+        shaped = _shape_aggregations(aggs)
+        if shaped is not None:
+            agg_cols, agg_rows = shaped
+            return {
+                "columns": agg_cols,
+                "rows": agg_rows,
+                "row_count": len(agg_rows),
+                "raw": {"aggregations": aggs},
+            }
 
     cols: list[str] = ["_index", "_id", "_score"]
     seen = set(cols)

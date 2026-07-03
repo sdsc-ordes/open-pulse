@@ -55,11 +55,14 @@ STEP_NAMES: tuple[str, ...] = tuple(STEP_REGISTRY)
 def load_config(path: Path) -> QuestFileConfig:
     """Load and validate a quest YAML config.
 
-    Returns default configuration when *path* does not exist.
+    Raises ``FileNotFoundError`` when *path* does not exist. A missing
+    config almost always means a mistyped ``--config`` name (e.g.
+    ``-c epfl-enac-full`` when the file is ``quest.epfl-enac-full.yml``);
+    silently falling back to an empty default pipeline ran a no-op
+    ``default-quest`` with no seeds and hid the mistake.
     """
     if not path.exists():
-        logger.debug("Config file %s not found; using defaults", path)
-        return QuestFileConfig()
+        raise FileNotFoundError(f"quest config not found: {path}")
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return QuestFileConfig.model_validate(raw or {})

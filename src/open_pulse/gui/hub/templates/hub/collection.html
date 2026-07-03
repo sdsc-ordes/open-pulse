@@ -7,12 +7,12 @@
   {% if count is not none %} · <strong>{{ '{:,}'.format(count) }}</strong> entries{% endif %}
 {% endblock %}
 {% block headeractions %}
-  <a class="btn btn-ghost" href="/hub">← Back to Hub</a>
+  <a class="btn btn-ghost" href="/hub/sources">← Back to Sources</a>
 {% endblock %}
 
 {% block breadcrumb %}
 <nav class="hub-breadcrumb" aria-label="breadcrumb">
-  <a href="/hub">Hub</a>
+  <a href="/hub/sources">Sources</a>
   <span class="sep">›</span>
   <span class="current">{{ label }}</span>
 </nav>
@@ -172,6 +172,33 @@
     opacity: 0.25;
     cursor: not-allowed;
   }
+  /* Cross-table link cells: jump to a related collection pre-filtered. */
+  a.xlink { text-decoration: none; border-bottom: 1px dashed var(--accent); }
+  a.xlink:hover { text-decoration: none; border-bottom-style: solid; }
+  a.xlink .xlink-arrow { opacity: 0.5; font-size: 0.85em; }
+  /* Per-column hide button in the header (next to the pin). */
+  .col-hide-btn { opacity: 0; font-size: 10px; transition: opacity .12s, color .12s; }
+  th:hover .col-hide-btn { opacity: 0.45; }
+  .col-hide-btn:hover { opacity: 1 !important; color: var(--tone-bad, #c0392b); }
+  /* Columns dropdown (show/hide checkboxes). */
+  .duckdb-colmenu-wrap { position: relative; display: inline-block; }
+  .duckdb-colmenu {
+    position: absolute; top: calc(100% + 4px); right: 0; z-index: 50;
+    min-width: 200px; max-height: 320px; overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 8px; box-shadow: var(--shadow); padding: 6px;
+  }
+  .duckdb-colmenu-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 2px 6px 6px; border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+  .duckdb-colmenu-item {
+    display: flex; align-items: center; gap: 8px; padding: 4px 6px;
+    border-radius: 6px; cursor: pointer; font-size: 12px;
+  }
+  .duckdb-colmenu-item:hover { background: var(--surface-2, rgba(127,127,127,0.08)); }
+  .duckdb-colmenu-item input { cursor: pointer; }
 </style>
 <div style="display: flex; flex-direction: column; gap: 18px;">
 
@@ -215,36 +242,50 @@
       </div>
     {% else %}
       <div class="card">
-        <div class="card-title">Entry points</div>
+        <div class="card-title">Entries</div>
         <div class="card-meta" style="margin: 4px 0 12px;">
-          A sample of {{ samples|length }} entries from the collection. Click any
-          to land on its hub page.
+          A sample of {{ samples|length }} entries from the collection — this
+          source has no tabular store (it's a vector/chunk index), so the full
+          row browser isn't available. Click any entry to open its hub page;
+          everything is searchable in the <a href="/databases">Query</a> console.
         </div>
-        <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px;">
-          {% for s in samples %}
-            <li>
-              <span class="hub-hover" data-preview-ref="{{ s.hub_url[5:] }}">
+        <table class="data" style="margin-top: 4px;">
+          <thead>
+            <tr>
+              {% if source_type %}<th style="width: 1%; white-space: nowrap;">Source</th>{% endif %}
+              <th>Entry</th>
+              <th>Detail</th>
+              <th style="width: 1%;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in samples %}
+              <tr>
                 {% if source_type %}
-                  <span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ source_type }}</span>
+                  <td><span class="pill pill-info" style="font-size: 10px; padding: 1px 6px;">{{ source_type }}</span></td>
                 {% endif %}
-                <a href="{{ s.hub_url }}" class="mono" style="word-break: break-all;">{{ s.title }}</a>
-                {% if s.external_url %}
-                  <a href="{{ s.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>
-                {% endif %}
-                {% if s.badge %}
-                  <span class="card-meta" style="font-size: 11px;">· {{ s.badge }}</span>
-                {% endif %}
-                <span class="hub-preview" aria-hidden="true">
-                  <p class="hub-preview-title">{{ s.title }}</p>
-                  {% if source_type %}<div class="hub-preview-meta">{{ source_type }} · {{ collection_name }}</div>{% endif %}
-                  <div class="hub-preview-description"></div>
-                  {% if s.badge %}<div class="hub-preview-badge">{{ s.badge }}</div>{% endif %}
-                  <div class="hub-preview-hint">Click to open the hub page →</div>
-                </span>
-              </span>
-            </li>
-          {% endfor %}
-        </ul>
+                <td>
+                  <span class="hub-hover" data-preview-ref="{{ s.hub_url[5:] }}">
+                    <a href="{{ s.hub_url }}" class="mono" style="word-break: break-all;">{{ s.title }}</a>
+                    <span class="hub-preview" aria-hidden="true">
+                      <p class="hub-preview-title">{{ s.title }}</p>
+                      {% if source_type %}<div class="hub-preview-meta">{{ source_type }} · {{ collection_name }}</div>{% endif %}
+                      <div class="hub-preview-description"></div>
+                      {% if s.badge %}<div class="hub-preview-badge">{{ s.badge }}</div>{% endif %}
+                      <div class="hub-preview-hint">Click to open the hub page →</div>
+                    </span>
+                  </span>
+                </td>
+                <td class="card-meta" style="font-size: 11px;">{{ s.badge or '' }}</td>
+                <td>
+                  {% if s.external_url %}
+                    <a href="{{ s.external_url }}" rel="noopener" target="_blank" class="card-meta" title="open at source">↗</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     {% endif %}
   {% endif %}
@@ -254,7 +295,7 @@
        Top stats + search bar + paginated table backed by the
        source-of-truth DuckDB. Mapping lives in
        knowledge/duckdb_browser.py. Lazy-fetched on first render. #}
-  <div x-data='collectionRows({{ {"name": collection_name} | tojson }})' x-init="loadStats(); load(1)" style="display: flex; flex-direction: column; gap: 14px;">
+  <div x-data='collectionRows({{ {"name": collection_name, "q": initial_q} | tojson }})' x-init="_loadHidden(); loadStats(); load(1)" style="display: flex; flex-direction: column; gap: 14px;">
 
     {# ── 4 headline stats — only renders when stats arrive ─── #}
     <div class="card" x-show="stats.length" x-cloak>
@@ -302,12 +343,36 @@
       {# Header — title left, "X of Y rows · Z cols" right. #}
       <div class="duckdb-rows-header">
         <div class="card-title">Rows · DuckDB</div>
-        <span class="card-meta duckdb-rows-meta" x-show="meta.table" x-cloak
-              x-text="(meta.q && meta.matched !== meta.total
-                       ? (meta.matched||0).toLocaleString() + ' of ' + (meta.total||0).toLocaleString()
-                       : (meta.total||0).toLocaleString()) + ' rows · '
-                      + (meta.columns||[]).length + ' cols'
-                      + (meta.hidden && meta.hidden.length ? ' (+' + meta.hidden.length + ' hidden)' : '')"></span>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span class="card-meta duckdb-rows-meta" x-show="meta.table" x-cloak
+                x-text="(meta.q && meta.matched !== meta.total
+                         ? (meta.matched||0).toLocaleString() + ' of ' + (meta.total||0).toLocaleString()
+                         : (meta.total||0).toLocaleString()) + ' rows · '
+                        + visibleColumns().length + ' cols'
+                        + (hiddenCols.length ? ' (' + hiddenCols.length + ' hidden)' : '')"></span>
+          {# Columns menu — per-column visibility (checkbox = shown). Hidden
+             set is per-collection + persisted in the browser (localStorage). #}
+          <div class="duckdb-colmenu-wrap" x-show="meta.columns && meta.columns.length"
+               x-cloak @click.outside="showColMenu = false">
+            <button type="button" class="btn btn-ghost btn-tiny"
+                    @click="showColMenu = !showColMenu" title="Show / hide columns">
+              ⚏ Columns<span x-show="hiddenCols.length" x-text="' (' + hiddenCols.length + ')'"></span>
+            </button>
+            <div class="duckdb-colmenu" x-show="showColMenu" x-cloak>
+              <div class="duckdb-colmenu-head">
+                <span class="card-meta">Show columns</span>
+                <button type="button" class="btn btn-ghost btn-tiny"
+                        x-show="hiddenCols.length" @click="showAllCols()">show all</button>
+              </div>
+              <template x-for="col in (meta.columns || [])" :key="col">
+                <label class="duckdb-colmenu-item">
+                  <input type="checkbox" :checked="!isHidden(col)" @change="toggleHideCol(col)">
+                  <span class="mono" x-text="col"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+        </div>
       </div>
 
       {# Search bar — clean input, no prefix icon. Examples float right. #}
@@ -403,7 +468,7 @@
         <table class="data duckdb-table">
           <thead>
             <tr>
-              <template x-for="(col, ci) in meta.columns" :key="col">
+              <template x-for="(col, ci) in visibleColumns()" :key="col">
                 <th :class="(isPinned(col) ? 'pinned-col ' : '') + 'sortable-col' + (sort.col === col ? ' sort-active' : '')"
                     :data-col="col"
                     @click="cycleSort(col)"
@@ -418,6 +483,13 @@
                             @click.stop="togglePin(col)"
                             :title="isPinned(col) ? 'Unpin column' : 'Pin column (freeze during horizontal scroll)'"
                             type="button">📌</button>
+                    {# Hide this column (user-local; restore via the Columns
+                       menu in the pagination strip). @click.stop so it doesn't
+                       trigger the th's sort handler. #}
+                    <button class="pin-btn col-hide-btn"
+                            @click.stop="toggleHideCol(col)"
+                            title="Hide this column (restore via ‘Columns’)"
+                            type="button">✕</button>
                     <span class="th-label">
                       <span x-text="col"></span>
                       <span class="sort-indicator"
@@ -447,7 +519,7 @@
           <tbody>
             <template x-for="(row, i) in rows" :key="i">
               <tr>
-                <template x-for="(col, ci) in meta.columns" :key="col">
+                <template x-for="(col, ci) in visibleColumns()" :key="col">
                   <td :class="(isPinned(col) ? 'pinned-col ' : '') + 'copyable-cell'"
                       :data-col="col"
                       :title="formatCell(row[col]) + ' · click to copy'"
@@ -512,7 +584,7 @@
   {% endif %}
 
   <div>
-    <a class="btn btn-ghost" href="/hub">← Back to the hub home</a>
+    <a class="btn btn-ghost" href="/hub/sources">← Back to Sources</a>
   </div>
 
 </div>
@@ -522,10 +594,10 @@ function collectionRows(init) {
   return {
     name: init.name,
     rows: [],
-    meta: {},          // {columns, hidden, total, matched, page, pages, size, table, q, sort}
+    meta: {},          // {columns, hidden, cross_links, total, matched, page, pages, size, table, q, sort}
     stats: [],         // [{label, value}, ...]
     search: { enabled: false, columns: [], examples: [] },
-    q: '',
+    q: init.q || '',
     sort: { col: '', dir: '' },   // dir: '' | 'asc' | 'desc'
     pageSize: 50,
     jumpPage: 1,
@@ -539,6 +611,10 @@ function collectionRows(init) {
     // (preserves the legacy ``sticky-col`` behaviour) but can be unpinned.
     pinnedCols: [],
     _pinsInitialized: false,
+    // Columns the user hid for this collection. Persisted in localStorage
+    // (key per collection) so the choice survives reloads + pagination.
+    hiddenCols: [],
+    showColMenu: false,
 
     // Per-column render override (set via the in-header dropdown):
     //   auto    — try to JSON-parse strings that look like JSON; render
@@ -589,6 +665,17 @@ function collectionRows(init) {
         if (!this._pinsInitialized && Array.isArray(this.meta.columns) && this.meta.columns.length) {
           this.pinnedCols = [this.meta.columns[0]];
           this._pinsInitialized = true;
+        }
+        // Default-hide a bulky ``raw`` source-JSON column on first view —
+        // only when the user has no saved column preference yet. They can
+        // re-enable it from the ⚏ Columns menu and that choice persists.
+        if (!this._hiddenInitialized) {
+          this._hiddenInitialized = true;
+          let saved = null;
+          try { saved = localStorage.getItem(this._hideKey()); } catch (_) { /* no storage */ }
+          if (saved === null && Array.isArray(this.meta.columns)) {
+            this.hiddenCols = this.meta.columns.filter(c => String(c).toLowerCase() === 'raw');
+          }
         }
         this.jumpPage = j.page || 1;
         this.$nextTick(() => this._measurePins());
@@ -651,6 +738,33 @@ function collectionRows(init) {
       this.pinnedCols = this.isPinned(col)
         ? this.pinnedCols.filter(c => c !== col)
         : [...this.pinnedCols, col];
+      this.$nextTick(() => this._measurePins());
+    },
+    // ── Hide / show columns (user-local, persisted) ──
+    _hideKey() { return 'hub:hiddencols:' + this.name; },
+    _loadHidden() {
+      try {
+        const raw = localStorage.getItem(this._hideKey());
+        this.hiddenCols = raw ? JSON.parse(raw) : [];
+      } catch (_) { this.hiddenCols = []; }
+    },
+    _saveHidden() {
+      try { localStorage.setItem(this._hideKey(), JSON.stringify(this.hiddenCols)); } catch (_) {}
+    },
+    visibleColumns() {
+      return (this.meta.columns || []).filter(c => !this.hiddenCols.includes(c));
+    },
+    isHidden(col) { return this.hiddenCols.includes(col); },
+    toggleHideCol(col) {
+      this.hiddenCols = this.isHidden(col)
+        ? this.hiddenCols.filter(c => c !== col)
+        : [...this.hiddenCols, col];
+      this._saveHidden();
+      this.$nextTick(() => this._measurePins());
+    },
+    showAllCols() {
+      this.hiddenCols = [];
+      this._saveHidden();
       this.$nextTick(() => this._measurePins());
     },
     _measurePins() {
@@ -953,6 +1067,19 @@ function collectionRows(init) {
       // ``*_json`` columns as serialized strings so this is where they
       // become navigable structures.
       if (v === null || v === undefined) return '<span class="cell-null">—</span>';
+      // Cross-table link: a value in a cross-linked column becomes a link
+      // that jumps to the target collection with this value pre-filled in
+      // its search box (e.g. a zenodo community id → the communities table).
+      const xlinks = this.meta.cross_links || {};
+      if (col && xlinks[col] && typeof v !== 'object') {
+        const val = String(v);
+        if (val !== '') {
+          const target = xlinks[col];
+          const href = `/hub/c/${encodeURIComponent(target)}?q=${encodeURIComponent(val)}`;
+          const text = this.highlight(this.escapeHtml(val));
+          return `<a class="xlink" href="${href}" title="↪ jump to ${this.escapeHtml(target)} (search: ${this.escapeHtml(val)})">${text}<span class="xlink-arrow"> ↪</span></a>`;
+        }
+      }
       const t = (col && this.cellTypes[col]) || 'auto';
 
       if (t === 'text') {

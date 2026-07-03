@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Sources · Hub · Open Pulse{% endblock %}
+{% block heading %}Sources{% endblock %}
+{% block subheading %}
+  Every store the data plane indexes — counts per source, and the top
+  entities across the network. Open a source to browse its rows.
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 24px;">
+
+  {# ── Collection grid. Each tile is the primary click target into
+        /hub/c/<name>; a secondary ↗ link opens the upstream source. #}
+  <div>
+    <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;">
+      <div class="card-title">Indexed sources</div>
+      <span class="card-meta">point counts from gme-qdrant · refreshed every minute</span>
+    </div>
+    {# Lazy-loaded so the per-collection DuckDB counts don't block the
+       first paint. One fetch returns the whole ranked tile set as a
+       server-rendered fragment (the heat tiers need the global max across
+       all collections, so this can't be a per-tile fan-out). #}
+    <div x-data="hubSources()" x-init="load()">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 10px;">
+        <span class="hub-spinner"></span>
+        <span class="card-meta">counting entries across sources…</span>
+      </div>
+      <div x-show="!loading" x-html="html"></div>
+    </div>
+  </div>
+
+  {# ── Top across the network — leaderboards. Lazy-loaded so they don't
+        slow the first paint of the source grid. #}
+  <div>
+    <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;">
+      <div class="card-title">Top across the network</div>
+      <span class="card-meta">aggregated from Neo4j + Qdrant · cached for an hour in DuckDB</span>
+    </div>
+    <div class="grid-tiles" x-data>
+      {% for topic, msg in [
+        ('github_orgs', 'crunching org repo counts…'),
+        ('contributors', 'finding most-active contributors…'),
+        ('languages', 'sampling primary languages…'),
+        ('countries', 'sampling ROR countries…'),
+        ('repos_by_contributors', 'ranking repos by community…'),
+        ('publication_years', 'sampling Infoscience publication years…'),
+      ] %}
+        <div x-data="hubTopPanel('{{ topic }}')" x-init="load()">
+          <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 10px;">
+            <span class="hub-spinner"></span><span class="card-meta">{{ msg }}</span>
+          </div>
+          <div x-show="!loading" x-html="html"></div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .hub-spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    display: inline-block;
+    animation: hub-spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes hub-spin { to { transform: rotate(360deg); } }
+</style>
+<script>
+// Lazy-loaded Sources grid. One fetch returns the whole ranked tile
+// set as a server-rendered fragment (the heat tiers need the global
+// max across all collections, so this is one call, not per-tile). The
+// fragment itself renders the 'Qdrant unreachable' warn card when the
+// gather came back empty; a failed fetch degrades to a retry hint.
+function hubSources() {
+  return {
+    loading: true,
+    html: '',
+    async load() {
+      try {
+        const r = await fetch('/api/hub/collections', { credentials: 'include' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        this.html = (await r.text()).trim();
+      } catch (e) {
+        console.warn('hub sources failed:', e);
+        this.html =
+          '<div class="card tone-warn">' +
+          '<div class="card-title">Couldn’t load sources</div>' +
+          '<p style="margin: 6px 0 0;">The source counts failed to load. ' +
+          'Refresh to retry.</p></div>';
+      } finally {
+        this.loading = false;
+      }
+    },
+  };
+}
+
+// Lazy-loaded leaderboard panel for /api/hub/stats/<topic>. Each
+// instance fetches once on init and renders the returned HTML.
+function hubTopPanel(topic) {
+  return {
+    topic: topic,
+    loading: true,
+    html: '',
+    async load() {
+      try {
+        const r = await fetch(`/api/hub/stats/${this.topic}`, { credentials: 'include' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        this.html = (await r.text()).trim();
+      } catch (e) {
+        console.warn(`top stats ${this.topic} failed:`, e);
+        this.html = '';
+      } finally {
+        this.loading = false;
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

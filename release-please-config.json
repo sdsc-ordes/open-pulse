@@ -9,7 +9,10 @@
       "release-type": "python",
       "package-name": "open-pulse-science",
       "changelog-path": "CHANGELOG.md",
-      "skip-github-release": true
+      "skip-github-release": true,
+      "extra-files": [
+        { "type": "generic", "path": "src/open_pulse/__init__.py" }
+      ]
     }
   }
 }

@@ -32,6 +32,22 @@ class Fact:
     href: str = ""
     value_list: tuple[str, ...] = ()
     value_links: tuple[tuple[str, str], ...] = ()
+    badges: tuple[tuple[str, str, str], ...] = ()
+    """Rendered badge images — one ``(image_url, label, link_url)`` per badge.
+    The template renders each as ``<a href=link title=label><img src=image>``.
+    Built from a repo's structured badge predicates or a README's markdown
+    badges (see ``resolvers.base``)."""
+    source: str = ""
+    """Provenance tag driving a small source chip in the UI:
+    ``"rdf"`` (SPARQL / Oxigraph), ``"index"`` (GME payload via Qdrant),
+    ``"graph"`` (Neo4j). Empty for synthetic / audit facts."""
+
+    sources: tuple[str, ...] = ()
+    """All stores that corroborate this exact fact (same label + value),
+    in first-seen order — e.g. ``("rdf", "index")`` when SPARQL and the
+    Qdrant payload agree. Set by the harmonising merge in
+    :func:`resolvers.base.build_entity`; when empty the renderer falls
+    back to the single ``source`` tag above."""
 
 
 @dataclass(frozen=True)
@@ -50,6 +66,44 @@ class Neighbour:
     external_url: str = ""
     kind: str = ""
     source_type: str = "GitHub"
+
+    sources: tuple[str, ...] = ()
+    """All graph stores that assert this same edge (same relation +
+    label), in first-seen order — e.g. ``("Neo4j", "RDF")`` when both the
+    crawl graph and the RDF store agree. Set by the harmonising merge in
+    :func:`resolvers.base.build_entity`; when empty the renderer falls
+    back to the single ``source_type`` tag above."""
+
+    category: str = "other"
+    """Section the edge belongs to on the page — ``people`` (contributors /
+    authors), ``orgs`` (owners / affiliations), ``repos`` (forks / projects),
+    ``works`` (cited publications) or ``other``. Set by the merge so the
+    template can group related edges instead of showing one flat list."""
+
+    neo4j_rel: str = ""
+    """Raw Neo4j relationship type (``CONTRIBUTES_TO``, ``OWNS``, …) behind
+    this edge, shown as the tooltip on the Neo4j provenance chip."""
+
+    rdf_predicate: str = ""
+    """RDF property qname (``schema:author``, ``ownedBy``, …) behind this
+    edge, shown as the tooltip on the RDF provenance chip."""
+
+    orcid_url: str = ""
+    """ORCID iD of this person when the identity bridge matched a Neo4j
+    contributor (github) to an RDF author (ORCID) — rendered as an extra
+    ORCID logo-link beside the name. Set by ``knowledge.identity``."""
+
+    ror_url: str = ""
+    """ROR iD of this organisation (from a github org's ``unitOf``) — rendered
+    as an extra ROR logo-link beside the org name. Set by ``knowledge.identity``."""
+
+    contribution_count: int = 0
+    """For a contributor edge: their commit count to this repo (the RDF
+    ``contributionCount``). 0 when unknown. Set by ``knowledge.identity``."""
+
+    first_contribution: str = ""
+    last_contribution: str = ""
+    """``YYYY-MM-DD`` of the contributor's first / last commit to this repo."""
 
 
 @dataclass(frozen=True)

@@ -150,6 +150,12 @@ class Settings:
     ``HUB_LLM_API_KEY`` is empty (so the hub piggybacks on the
     extractor's existing EPFL inference credentials)."""
 
+    agent_llm_api_key: str
+    """Optional key dedicated to the interactive agent / hub assistants
+    (``HUB_AGENT_LLM_API_KEY``). When set it overrides ``llm_api_key`` for the
+    agent chat, so the agent can run on a separate / rate-limited RCP key from
+    the rest of the hub. A browser-supplied per-request key still wins over it."""
+
     llm_model: str
     """Model name passed to the chat endpoint."""
 
@@ -280,5 +286,6 @@ def _llm_settings() -> dict[str, str]:
     return {
         "llm_base_url": base_url.rstrip("/"),
         "llm_api_key": api_key,
+        "agent_llm_api_key": os.environ.get("HUB_AGENT_LLM_API_KEY", "").strip(),
         "llm_model": model,
     }

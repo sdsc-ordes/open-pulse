@@ -79,9 +79,9 @@ _DATA_ROOT = Path(os.environ.get("HUB_DATA_DIR_HOST", "/data"))
 
 _BACKING: dict[str, Backing] = {
     "github_repos": Backing(
-        db_path=_DATA_ROOT / "index/github/duckdb/github.duckdb",
+        db_path=_DATA_ROOT / "index/github_repos/duckdb/github_repos.duckdb",
         table="repos",
-        hidden_cols=("languages", "topics", "raw"),
+        hidden_cols=(),
         stats=(
             Stat("Total repositories", "SELECT COUNT(*) FROM repos"),
             Stat("Distinct owners", "SELECT COUNT(DISTINCT owner) FROM repos"),
@@ -296,6 +296,33 @@ _BACKING: dict[str, Backing] = {
 # across regional Qdrant collections; we point each to the full table
 # and let the search bar narrow it.
 _AUTO_TABLES: dict[str, tuple[Path, str]] = {
+    # GitHub split stores — people + orgs of the crawled ecosystem.
+    # (``github_repos`` has a hand-tuned Backing above.)
+    "github_users": (
+        _DATA_ROOT / "index/github_users/duckdb/github_users.duckdb",
+        "users",
+    ),
+    "github_organizations": (
+        _DATA_ROOT / "index/github_organizations/duckdb/github_organizations.duckdb",
+        "organizations",
+    ),
+    # Split HuggingFace stores (GME 3.0.0rc1 layout) — browsable row tables.
+    "huggingface_models": (
+        _DATA_ROOT / "index/huggingface_models/duckdb/huggingface_models.duckdb",
+        "models",
+    ),
+    "huggingface_datasets": (
+        _DATA_ROOT / "index/huggingface_datasets/duckdb/huggingface_datasets.duckdb",
+        "datasets",
+    ),
+    "huggingface_organizations": (
+        _DATA_ROOT / "index/huggingface_organizations/duckdb/huggingface_organizations.duckdb",
+        "organizations",
+    ),
+    "huggingface_spaces": (
+        _DATA_ROOT / "index/huggingface_spaces/duckdb/huggingface_spaces.duckdb",
+        "spaces",
+    ),
     # OpenAlex — shared by the generic "authors" / "concepts" / ...
     "authors": (
         _DATA_ROOT / "index/openalex/duckdb/openalex.duckdb",
@@ -473,6 +500,17 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
         "users",
     ),
+    # Renkulab membership joins — who belongs to which group / project.
+    # Surfaced directly (like the other N:M join tables) so the row
+    # browser can answer "members of group X" / "members of project Y".
+    "renkulab_group_members": (
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
+        "group_members",
+    ),
+    "renkulab_project_members": (
+        _DATA_ROOT / "index/renkulab/duckdb/renkulab.duckdb",
+        "project_members",
+    ),
     # ROR — same ``records`` table for every regional flavour; the
     # per-tile WHERE clause that turns ``ror_switzerland`` into the
     # 1.8k-row Swiss subset lives in ``_AUTO_FILTERS`` below.
@@ -543,6 +581,23 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
         _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
         "institutions",
     ),
+    # SwissUBase ``datasets`` is the per-study data-file inventory (the
+    # studies are the headline records; datasets are their deposited
+    # resources). ``study_persons`` / ``study_institutions`` are the N:M
+    # joins the comment above refers to — surfaced directly so the row
+    # browser can answer "which persons/institutions back study X".
+    "swissubase_datasets": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "datasets",
+    ),
+    "swissubase_study_persons": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "study_persons",
+    ),
+    "swissubase_study_institutions": (
+        _DATA_ROOT / "index/swissubase/duckdb/swissubase.duckdb",
+        "study_institutions",
+    ),
     # Zenodo — ``zenodo_records`` is hand-tuned in ``_BACKING`` above
     # (it joins ``record_communities`` to expose a per-record community
     # list). ``communities`` + ``creators`` are exposed here so the
@@ -575,6 +630,55 @@ _AUTO_TABLES: dict[str, tuple[Path, str]] = {
     "zenodo_record_communities": (
         _DATA_ROOT / "index/zenodo/duckdb/zenodo.duckdb",
         "record_communities",
+    ),
+    # DockerHub — container images.
+    "dockerhub": (
+        _DATA_ROOT / "index/dockerhub/duckdb/dockerhub.duckdb",
+        "images",
+    ),
+    # HuggingFace Daily Papers (arXiv-linked).
+    "huggingface_papers": (
+        _DATA_ROOT / "index/huggingface_papers/duckdb/huggingface_papers.duckdb",
+        "papers",
+    ),
+    # GitLab — one split store per (instance, entity). Each lives in its
+    # own DuckDB named after the collection; the headline table is the
+    # entity name (groups / projects / users).
+    "gitlab_epfl_groups": (
+        _DATA_ROOT / "index/gitlab_epfl_groups/duckdb/gitlab_epfl_groups.duckdb",
+        "groups",
+    ),
+    "gitlab_epfl_projects": (
+        _DATA_ROOT / "index/gitlab_epfl_projects/duckdb/gitlab_epfl_projects.duckdb",
+        "projects",
+    ),
+    "gitlab_epfl_users": (
+        _DATA_ROOT / "index/gitlab_epfl_users/duckdb/gitlab_epfl_users.duckdb",
+        "users",
+    ),
+    "gitlab_ethz_groups": (
+        _DATA_ROOT / "index/gitlab_ethz_groups/duckdb/gitlab_ethz_groups.duckdb",
+        "groups",
+    ),
+    "gitlab_ethz_projects": (
+        _DATA_ROOT / "index/gitlab_ethz_projects/duckdb/gitlab_ethz_projects.duckdb",
+        "projects",
+    ),
+    "gitlab_ethz_users": (
+        _DATA_ROOT / "index/gitlab_ethz_users/duckdb/gitlab_ethz_users.duckdb",
+        "users",
+    ),
+    "gitlab_datascience_groups": (
+        _DATA_ROOT / "index/gitlab_datascience_groups/duckdb/gitlab_datascience_groups.duckdb",
+        "groups",
+    ),
+    "gitlab_datascience_projects": (
+        _DATA_ROOT / "index/gitlab_datascience_projects/duckdb/gitlab_datascience_projects.duckdb",
+        "projects",
+    ),
+    "gitlab_datascience_users": (
+        _DATA_ROOT / "index/gitlab_datascience_users/duckdb/gitlab_datascience_users.duckdb",
+        "users",
     ),
 }
 
@@ -662,6 +766,7 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "swissubase_institutions": (
         "FORS", "Lausanne", "Bern", "Switzerland",
     ),
+    "swissubase_datasets": ("survey", "data", "wave", "panel"),
     # Zenodo
     "zenodo_records": ("dataset", "epfl", "10.5281", "machine learning"),
     "zenodo_communities": ("epfl", "swiss", "open", "research"),
@@ -669,6 +774,18 @@ _AUTO_SEARCH_EXAMPLES: dict[str, tuple[str, ...]] = {
     "zenodo_files": (".pdf", ".csv", ".zip", "dataset"),
     "zenodo_record_creators": ("first", "corresponding", "co-author", "1"),
     "zenodo_record_communities": ("epfl", "cern", "ethz", "openlab"),
+    # DockerHub / HuggingFace papers / GitLab
+    "dockerhub": ("library", "epfl", "python", "official"),
+    "huggingface_papers": ("transformer", "diffusion", "llm", "agent"),
+    "gitlab_epfl_groups": ("lab", "epfl", "research", "course"),
+    "gitlab_epfl_projects": ("python", "thesis", "data", "epfl"),
+    "gitlab_epfl_users": ("anna", "patrick", "müller", "martin"),
+    "gitlab_ethz_groups": ("eth", "institute", "lab", "course"),
+    "gitlab_ethz_projects": ("robotics", "thesis", "data", "eth"),
+    "gitlab_ethz_users": ("müller", "schmidt", "anna", "thomas"),
+    "gitlab_datascience_groups": ("sdsc", "renku", "research", "course"),
+    "gitlab_datascience_projects": ("renku", "machine learning", "data", "tutorial"),
+    "gitlab_datascience_users": ("sdsc", "alice", "patrick", "anna"),
 }
 
 
@@ -815,6 +932,29 @@ _AUTO_FILTERS: dict[str, str] = {
         "OR institute ILIKE '%ETH Zurich%' "
         "OR institute ILIKE '%ETHZ%'"
     ),
+}
+
+
+# Cross-table links: ``{source_collection: {column: target_collection}}``.
+# When a row in ``source_collection`` is rendered, cells in ``column`` become
+# clickable links to ``/hub/c/<target_collection>?q=<cell value>`` — i.e. they
+# jump to the target table with that value pre-filled in its search box. The
+# value must match one of the target collection's ``search_cols`` for the
+# pre-filter to land. Exposed to the row browser via ``list_rows`` → meta.
+_CROSS_LINKS: dict[str, dict[str, str]] = {
+    # Zenodo record → its community: click the community id, land on the
+    # communities table filtered to that community.
+    "zenodo_records": {
+        "primary_community_id": "communities",
+    },
+    # GitHub repo → its owner's people/org page in the index.
+    "github_repos": {
+        "owner": "github_users",
+    },
+    # GitHub org → the repos it owns (search github_repos by owner login).
+    "github_organizations": {
+        "login": "github_repos",
+    },
 }
 
 
@@ -965,6 +1105,28 @@ def row_count_for(collection: str) -> int | None:
         return None
 
 
+def fresh_row_count(collection: str) -> int | None:
+    """Uncached row count for a browsable collection.
+
+    Same backing resolution as :func:`row_count_for` — including the
+    ``.ro.duckdb`` snapshot preference and any ``select_sql`` filter — but
+    bypasses ``_COUNT_CACHE`` and re-runs ``COUNT(*)`` on every call. Used
+    by callers that sample the same collection over time (the overview's
+    60s growth chart), where the process-lifetime cache would otherwise
+    freeze the series at its first reading.
+    """
+    b = _BACKING.get(collection)
+    if b is None:
+        return None
+    try:
+        with _connect(b.db_path) as con:
+            n = con.execute(f"SELECT COUNT(*) FROM {_source_expr(b)}").fetchone()[0]
+        return int(n)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("fresh_row_count(%s) failed: %s", collection, exc)
+        return None
+
+
 def _json_safe(v: Any) -> Any:
     """Coerce a DuckDB cell value into something the JSON encoder can handle.
 
@@ -984,10 +1146,27 @@ def _json_safe(v: Any) -> Any:
     return str(v)
 
 
+def _snapshot_path(db_path: Path) -> Path:
+    """The GME-published read-only snapshot beside a live store.
+
+    ``…/openalex.duckdb`` → ``…/openalex.ro.duckdb`` (see
+    ``src/index/_snapshot.py`` in the git-metadata-extractor).
+    """
+    return db_path.with_name(db_path.stem + ".ro.duckdb")
+
+
 def _connect(db_path: Path) -> duckdb.DuckDBPyConnection:
-    if not db_path.is_file():
-        raise FileNotFoundError(f"DuckDB file missing: {db_path}")
-    return duckdb.connect(str(db_path), read_only=True)
+    # Prefer the GME-published read-only snapshot. The live ``.duckdb`` is
+    # held read-WRITE by the extractor, so opening it read-only from here
+    # fails with "Conflicting lock is held" (DuckDB allows N readers OR 1
+    # writer). The ``.ro.duckdb`` snapshot is a separate file the GME
+    # refreshes after each ingest — no contention. Fall back to the live
+    # file when no snapshot exists yet (fresh deploy / un-snapshotted store).
+    ro_path = _snapshot_path(db_path)
+    target = ro_path if ro_path.is_file() else db_path
+    if not target.is_file():
+        raise FileNotFoundError(f"DuckDB file missing: {target}")
+    return duckdb.connect(str(target), read_only=True)
 
 
 def _source_expr(b: Backing) -> str:
@@ -1149,9 +1328,12 @@ def _resolve_visible_cols(
         all_cols = [d[0] for d in (cur.description or [])]
     else:
         all_cols = [c[0] for c in con.execute(f'DESCRIBE "{b.table}"').fetchall()]
-    visible = [c for c in all_cols if c not in b.hidden_cols]
-    if not visible:
-        visible = all_cols
+    # Reflect ALL columns in the row browser (the row tables carry no
+    # high-dimensional vector columns — embeddings live in Qdrant / the
+    # ``chunks`` table — so showing every column is safe and is what the
+    # browser is expected to surface). ``hidden_cols`` is kept on the
+    # Backing for other consumers but no longer drops columns from view.
+    visible = list(all_cols)
     return all_cols, visible
 
 
@@ -1162,6 +1344,7 @@ def list_rows(
     size: int = DEFAULT_PAGE_SIZE,
     q: str = "",
     sort: str = "",
+    filters: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     """Return a paginated slice of the DuckDB table behind ``collection``.
 
@@ -1175,6 +1358,11 @@ def list_rows(
 
     ``sort`` is ``"col"`` (asc) or ``"col:desc"``. Invalid columns are
     silently ignored.
+
+    ``filters`` is an optional ``{column: value}`` map of exact (case-
+    insensitive) equality constraints, AND-combined with ``q``. Columns
+    not present in the table are silently ignored (validated against the
+    real schema, so the column name never reaches SQL unchecked).
     """
     b = _BACKING.get(collection)
     if b is None:
@@ -1184,12 +1372,39 @@ def list_rows(
     size = max(1, min(MAX_PAGE_SIZE, int(size or DEFAULT_PAGE_SIZE)))
     q = (q or "").strip()
     sort = (sort or "").strip()
-
-    where_sql, params_filter = _build_filter(b, q)
+    filters = filters or {}
     offset = (page - 1) * size
 
     src = _source_expr(b)
     with _connect(b.db_path) as con:
+        all_cols, visible_cols = _resolve_visible_cols(con, b)
+
+        where_sql, params_filter = _build_filter(b, q)
+        # AND-combine exact-match filters on validated columns. A list/tuple
+        # value becomes a case-insensitive ``IN (…)`` (OR within the facet);
+        # a scalar stays an ILIKE.
+        extra_clauses: list[str] = []
+        extra_params: list[Any] = []
+        for col, val in filters.items():
+            if col not in all_cols:
+                continue
+            if isinstance(val, (list, tuple, set)):
+                vals = [str(v).strip() for v in val if str(v).strip()]
+                if not vals:
+                    continue
+                placeholders = ", ".join("?" for _ in vals)
+                extra_clauses.append(
+                    f'lower(CAST("{col}" AS VARCHAR)) IN ({placeholders})'
+                )
+                extra_params.extend(v.lower() for v in vals)
+            elif str(val).strip():
+                extra_clauses.append(f'CAST("{col}" AS VARCHAR) ILIKE ?')
+                extra_params.append(str(val).strip())
+        if extra_clauses:
+            joiner = " AND " if where_sql else "WHERE "
+            where_sql = (where_sql or "") + joiner + " AND ".join(extra_clauses)
+            params_filter = [*params_filter, *extra_params]
+
         if where_sql:
             matched = int(
                 con.execute(
@@ -1201,7 +1416,6 @@ def list_rows(
         total = _row_count(b)
         pages = max(1, (matched + size - 1) // size)
 
-        all_cols, visible_cols = _resolve_visible_cols(con, b)
         col_list = ", ".join(f'"{c}"' for c in visible_cols)
         order_sql = _build_order(sort, visible_cols)
 
@@ -1220,6 +1434,7 @@ def list_rows(
         "columns": visible_cols,
         "all_columns": all_cols,
         "hidden": list(b.hidden_cols),
+        "cross_links": _CROSS_LINKS.get(collection, {}),
         "rows": rows_out,
         "page": page,
         "size": size,
@@ -1229,6 +1444,42 @@ def list_rows(
         "q": q,
         "sort": sort,
     }
+
+
+def rows_for_refs(
+    collection: str, id_col: str, refs: list[str]
+) -> dict[str, Any] | None:
+    """Fetch the rows of ``collection`` whose ``id_col`` matches one of
+    ``refs`` (case-insensitive), returned in the given ``refs`` order.
+
+    Used to hydrate a page of catalog items from an externally-computed id
+    list — e.g. the github repo refs a SPARQL graph-facet query resolves.
+    Returns ``{columns, rows}`` (rows as dicts) or ``None`` if the collection
+    isn't registered. The id list is deduped and capped so a single page can't
+    materialise an unbounded ``IN`` list.
+    """
+    b = _BACKING.get(collection)
+    if b is None or not refs:
+        return None
+    wanted = list(dict.fromkeys(refs))[:MAX_PAGE_SIZE]
+    src = _source_expr(b)
+    with _connect(b.db_path) as con:
+        _all_cols, visible_cols = _resolve_visible_cols(con, b)
+        if id_col not in visible_cols:
+            return {"columns": visible_cols, "rows": []}
+        col_list = ", ".join(f'"{c}"' for c in visible_cols)
+        placeholders = ", ".join("?" for _ in wanted)
+        rows = con.execute(
+            f"SELECT {col_list} FROM {src} "
+            f'WHERE lower(CAST("{id_col}" AS VARCHAR)) IN ({placeholders})',
+            [r.lower() for r in wanted],
+        ).fetchall()
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        rec = {c: _json_safe(v) for c, v in zip(visible_cols, row)}
+        by_id[str(rec.get(id_col, "")).lower()] = rec
+    ordered = [by_id[r.lower()] for r in wanted if r.lower() in by_id]
+    return {"columns": visible_cols, "rows": ordered}
 
 
 # Cap on how many rows a single ``/export`` call may return. Picked

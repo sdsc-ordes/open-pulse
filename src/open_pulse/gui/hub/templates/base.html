@@ -15,6 +15,11 @@
     <script>
       tailwind.config = { darkMode: ['selector', '[data-theme="dark"]'] };
     </script>
+    {# TomSelect — searchable multi-select used by the entity page's RDF
+       named-graph picker (select one or several graphs). Loaded before Alpine
+       (not deferred) so the entity page can init it synchronously. #}
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.css" />
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
     <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <link rel="stylesheet" href="/static/app.css" />
     <script>
@@ -42,6 +47,16 @@
         clear: () => { localStorage.removeItem(KEY); window.dispatchEvent(new Event('op-secrets-changed')); },
       };
     })();
+
+    // Shared LLM/agent preferences (set in Settings, used by every assistant:
+    // the agent chat + the Databases assistant). The key is sent as a header
+    // so the hub uses it upstream instead of its shared key; the model is the
+    // browser's preferred default. Both live in op:hub:secrets:v1.
+    window.opLlm = {
+      key:   () => window.opSecrets.get('rcp_api_key'),
+      model: () => window.opSecrets.get('llm_model'),
+      headers: () => { const k = window.opSecrets.get('rcp_api_key'); return k ? { 'X-OP-LLM-Key': k } : {}; },
+    };
     </script>
   </head>
   <body class="antialiased min-h-screen flex flex-col">
@@ -83,6 +98,20 @@
           </div>
         </template>
       </div>
+      {# Fixed attribution pinned to the right of the marquee — always visible;
+         the stats scroll behind it. Logos sit on white chips so the colour
+         marks read on both the dark and light marquee. #}
+      <div class="marquee-credit">
+        <span class="marquee-credit-label">A project developed by</span>
+        <a class="marquee-logo-chip" href="https://datascience.ch" target="_blank" rel="noopener"
+           title="Swiss Data Science Center">
+          <img src="/static/img/sdsc-logo.svg" alt="Swiss Data Science Center" />
+        </a>
+        <span class="marquee-credit-amp" aria-hidden="true">&amp;</span>
+        <a class="marquee-logo-chip" href="https://epfl.ch" target="_blank" rel="noopener" title="EPFL">
+          <img src="/static/img/epfl-logo.svg" alt="EPFL" />
+        </a>
+      </div>
     </div>
 
     <div class="flex flex-1">
@@ -101,13 +130,25 @@
              is the trends view (charts over time); the live snapshot moved
              to Admin → Status. The Ontology link goes off-host to the
              open-pulse-ontology docs (configurable via HUB_ONTOLOGY_URL). #}
-          {% set nav_explore = [
+          {# Canvas is intentionally hidden from the sidebar — the route is
+             still served at /canvas; re-add the tuple below to restore it:
+             ('/canvas', 'canvas', 'Canvas', 'M3 5h18v14H3z M7 9h2 M11 9h2 M15 9h2 M7 13h6 M7 17h10') #}
+          {# Role is resolved up-front so the nav can branch on it. Defaults to
+             "admin" for legacy single-password deploys with no reader role. #}
+          {% set _role = request.state.user_role if request.state and request.state.user_role else 'admin' %}
+          {% set _is_admin = _role == 'admin' %}
+          {% set _is_expert = _is_admin and not hub_read_only %}
+          {% set nav_explore_all = [
             ('/', 'overview', 'Overview', 'M3 17l4-6 5 4 4-7 5 9'),
             ('/hub', 'hub', 'Hub', 'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z'),
+            ('/hub/sources', 'sources', 'Sources', 'M3 7l9-4 9 4-9 4-9-4z M3 12l9 4 9-4 M3 17l9 4 9-4'),
             ('/databases', 'databases', 'Query', 'M4 7c0-2 4-3 8-3s8 1 8 3v10c0 2-4 3-8 3s-8-1-8-3z M4 7c0 2 4 3 8 3s8-1 8-3 M4 12c0 2 4 3 8 3s8-1 8-3'),
-            ('/canvas', 'canvas', 'Canvas', 'M3 5h18v14H3z M7 9h2 M11 9h2 M15 9h2 M7 13h6 M7 17h10'),
+            ('/agent', 'agent', 'Agent chat', 'M4 5h16v11H9l-5 4z M8 9.5h8 M8 12.5h5'),
             ('/chaoss', 'chaoss', 'CHAOSS metrics', 'M12 3v2 M12 19v2 M3 12h2 M19 12h2 M5.6 5.6l1.4 1.4 M17 17l1.4 1.4 M5.6 18.4l1.4-1.4 M17 7l1.4-1.4 M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z M12 11v3 M10.5 12.5h3'),
           ] %}
+          {# Readers land on the Hub (their `/` redirects there), so the
+             Overview metrics dashboard is dropped from their Explore nav. #}
+          {% set nav_explore = nav_explore_all if _is_admin else nav_explore_all[1:] %}
           {# Admin / operations — orchestration, observability, configuration.
              Status leads the admin block (was the old Overview tile view).
              GrimoireLab Projects sits with admin tools because it builds
@@ -122,11 +163,8 @@
                in the nav just keeps the UI honest.
 
              ``request.state.user_role`` is stamped by ``require_auth``
-             on every protected page. Default to "admin" for legacy
-             single-password deploys that pre-date the reader role. #}
-          {% set _role = request.state.user_role if request.state and request.state.user_role else 'admin' %}
-          {% set _is_admin = _role == 'admin' %}
-          {% set _is_expert = _is_admin and not hub_read_only %}
+             on every protected page; ``_role`` / ``_is_admin`` / ``_is_expert``
+             are resolved once above, next to ``nav_explore``. #}
           {% set nav_admin_basic = [
             ('/status', 'status', 'Status', 'M3 12l9-9 9 9M5 10v10h14V10'),
             ('/services', 'services', 'Services', 'M4 6h16M4 12h16M4 18h16'),
@@ -139,7 +177,22 @@
             ('/stack', 'stack', 'Stack', 'M3 5l9-3 9 3-9 3-9-3z M3 12l9 3 9-3 M3 19l9 3 9-3'),
             ('/settings', 'settings', 'Settings', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'),
           ] %}
-          {% set nav_admin = nav_admin_basic + nav_admin_expert if _is_expert else nav_admin_basic %}
+          {# Viewer (reader) settings panel — same /settings route, but the
+             page renders only the view-preference cards (RDF graph, theme,
+             backup) for non-admins. #}
+          {% set nav_viewer = [
+            ('/settings', 'settings', 'Settings', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'),
+          ] %}
+          {# Admins see the operator block (basic + expert); readers see only
+             a viewer Settings entry — the operator pages are require_admin and
+             404/403 to them anyway, so the nav matches the real access. #}
+          {% if _is_admin %}
+            {% set nav_admin = nav_admin_basic + nav_admin_expert if _is_expert else nav_admin_basic %}
+            {% set nav_admin_label = 'Admin' %}
+          {% else %}
+            {% set nav_admin = nav_viewer %}
+            {% set nav_admin_label = 'Preferences' %}
+          {% endif %}
 
           <div class="sidebar-group">
             <div class="sidebar-group-label">Explore</div>
@@ -189,7 +242,7 @@
           </div>
 
           <div class="sidebar-group sidebar-group-admin">
-            <div class="sidebar-group-label">Admin</div>
+            <div class="sidebar-group-label">{{ nav_admin_label }}</div>
             {% for href, key, label, icon in nav_admin %}
               <a href="{{ href }}" class="sidebar-link {% if page == key %}is-active{% endif %}">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24" aria-hidden="true">
@@ -212,7 +265,7 @@
         </div>
       </aside>
 
-      <main class="main">
+      <main class="main main-{{ page }}">
         {# .page-chrome is the sticky strip under the marquee that
            contains the page heading + an optional breadcrumb. They
            scroll as a single block so the breadcrumb always sits

@@ -32,7 +32,22 @@
    the rendered body fragment swaps in over the spinner. The lazy
    backlinks panel below the body fetches independently after the
    entity has rendered, so a slow Qdrant doesn't pin the main load. #}
-<div x-data='hubStream({{ ref_payload | tojson }})' x-init="connect()" style="position: relative; display: flex; flex-direction: column; gap: 16px;">
+<div x-data='hubStream({{ ref_payload | tojson }})' x-init="start()" style="position: relative; display: flex; flex-direction: column; gap: 16px;">
+
+  {# Inline RDF named-graph selector (TomSelect). Pick one *or several* named
+     graphs to scope the descriptive facts to (relationships always union
+     across graphs); re-resolves the page live. Shares the per-session
+     ``rdf_graph`` setting with Settings. Hidden when the store has no graphs.
+     TomSelect owns the <select>, so we populate + init it in JS rather than
+     binding it with Alpine. #}
+  <div x-show="graphs.length" x-cloak class="entity-graphbar">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="6" cy="6" r="2.4"/><circle cx="18" cy="9" r="2.4"/><circle cx="9" cy="18" r="2.4"/><path d="M7.7 7.4 16 8.6 M8 16.2 16.5 10.6" stroke-linecap="round"/></svg>
+    <span class="card-meta" style="font-weight:600;">RDF graph</span>
+    <select class="entity-graphsel" x-ref="graphsel" multiple placeholder="Default · all graphs"></select>
+    <span x-show="sel.length" x-cloak class="card-meta" style="opacity:.7; font-size:11px;">
+      facts scoped to <span x-text="sel.length"></span> graph<span x-show="sel.length>1">s</span> · relations span all
+    </span>
+  </div>
 
   <div x-show="!done" class="card" style="display: flex; flex-direction: column; gap: 12px;">
     <div style="display: flex; align-items: center; gap: 12px;">
@@ -62,11 +77,38 @@
      returned no data — otherwise the parent flex column adds a 16px
      gap around an empty <div>, producing the "phantom newlines" the
      entity page used to grow when Activity / Backlinks came up empty. #}
+  {# Lazy panels tile into a two-column masonry below the body —
+     derived works, related orgs, main developers, activity statistics.
+     Each fetches its own endpoint after the entity body lands. #}
+  <div class="entity-panels">
+
+  {# NB: "Present in" / availability now renders at the TOP of the entity
+     body (under the description, beside the metric tiles), computed
+     synchronously in the resolve-stream — it is no longer a trailing
+     lazy panel here. See hub/_entity_body.html + routes/hub.py. #}
+
+  {# CHAOSS health — compact headline metrics for a software repo, with a
+     link to the full per-repo dashboard. The endpoint returns an empty body
+     for non-repo URLs, so the slot hides itself there. #}
+  <template x-if="done && found">
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "chaoss", "📊 CHAOSS health")' x-init="load()"
+         x-show="loading || html.length > 0">
+      <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
+        <span class="hub-spinner" aria-hidden="true"></span>
+        <div>
+          <div class="card-title" style="margin-bottom: 2px;" x-text="title"></div>
+          <div style="font-size: 14px;" class="card-meta">computing health metrics…</div>
+        </div>
+      </div>
+      <div x-show="!loading && html.length > 0" x-html="html"></div>
+    </div>
+  </template>
+
   {# Non-github entities — surface the GitHub repos they reference.
      Each item navigates to the github.com hub page, where Neo4j
      neighbours + OpenSearch activity show up. #}
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "connected", "Connected on GitHub")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "connected", "🔗 Connected on GitHub")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -83,7 +125,7 @@
      across all connected GitHub repos. Lights up only when at least
      one of those repos is indexed in Neo4j. #}
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "community", "Community behind the cited code")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "community", "👥 Main developers")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -97,7 +139,7 @@
   </template>
 
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "activity", "Activity")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "activity", "📈 Activity")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -111,7 +153,7 @@
   </template>
 
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "related", "Related")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "related", "🧩 Related")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -125,7 +167,7 @@
   </template>
 
   <template x-if="done && found">
-    <div x-data='hubPanel({{ ref_payload | tojson }}, "backlinks", "Referenced from")' x-init="load()"
+    <div x-data='hubPanel({{ ref_payload | tojson }}, "backlinks", "📄 Derived works &amp; references")' x-init="load()"
          x-show="loading || html.length > 0">
       <div x-show="loading" class="card" style="display: flex; align-items: center; gap: 12px;">
         <span class="hub-spinner" aria-hidden="true"></span>
@@ -137,6 +179,8 @@
       <div x-show="!loading && html.length > 0" x-html="html"></div>
     </div>
   </template>
+
+  </div>{# /.entity-panels #}
 
   <div x-show="error" class="card tone-bad" x-cloak>
     <div class="card-title">Stream error</div>
@@ -170,7 +214,36 @@
     animation: hub-spin 0.8s linear infinite;
     flex-shrink: 0;
   }
+  /* Inline RDF graph selector bar. */
+  .entity-graphbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface-sunk); color: var(--fg-muted); }
+  /* TomSelect graph picker — themed to match the hub surfaces. */
+  .entity-graphbar .ts-wrapper { flex: 1; min-width: 240px; max-width: 620px; margin: 0; }
+  .entity-graphbar .ts-control { background: var(--surface); border: 1px solid var(--border);
+    color: var(--fg); border-radius: 8px; min-height: 30px; font-size: 12.5px;
+    padding: 2px 6px; box-shadow: none; }
+  .entity-graphbar .ts-control.focus { border-color: var(--accent); box-shadow: none; }
+  .entity-graphbar .ts-control > input { color: var(--fg); }
+  .entity-graphbar .ts-control .item { background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+    color: var(--fg); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-radius: 6px; font-size: 11.5px; padding: 1px 6px; }
+  .entity-graphbar .ts-control .item .remove { border-left-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .ts-dropdown { background: var(--surface); border: 1px solid var(--border-strong, var(--border));
+    color: var(--fg); border-radius: 8px; font-size: 12.5px; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
+  .ts-dropdown .option { color: var(--fg-muted); }
+  .ts-dropdown .option.active { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); color: var(--fg); }
   @keyframes hub-spin { to { transform: rotate(360deg); } }
+
+  /* Lazy panels tile into a balanced two-column masonry on wide
+     screens; each card stays whole (no mid-card column break). */
+  .entity-panels { column-gap: 16px; }
+  @media (min-width: 880px) { .entity-panels { column-count: 2; } }
+  .entity-panels > * { break-inside: avoid; }
+  .entity-panels > div { margin-bottom: 16px; }
+  /* The body's own panel cards already carry the title emoji; make the
+     lazy-panel headings match the body card-title weight. */
+  .entity-panels .card-title { display: flex; align-items: center; gap: 6px; }
 </style>
 
 <script>
@@ -183,11 +256,68 @@ function hubStream(ref) {
     done: false,
     found: false,
     error: '',
+    graphs: [],
+    sel: [],          // selected graph IRIs (one or several)
+    _es: null,
+    _ts: null,        // the TomSelect instance
+    // Entry point — read the pinned graph(s), load the list, init the picker,
+    // then resolve.
+    async start() {
+      try {
+        const raw = (window.opSecrets && window.opSecrets.get('rdf_graph')) || '';
+        this.sel = raw.split(',').map(s => s.trim()).filter(Boolean);
+      } catch (_) { this.sel = []; }
+      // Open the resolve stream IMMEDIATELY — don't await the graph list.
+      // The picker is optional chrome; loading it in parallel keeps it from
+      // delaying first paint (it used to block the whole page).
+      this.connect();
+      this.loadGraphs().then(() => this.initGraphSelect());
+    },
+    async loadGraphs() {
+      try {
+        const r = await fetch('/api/hub/graphs', { credentials: 'include' });
+        const j = await r.json();
+        this.graphs = j.graphs || [];
+      } catch (_) { this.graphs = []; }
+    },
+    // Build the TomSelect multi-select from the loaded graphs.
+    initGraphSelect() {
+      const el = this.$refs.graphsel;
+      if (!el || !this.graphs.length || typeof TomSelect === 'undefined' || this._ts) return;
+      const options = this.graphs.map(g => ({
+        value: g.iri,
+        label: g.count ? `${g.label} · ${g.count.toLocaleString()} triples` : g.label,
+      }));
+      this._ts = new TomSelect(el, {
+        options, items: this.sel,
+        valueField: 'value', labelField: 'label', searchField: 'label',
+        plugins: ['remove_button'], maxItems: null, closeAfterSelect: false,
+        placeholder: 'Default · all graphs',
+        onChange: (vals) => this.changeGraph(Array.isArray(vals) ? vals : (vals ? [vals] : [])),
+      });
+    },
+    // Pin the chosen graph(s) (shared with Settings via opSecrets) + re-resolve.
+    changeGraph(vals) {
+      const next = (vals || []).filter(Boolean);
+      if (next.join(',') === this.sel.join(',')) return;  // no-op (e.g. init echo)
+      this.sel = next;
+      try { window.opSecrets && window.opSecrets.set('rdf_graph', this.sel.join(',')); } catch (_) {}
+      if (this._es) { try { this._es.close(); } catch (_) {} this._es = null; }
+      this.done = false; this.found = false; this.result = '';
+      this.error = ''; this.log = []; this.status = 're-resolving…';
+      this.connect();
+    },
     connect() {
-      const url = `/api/hub/resolve-stream/${ref.encoded_path}`;
+      let url = `/api/hub/resolve-stream/${ref.encoded_path}`;
+      // Pinned RDF graph (Settings → "RDF graph"). Sent as a query param
+      // because EventSource can't set custom headers. Empty → store default.
+      let graph = '';
+      try { graph = (window.opSecrets && window.opSecrets.get('rdf_graph')) || ''; } catch (_) {}
+      if (graph) url += (url.includes('?') ? '&' : '?') + 'graph=' + encodeURIComponent(graph);
       // `withCredentials` so the session cookie travels — otherwise
       // a non-public hub would 401 the EventSource.
       const es = new EventSource(url, { withCredentials: true });
+      this._es = es;
       es.addEventListener('status', (e) => {
         this.log.push(e.data);
         this.status = e.data;
@@ -230,10 +360,36 @@ function hubStream(ref) {
           }
         }
         this.done = true;
+        // The Summary narrative streams in a follow-up `narrative` event,
+        // so keep the connection open when one is pending; otherwise close
+        // now. (Body is already on screen either way.)
+        if (!parsed || !parsed.narrative_pending) es.close();
+      });
+      // Deferred LLM summary — arrives after the body so first paint isn't
+      // blocked on the agent. Fill the placeholder slot in the rendered body;
+      // drop the Summary card if the agent returned nothing.
+      es.addEventListener('narrative', (e) => {
+        const txt = (e.data || '').trim();
+        const fill = (tries) => {
+          const slot = document.getElementById('entity-summary-text');
+          if (!slot) { if (tries > 0) setTimeout(() => fill(tries - 1), 60); return; }
+          if (txt) {
+            slot.style.display = '';
+            slot.style.gap = '';
+            slot.textContent = txt;
+          } else {
+            const card = document.getElementById('entity-summary-card');
+            if (card) card.remove();
+          }
+        };
+        this.$nextTick(() => fill(10));
         es.close();
       });
       es.addEventListener('error', () => {
-        this.error = 'Connection to the stream was lost. Reload to retry.';
+        // A normal end-of-stream close fires 'error' too. Once the body is
+        // rendered there's nothing to retry — a missing narrative just leaves
+        // its placeholder, so only surface an error before first paint.
+        if (!this.done) this.error = 'Connection to the stream was lost. Reload to retry.';
         es.close();
       });
     },

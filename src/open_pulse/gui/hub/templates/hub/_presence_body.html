@@ -1,0 +1,58 @@
+{# "Present in" panel — which data-plane stores hold this entity. Served
+   by GET /api/hub/presence/{ref}. Always renders four rows for a known
+   host so absence is stated as plainly as presence. #}
+{% if rows %}
+<style>
+  .presence-list { list-style: none; margin: 8px 0 0; padding: 0;
+    display: flex; flex-direction: column; gap: 2px; }
+  .presence-row { display: flex; gap: 10px; align-items: flex-start;
+    padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .presence-row:last-child { border-bottom: 0; }
+  .presence-mark { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; margin-top: 1px; }
+  .presence-row.is-present .presence-mark {
+    background: color-mix(in srgb, #22c55e 22%, var(--surface)); color: #4ade80; }
+  .presence-row.is-absent .presence-mark {
+    background: var(--surface-sunk); color: var(--fg-faint); }
+  .presence-row.is-absent { opacity: .62; }
+  .presence-main { min-width: 0; flex: 1; }
+  .presence-label { font-size: 13px; font-weight: 600; color: var(--fg);
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .presence-summary { font-size: 11.5px; font-weight: 400; color: var(--fg-muted); }
+  .presence-items { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 5px; }
+  .presence-chip { font-size: 10.5px; padding: 1px 7px; border-radius: 8px;
+    background: var(--surface-sunk); color: var(--fg-muted);
+    max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .presence-more { font-size: 10.5px; color: var(--fg-faint); align-self: center; }
+</style>
+<div class="card">
+  <div class="card-title">📍 Present in</div>
+  <div class="card-meta" style="margin: 4px 0 0;">
+    Where this entity lives across the data plane.
+  </div>
+  <ul class="presence-list">
+    {% for r in rows %}
+      <li class="presence-row {{ 'is-present' if r.present else 'is-absent' }}">
+        <span class="presence-mark">{{ '✓' if r.present else '✕' }}</span>
+        <div class="presence-main">
+          <div class="presence-label">
+            {{ r.label }}<span class="presence-summary">{{ r.summary }}</span>
+          </div>
+          {% set entries = r['items'] %}
+          {% if entries %}
+            <div class="presence-items">
+              {% for it in entries[:6] %}
+                <span class="presence-chip" title="{{ it.detail }}">{{ it.label }}</span>
+              {% endfor %}
+              {% if entries|length > 6 %}
+                <span class="presence-more">+{{ entries|length - 6 }} more</span>
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
