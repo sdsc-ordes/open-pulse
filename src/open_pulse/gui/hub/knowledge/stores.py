@@ -150,24 +150,24 @@ def sparql_select(query: str) -> list[dict[str, Any]]:
 
 
 def list_named_graphs() -> list[dict[str, Any]]:
-    """Named graphs in the SPARQL store, with triple counts (largest first).
+    """Named graphs in the SPARQL store.
 
     Powers the hub's graph picker. Returns ``[{"iri", "count"}, ...]`` or an
-    empty list when the store is unreachable."""
-    rows = sparql_select(
-        "SELECT ?g (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } } "
-        "GROUP BY ?g ORDER BY DESC(?n)"
-    )
+    empty list when the store is unreachable. ``count`` is always 0: the
+    empty group pattern ``GRAPH ?g {}`` enumerates each graph once *without*
+    scanning its triples, so it returns in milliseconds. An exact per-graph
+    ``COUNT(*)`` is O(all triples) and reliably times out on a large store —
+    which previously left the picker empty and stalled page load while the
+    client waited on it."""
+    rows = sparql_select("SELECT ?g WHERE { GRAPH ?g {} }")
     out: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for r in rows:
         iri = r.get("g", {}).get("value", "")
-        if not iri:
+        if not iri or iri in seen:
             continue
-        try:
-            n = int(r.get("n", {}).get("value") or 0)
-        except (TypeError, ValueError):
-            n = 0
-        out.append({"iri": iri, "count": n})
+        seen.add(iri)
+        out.append({"iri": iri, "count": 0})
     return out
 
 

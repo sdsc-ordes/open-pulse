@@ -17,7 +17,7 @@ from typing import Any
 
 import duckdb
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from ..auth import get_settings, require_auth
 from ..db_examples import by_engine as db_examples_by_engine
@@ -216,9 +216,15 @@ async def sparql_query(
 
 @router.post("/cypher/query", dependencies=[Depends(require_auth)])
 def cypher_query(
+    request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    """Run a Cypher statement against Neo4j and return result rows."""
+    """Run a Cypher statement against Neo4j and return result rows.
+
+    Admins get the full console (reads + writes). Readers (and the global
+    HUB_READONLY switch) run inside a Neo4j READ transaction, so any write
+    clause is rejected server-side — the graph stays immutable for them.
+    """
     settings = get_settings()
     query = (payload.get("query") or "").strip()
     if not query:
@@ -238,16 +244,43 @@ def cypher_query(
     except ImportError as e:  # pragma: no cover - hub image bundles it
         raise HTTPException(status_code=500, detail=f"neo4j driver missing: {e}") from e
 
+    # Only admins (and only when the hub isn't globally read-only) may run
+    # write Cypher. Everyone else runs in a read transaction Neo4j refuses to
+    # write through.
+    is_admin = (
+        getattr(request.state, "user_role", None) == "admin"
+        and not settings.read_only
+    )
+
+    def _read_tx(tx: Any) -> tuple[list[str], list[list[Any]]]:
+        res = tx.run(query)
+        ks = list(res.keys())
+        return ks, [[rec.get(k) for k in ks] for rec in res]
+
     try:
         driver = GraphDatabase.driver(settings.neo4j_url, auth=(user, pw))
         with driver.session() as s:
-            result = s.run(query)
-            keys = list(result.keys())
-            rows = [[record.get(k) for k in keys] for record in result]
+            if is_admin:
+                result = s.run(query)
+                keys = list(result.keys())
+                rows = [[record.get(k) for k in keys] for record in result]
+            else:
+                keys, rows = s.execute_read(_read_tx)
         driver.close()
     except Exception as e:
         _log_history("cypher", query, row_count=None, error=str(e))
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        # A reader's write attempt surfaces as a Neo4j access-mode error;
+        # return a clear 403 instead of a cryptic 400.
+        msg = str(e)
+        if not is_admin and "write" in msg.lower():
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Read-only access: write Cypher (CREATE / MERGE / DELETE / "
+                    "SET) is not permitted for this account."
+                ),
+            ) from e
+        raise HTTPException(status_code=400, detail=msg) from e
 
     _log_history("cypher", query, row_count=len(rows), error=None)
     return {
