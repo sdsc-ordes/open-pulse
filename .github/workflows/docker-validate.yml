@@ -38,7 +38,7 @@ jobs:
           - "-f infra/open-pulse-stack/docker-compose.yml -f infra/open-pulse-stack/docker-compose.grimoirelab.yml"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Validate Compose manifests
         # The compose files use ${VAR:?error} interpolation for required
