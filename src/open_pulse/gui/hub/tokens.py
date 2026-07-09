@@ -18,11 +18,18 @@ import hashlib
 import json
 import secrets
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .config import load_settings
 
 _SETTINGS = load_settings()
+
+# Detailed activity is kept for this many days; older rows are rolled up into
+# per-token totals (see ``prune_old``) and deleted. Pruning is triggered off
+# the request path at most once a day per process via this in-memory guard.
+_RETENTION_DAYS = 90
+_last_prune: datetime | None = None
 
 
 def _db_path() -> str:
@@ -50,6 +57,11 @@ def _conn() -> sqlite3.Connection:
             kind      TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_token_access_tid ON token_access(token_id, id);
+        CREATE TABLE IF NOT EXISTS token_rollup (
+            token_id         INTEGER PRIMARY KEY,
+            archived_calls   INTEGER NOT NULL DEFAULT 0,
+            archived_queries INTEGER NOT NULL DEFAULT 0
+        );
         """
     )
     # Migration: per-token data scope (Phase 1 = named-graph allow-list). JSON:
@@ -203,6 +215,68 @@ def log_access(token_id: int, method: str, path: str) -> None:
             conn.close()
     except sqlite3.Error:
         pass
+    _maybe_prune()
+
+
+def _maybe_prune() -> None:
+    """Run ``prune_old`` at most once per 24h per process, off the request
+    path. First call after a (re)start always prunes. Never raises."""
+    global _last_prune
+    now = datetime.now(timezone.utc)
+    if _last_prune is not None and now - _last_prune < timedelta(hours=24):
+        return
+    _last_prune = now
+    try:
+        prune_old(_RETENTION_DAYS)
+    except sqlite3.Error:
+        pass
+
+
+def prune_old(days: int = _RETENTION_DAYS) -> dict[str, int]:
+    """Roll up then delete activity older than ``days``.
+
+    Detailed rows (``token_access`` calls and token-tagged ``query_history``
+    queries) beyond the window are counted into ``token_rollup`` — so a token's
+    lifetime call/query totals survive — and then removed. Untagged console
+    history (admin/env-reader, ``token_id IS NULL``) is simply trimmed to the
+    same window; there is no token to attribute it to. Returns the number of
+    rows deleted from each table."""
+    cutoff = (f"-{int(days)} days",)
+    conn = _conn()
+    try:
+        conn.execute(
+            "INSERT INTO token_rollup(token_id, archived_calls) "
+            "SELECT token_id, COUNT(*) FROM token_access "
+            "WHERE ts < datetime('now', ?) GROUP BY token_id "
+            "ON CONFLICT(token_id) DO UPDATE SET "
+            "archived_calls = archived_calls + excluded.archived_calls",
+            cutoff,
+        )
+        calls = conn.execute(
+            "DELETE FROM token_access WHERE ts < datetime('now', ?)", cutoff
+        ).rowcount
+        queries = 0
+        try:
+            conn.execute(
+                "INSERT INTO token_rollup(token_id, archived_queries) "
+                "SELECT token_id, COUNT(*) FROM query_history "
+                "WHERE token_id IS NOT NULL AND ran_at < datetime('now', ?) "
+                "GROUP BY token_id "
+                "ON CONFLICT(token_id) DO UPDATE SET "
+                "archived_queries = archived_queries + excluded.archived_queries",
+                cutoff,
+            )
+            queries = conn.execute(
+                "DELETE FROM query_history WHERE ran_at < datetime('now', ?)",
+                cutoff,
+            ).rowcount
+        except sqlite3.OperationalError:
+            # query_history is created lazily on the first console call.
+            pass
+        conn.commit()
+        return {"token_access": calls, "query_history": queries}
+    finally:
+        conn.close()
 
 
 # ── reads (admin panel) ────────────────────────────────────────────────────
@@ -263,6 +337,23 @@ def token_activity(token_id: int, limit: int = 60) -> dict[str, Any]:
             ]
         except sqlite3.OperationalError:
             queries = []
-        return {"recent": recent, "by_kind": by_kind, "queries": queries}
+        # Totals for detail already pruned (older than the retention window).
+        row = conn.execute(
+            "SELECT archived_calls, archived_queries FROM token_rollup "
+            "WHERE token_id = ?",
+            (token_id,),
+        ).fetchone()
+        archived = (
+            {"calls": row["archived_calls"], "queries": row["archived_queries"]}
+            if row
+            else {"calls": 0, "queries": 0}
+        )
+        return {
+            "recent": recent,
+            "by_kind": by_kind,
+            "queries": queries,
+            "retention_days": _RETENTION_DAYS,
+            "archived": archived,
+        }
     finally:
         conn.close()

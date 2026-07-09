@@ -126,6 +126,12 @@
         </template>
         <span class="card-meta" x-show="!(activity.by_kind||[]).length">No calls recorded yet.</span>
       </div>
+      <p class="card-meta" x-show="activity.archived && (activity.archived.calls || activity.archived.queries)"
+         style="margin:-4px 0 10px;">
+        Detail kept for the last <span x-text="activity.retention_days || 90"></span> days.
+        Earlier, summarized: <span x-text="(activity.archived||{}).calls || 0"></span> calls ·
+        <span x-text="(activity.archived||{}).queries || 0"></span> queries.
+      </p>
       <table class="data" x-show="(activity.recent||[]).length">
         <thead><tr><th style="width:150px;">When</th><th style="width:64px;">Method</th><th style="width:90px;">Kind</th><th>Path</th></tr></thead>
         <tbody>
