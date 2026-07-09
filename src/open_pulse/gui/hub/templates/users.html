@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block heading %}Users{% endblock %}
+{% block subheading %}Reader API tokens — create, scope to named graphs, revoke, and see what each token calls and when (no IP, just activity).{% endblock %}
+
+{% block content %}
+<div x-data="usersPanel()" x-init="load()" class="space-y-4">
+
+  <!-- Create -->
+  <div class="card">
+    <div class="card-title">Create a reader token</div>
+    <p class="card-meta mt-1">
+      A read-only credential (browse + read-only queries, no operator pages, no writes).
+      Optionally <strong>scope</strong> it to specific RDF named graphs — a scoped
+      token only ever reads those (enforced at the store). The secret is shown
+      <strong>once</strong>.
+    </p>
+    <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+      <input class="key-input" style="flex:1; min-width:220px;"
+             placeholder="Label (e.g. webkit-prod, partner-readonly)"
+             x-model="newLabel" @keydown.enter="create()">
+      <button class="btn btn-ghost" @click="pickGraphs = !pickGraphs"
+              x-text="pickGraphs ? 'Full access' : 'Scope to graphs…'"></button>
+      <button class="btn btn-primary" @click="create()" :disabled="!newLabel.trim() || busy">Create token</button>
+    </div>
+
+    <template x-if="pickGraphs">
+      <div style="margin-top:10px; padding:10px; background:var(--surface-sunk); border-radius:8px;">
+        <div class="card-meta" style="margin-bottom:6px;">Allowed named graphs (none checked = full access):</div>
+        <div style="display:flex; flex-direction:column; gap:4px;">
+          <template x-for="g in availableGraphs" :key="g.iri">
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+              <input type="checkbox" :value="g.iri" x-model="newGraphs">
+              <span x-text="g.label"></span>
+            </label>
+          </template>
+          <span class="card-meta" x-show="!availableGraphs.length">No named graphs found in the store.</span>
+        </div>
+      </div>
+    </template>
+    <p class="card-meta" style="margin-top:8px;" x-text="status"></p>
+
+    <template x-if="created">
+      <div class="card tone-info" style="margin-top:12px;">
+        <div class="card-title">🔑 New token for “<span x-text="created.label"></span>” — copy it now</div>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+          <code class="mono" style="flex:1; word-break:break-all; padding:8px 10px; background:var(--surface-sunk); border-radius:6px;" x-text="created.token"></code>
+          <button class="btn" @click="copy(created.token)">Copy</button>
+          <button class="btn btn-ghost" @click="created=null">Dismiss</button>
+        </div>
+        <p class="card-meta" style="margin-top:6px;">Not stored — only its hash is kept. Lost it? Revoke and create a new one.</p>
+      </div>
+    </template>
+  </div>
+
+  <!-- Tokens table -->
+  <div class="card" style="padding:0; overflow:hidden;">
+    <table class="data">
+      <thead>
+        <tr>
+          <th style="width:22%;">Label</th>
+          <th>Status</th>
+          <th>Scope</th>
+          <th>Last seen</th>
+          <th style="text-align:right;">Calls</th>
+          <th style="width:230px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="t in tokens" :key="t.id">
+          <tr :style="t.revoked_at ? 'opacity:.55' : ''">
+            <td>
+              <span class="font-semibold" x-text="t.label"></span>
+              <span class="card-meta" style="margin-left:6px;">#<span x-text="t.id"></span></span>
+            </td>
+            <td><span class="pill" :class="t.revoked_at ? 'pill-bad' : 'pill-ok'" x-text="t.revoked_at ? 'revoked' : 'active'"></span></td>
+            <td>
+              <span class="pill pill-info" x-show="!(t.scoped_graphs||[]).length">all graphs</span>
+              <span class="pill" x-show="(t.scoped_graphs||[]).length"
+                    :title="(t.scoped_graphs||[]).map(g=>g.split('/graph/').pop()).join(', ')">
+                <span x-text="(t.scoped_graphs||[]).length"></span> graph<span x-show="(t.scoped_graphs||[]).length!==1">s</span>
+              </span>
+            </td>
+            <td class="card-meta" x-text="t.last_seen ? t.last_seen.replace('T',' ').slice(0,16) : '—'"></td>
+            <td style="text-align:right;" x-text="t.calls || 0"></td>
+            <td>
+              <button class="btn btn-ghost" x-show="!t.revoked_at" @click="editScope(t)">Scope</button>
+              <button class="btn btn-ghost" @click="toggleActivity(t.id)" x-text="expandedId===t.id ? 'Hide' : 'Activity'"></button>
+              <button class="btn btn-danger" x-show="!t.revoked_at" @click="revoke(t)">Revoke</button>
+            </td>
+          </tr>
+        </template>
+        <template x-if="!tokens.length">
+          <tr><td colspan="6" class="card-meta" style="padding:18px;">No reader tokens yet — create one above.</td></tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Scope editor -->
+  <template x-if="scopeEditId">
+    <div class="card">
+      <div class="card-title">Scope — token #<span x-text="scopeEditId"></span></div>
+      <div class="card-meta mt-1">Check the named graphs this token may read. None checked = full access.</div>
+      <div style="display:flex; flex-direction:column; gap:4px; margin:10px 0;">
+        <template x-for="g in availableGraphs" :key="g.iri">
+          <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+            <input type="checkbox" :value="g.iri" x-model="scopeGraphs">
+            <span x-text="g.label"></span>
+          </label>
+        </template>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-primary" @click="saveScope()">Save scope</button>
+        <button class="btn btn-ghost" @click="scopeEditId=null">Cancel</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- Activity detail -->
+  <template x-if="expandedId && activity">
+    <div class="card">
+      <div class="card-title">Activity — token #<span x-text="expandedId"></span></div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin:10px 0;">
+        <template x-for="k in (activity.by_kind||[])" :key="k.kind">
+          <span class="pill pill-info"><span x-text="k.kind"></span>: <span x-text="k.n"></span></span>
+        </template>
+        <span class="card-meta" x-show="!(activity.by_kind||[]).length">No calls recorded yet.</span>
+      </div>
+      <table class="data" x-show="(activity.recent||[]).length">
+        <thead><tr><th style="width:180px;">When</th><th style="width:90px;">Method</th><th>Kind</th></tr></thead>
+        <tbody>
+          <template x-for="(a,i) in (activity.recent||[])" :key="i">
+            <tr>
+              <td class="card-meta" x-text="(a.ts||'').replace('T',' ').slice(0,19)"></td>
+              <td class="mono" x-text="a.method"></td>
+              <td><span class="pill" x-text="a.kind"></span></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </template>
+</div>
+
+<script>
+function usersPanel() {
+  return {
+    tokens: [], availableGraphs: [], newLabel: '', newGraphs: [], pickGraphs: false,
+    created: null, status: '', busy: false,
+    expandedId: null, activity: null, scopeEditId: null, scopeGraphs: [],
+    async load() {
+      try {
+        const r = await fetch('/api/users', { credentials: 'include' });
+        this.tokens = (await r.json()).tokens || [];
+      } catch (e) { this.status = 'Could not load tokens.'; }
+      try {
+        const g = await fetch('/api/hub/graphs', { credentials: 'include' });
+        this.availableGraphs = (await g.json()).graphs || [];
+      } catch (e) { this.availableGraphs = []; }
+    },
+    async create() {
+      const label = this.newLabel.trim();
+      if (!label || this.busy) return;
+      this.busy = true; this.status = '';
+      try {
+        const body = { label };
+        if (this.pickGraphs && this.newGraphs.length) body.graphs = this.newGraphs;
+        const r = await fetch('/api/users', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        if (!r.ok) { this.status = 'Create failed: ' + (await r.text()); return; }
+        this.created = await r.json();
+        this.newLabel = ''; this.newGraphs = []; this.pickGraphs = false;
+        await this.load();
+      } finally { this.busy = false; }
+    },
+    editScope(t) {
+      this.scopeEditId = t.id;
+      this.scopeGraphs = (t.scoped_graphs || []).slice();
+      this.expandedId = null; this.activity = null;
+    },
+    async saveScope() {
+      await fetch('/api/users/' + this.scopeEditId + '/scope', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ graphs: this.scopeGraphs })
+      });
+      this.scopeEditId = null; await this.load();
+    },
+    async revoke(t) {
+      if (!confirm('Revoke token “' + t.label + '” (#' + t.id + ')? It stops working immediately.')) return;
+      await fetch('/api/users/' + t.id + '/revoke', { method: 'POST', credentials: 'include' });
+      if (this.expandedId === t.id) { this.expandedId = null; this.activity = null; }
+      await this.load();
+    },
+    async toggleActivity(id) {
+      if (this.expandedId === id) { this.expandedId = null; this.activity = null; return; }
+      this.expandedId = id; this.scopeEditId = null; this.activity = null;
+      this.activity = await (await fetch('/api/users/' + id + '/activity', { credentials: 'include' })).json();
+    },
+    copy(text) { navigator.clipboard && navigator.clipboard.writeText(text); this.status = 'Copied.'; },
+  };
+}
+</script>
+{% endblock %}

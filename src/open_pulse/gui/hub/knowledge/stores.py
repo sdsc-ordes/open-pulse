@@ -54,6 +54,29 @@ def get_active_graph() -> str:
     return graphs[0] if graphs else ""
 
 
+# Per-token graph *ceiling* — a hard allow-list of named graphs a scoped reader
+# may read. Unlike the picker pin above (a UX narrowing that only scopes
+# descriptive facts), this is a security limit enforced at the Oxigraph
+# endpoint via the SPARQL-protocol ``default-graph-uri`` / ``named-graph-uri``
+# params: the query can only ever touch these graphs, no matter its text
+# (facts, relationships, ``GRAPH ?g``, or unscoped). Empty = no ceiling.
+_scope_graphs: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "op_scope_graphs", default=()
+)
+
+
+def set_scope_graphs(graphs: tuple[str, ...] | list[str] | None) -> None:
+    """Restrict every SPARQL read in this context to these named graphs
+    (endpoint-enforced). Empty/None clears the ceiling (full access)."""
+    _scope_graphs.set(
+        tuple(g for g in (graphs or ()) if g and _GRAPH_IRI_RE.match(g))
+    )
+
+
+def get_scope_graphs() -> tuple[str, ...]:
+    return _scope_graphs.get()
+
+
 def _graph_scoped(inner: str) -> str:
     """Wrap a triple pattern in ``GRAPH`` scoping for the active graph(s):
     one graph → ``GRAPH <g> { … }``; several → ``GRAPH ?g { … } FILTER(?g IN …)``;
@@ -128,10 +151,20 @@ def sparql_select(query: str) -> list[dict[str, Any]]:
     if settings.sparql_user or settings.sparql_password:
         auth = (settings.sparql_user, settings.sparql_password)
 
+    params: dict[str, Any] = {"query": query}
+    ceiling = _scope_graphs.get()
+    if ceiling:
+        # Restrict the queryable RDF dataset at the endpoint: the query can only
+        # ever see these graphs (merged as the default graph AND exposed as
+        # named graphs), regardless of its text. Enforced by Oxigraph, so a
+        # scoped reader cannot reach data outside its allow-list.
+        params["default-graph-uri"] = list(ceiling)
+        params["named-graph-uri"] = list(ceiling)
+
     try:
         r = httpx.get(
             url,
-            params={"query": query},
+            params=params,
             headers={"Accept": "application/sparql-results+json"},
             auth=auth,
             timeout=_SPARQL_TIMEOUT,
