@@ -27,6 +27,7 @@ from typing import Annotated, Literal
 from fastapi import Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
+from . import tokens
 from .config import Settings, load_settings
 
 _SETTINGS = load_settings()
@@ -34,9 +35,11 @@ _basic = HTTPBasic(auto_error=False)
 
 Role = Literal["admin", "reader"]
 
-# In-memory session store: cookie value -> role.
-# The hub is single-process and short-lived; no need for Redis here.
-_SESSIONS: dict[str, Role] = {}
+# In-memory session store: cookie value -> (role, reader_token_id).
+# The hub is single-process and short-lived; no need for Redis here. token_id
+# is set only for sessions authenticated by a DB-managed reader token, so a
+# cookie-based follow-up request still logs against the right token.
+_SESSIONS: dict[str, tuple[Role, int | None]] = {}
 _COOKIE_NAME = "op_hub_session"
 
 
@@ -61,21 +64,44 @@ def _match_role(password: str) -> Role | None:
     return None
 
 
+def _match_credential(password: str) -> tuple[Role, int | None] | None:
+    """Resolve a presented secret to ``(role, reader_token_id)``.
+
+    Admin password → ``("admin", None)``; the env ``HUB_AUTH_READER`` →
+    ``("reader", None)``; otherwise a DB-managed reader token →
+    ``("reader", <id>)``. ``None`` on mismatch. The token id lets us attribute
+    per-token activity for the Users panel."""
+    role = _match_role(password)
+    if role is not None:
+        return (role, None)
+    tid = tokens.match_token(password)
+    if tid is not None:
+        return ("reader", tid)
+    return None
+
+
 def get_settings() -> Settings:
     return _SETTINGS
+
+
+def session_info(token: str | None) -> tuple[Role | None, int | None]:
+    """(role, reader_token_id) for a session cookie value, or (None, None)."""
+    if not token:
+        return (None, None)
+    return _SESSIONS.get(token, (None, None))
 
 
 def session_role(token: str | None) -> Role | None:
     """Look up the role attached to a session cookie value, or None if
     the cookie is missing / expired / forged."""
-    if not token:
-        return None
-    return _SESSIONS.get(token)
+    return session_info(token)[0]
 
 
-def issue_session(response: Response, role: Role = "admin") -> str:
+def issue_session(
+    response: Response, role: Role = "admin", token_id: int | None = None
+) -> str:
     token = secrets.token_urlsafe(32)
-    _SESSIONS[token] = role
+    _SESSIONS[token] = (role, token_id)
     response.set_cookie(
         _COOKIE_NAME,
         token,
@@ -105,16 +131,23 @@ def require_auth(
     Basic auth, we also issue a session cookie so subsequent requests
     skip the credential check.
     """
-    role = session_role(op_hub_session)
+    role, token_id = session_info(op_hub_session)
     if role is not None:
         request.state.user_role = role
+        request.state.token_id = token_id
+        if token_id is not None:
+            tokens.log_access(token_id, request.method, request.url.path)
         return
 
     if creds is not None:
-        matched = _match_role(creds.password)
+        matched = _match_credential(creds.password)
         if matched is not None:
-            issue_session(response, matched)
-            request.state.user_role = matched
+            role, token_id = matched
+            issue_session(response, role, token_id)
+            request.state.user_role = role
+            request.state.token_id = token_id
+            if token_id is not None:
+                tokens.log_access(token_id, request.method, request.url.path)
             return
 
     raise HTTPException(

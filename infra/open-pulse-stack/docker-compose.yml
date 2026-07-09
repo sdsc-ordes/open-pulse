@@ -454,6 +454,10 @@ services:
       HUB_OPENSEARCH_URL: "${HUB_OPENSEARCH_URL:-https://opensearch-node1:9200}"
       HUB_OPENSEARCH_USERNAME: "${HUB_OPENSEARCH_USERNAME:-${OPENSEARCH_USERNAME:-admin}}"
       HUB_OPENSEARCH_PASSWORD: "${HUB_OPENSEARCH_PASSWORD:-${OPENSEARCH_PASSWORD:-}}"
+      # Least-privilege reader creds — the hub prefers these over the admin
+      # creds above and connects to the stores read-only (config.py).
+      OPENSEARCH_READER_USERNAME: "${OPENSEARCH_READER_USERNAME:-}"
+      OPENSEARCH_READER_PASSWORD: "${OPENSEARCH_READER_PASSWORD:-}"
       HUB_OPENSEARCH_VERIFY_TLS: "${HUB_OPENSEARCH_VERIFY_TLS:-false}"
       # Crawler in-network URL + bearer token used by /api/crawler/* proxies
       HUB_CRAWLER_URL: "${HUB_CRAWLER_URL:-http://crawler:8000}"
@@ -464,6 +468,9 @@ services:
       # doesn't need to type anything.
       APPLIER_AUTH: "${APPLIER_AUTH:-}"
       SPARQL_AUTH: "${SPARQL_AUTH:-}"
+      # Read-only SPARQL creds — hub prefers these (config.py) so it can only
+      # read Oxigraph; /update stays admin-only at the proxy.
+      SPARQL_READER_AUTH: "${SPARQL_READER_AUTH:-}"
       # Used by /api/projects/build-by-owner to query Neo4j directly.
       NEO4J_AUTH: "${NEO4J_AUTH:-}"
       # User-facing dashboard URLs (host-published ports / external links).
