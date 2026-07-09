@@ -67,6 +67,15 @@ RUN uv sync --no-dev --no-editable --extra hub \
 ENV PATH=/app/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     HUB_DATA_DIR=/data/hub
 
+# Build identity baked into the image → surfaced at GET /version + the hub
+# footer. Pass at build time:
+#   docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) \
+#                --build-arg BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) ...
+ARG GIT_SHA=dev
+ARG BUILT_AT=
+ENV OPEN_PULSE_GIT_SHA=$GIT_SHA \
+    OPEN_PULSE_BUILT_AT=$BUILT_AT
+
 # Hub data dir lives here when no host volume is mounted.
 RUN mkdir -p /data/hub
 
