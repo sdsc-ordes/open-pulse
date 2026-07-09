@@ -136,7 +136,12 @@ def require_auth(
         request.state.user_role = role
         request.state.token_id = token_id
         if token_id is not None:
-            tokens.log_access(token_id, request.method, request.url.path)
+            tokens.log_access(
+                token_id,
+                request.method,
+                request.url.path
+                + (f"?{request.url.query}" if request.url.query else ""),
+            )
         return
 
     if creds is not None:
@@ -147,7 +152,12 @@ def require_auth(
             request.state.user_role = role
             request.state.token_id = token_id
             if token_id is not None:
-                tokens.log_access(token_id, request.method, request.url.path)
+                tokens.log_access(
+                    token_id,
+                    request.method,
+                    request.url.path
+                    + (f"?{request.url.query}" if request.url.query else ""),
+                )
             return
 
     raise HTTPException(

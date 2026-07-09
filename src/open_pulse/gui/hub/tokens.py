@@ -58,6 +58,12 @@ def _conn() -> sqlite3.Connection:
     if "scope_json" not in cols:
         conn.execute("ALTER TABLE reader_tokens ADD COLUMN scope_json TEXT")
         conn.commit()
+    # Migration: record the full request path (endpoint + query string) so the
+    # activity log shows what each call actually hit, not just the coarse kind.
+    acols = {r[1] for r in conn.execute("PRAGMA table_info(token_access)")}
+    if "path" not in acols:
+        conn.execute("ALTER TABLE token_access ADD COLUMN path TEXT")
+        conn.commit()
     return conn
 
 
@@ -188,8 +194,9 @@ def log_access(token_id: int, method: str, path: str) -> None:
         conn = _conn()
         try:
             conn.execute(
-                "INSERT INTO token_access(token_id, method, kind) VALUES (?, ?, ?)",
-                (token_id, method, kind_for(path)),
+                "INSERT INTO token_access(token_id, method, kind, path) "
+                "VALUES (?, ?, ?, ?)",
+                (token_id, method, kind_for(path), (path or "")[:2000]),
             )
             conn.commit()
         finally:
@@ -228,7 +235,7 @@ def token_activity(token_id: int, limit: int = 60) -> dict[str, Any]:
         recent = [
             dict(r)
             for r in conn.execute(
-                "SELECT ts, method, kind FROM token_access "
+                "SELECT ts, method, kind, path FROM token_access "
                 "WHERE token_id = ? ORDER BY id DESC LIMIT ?",
                 (token_id, limit),
             ).fetchall()
@@ -241,6 +248,21 @@ def token_activity(token_id: int, limit: int = 60) -> dict[str, Any]:
                 (token_id,),
             ).fetchall()
         ]
-        return {"recent": recent, "by_kind": by_kind}
+        # Raw console queries this token ran (SPARQL/Cypher/OpenSearch/DuckDB),
+        # tagged by the databases router. The table is created lazily on the
+        # first console call, so tolerate its absence on a fresh deploy.
+        try:
+            queries = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT ran_at, engine, query, row_count, error "
+                    "FROM query_history WHERE token_id = ? "
+                    "ORDER BY id DESC LIMIT ?",
+                    (token_id, limit),
+                ).fetchall()
+            ]
+        except sqlite3.OperationalError:
+            queries = []
+        return {"recent": recent, "by_kind": by_kind, "queries": queries}
     finally:
         conn.close()

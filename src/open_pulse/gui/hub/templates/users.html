@@ -127,17 +127,38 @@
         <span class="card-meta" x-show="!(activity.by_kind||[]).length">No calls recorded yet.</span>
       </div>
       <table class="data" x-show="(activity.recent||[]).length">
-        <thead><tr><th style="width:180px;">When</th><th style="width:90px;">Method</th><th>Kind</th></tr></thead>
+        <thead><tr><th style="width:150px;">When</th><th style="width:64px;">Method</th><th style="width:90px;">Kind</th><th>Path</th></tr></thead>
         <tbody>
           <template x-for="(a,i) in (activity.recent||[])" :key="i">
             <tr>
               <td class="card-meta" x-text="(a.ts||'').replace('T',' ').slice(0,19)"></td>
               <td class="mono" x-text="a.method"></td>
               <td><span class="pill" x-text="a.kind"></span></td>
+              <td class="mono" style="font-size:12px; word-break:break-all;" x-text="a.path || ''"></td>
             </tr>
           </template>
         </tbody>
       </table>
+
+      <!-- Raw console queries this token ran (full query text) -->
+      <template x-if="(activity.queries||[]).length">
+        <div style="margin-top:16px;">
+          <div class="card-meta" style="margin-bottom:8px;">Console queries — full text</div>
+          <template x-for="(q,i) in (activity.queries||[])" :key="'q'+i">
+            <div style="margin-bottom:8px; padding:8px 10px; background:var(--surface-sunk); border-radius:6px;">
+              <div class="card-meta" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <span class="pill pill-info" x-text="q.engine"></span>
+                <span x-text="(q.ran_at||'').replace('T',' ').slice(0,19)"></span>
+                <span x-show="q.error" class="pill pill-bad">error</span>
+                <span x-show="!q.error && q.row_count !== null && q.row_count !== undefined"
+                      x-text="q.row_count + ' rows'"></span>
+              </div>
+              <pre class="mono" style="font-size:12px; white-space:pre-wrap; word-break:break-word; margin:6px 0 0; max-height:200px; overflow:auto;" x-text="q.query"></pre>
+              <div class="card-meta" x-show="q.error" style="color:var(--danger); margin-top:4px;" x-text="q.error"></div>
+            </div>
+          </template>
+        </div>
+      </template>
     </div>
   </template>
 </div>
