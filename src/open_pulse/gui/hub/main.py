@@ -34,6 +34,7 @@ from .routes import (
     services,
     stack,
     stats,
+    users,
 )
 
 _HERE = Path(__file__).parent
@@ -165,6 +166,7 @@ app.include_router(stack.router)
 app.include_router(stats.router)
 app.include_router(crawler.router)
 app.include_router(extractor.router)
+app.include_router(users.router)
 app.include_router(ai.router)
 app.include_router(admin.router)
 app.include_router(hub.router)
@@ -340,6 +342,16 @@ def logs_page(
     __: None = Depends(require_admin),
 ) -> HTMLResponse:
     return templates.TemplateResponse(request, "logs.html", {"page": "logs"})
+
+
+@app.get("/users", response_class=HTMLResponse)
+def users_page(
+    request: Request,
+    _: None = Depends(require_auth),
+    __: None = Depends(require_admin),
+) -> HTMLResponse:
+    """Admin Users — reader token management + per-token activity."""
+    return templates.TemplateResponse(request, "users.html", {"page": "users"})
 
 
 @app.get("/settings", response_class=HTMLResponse)

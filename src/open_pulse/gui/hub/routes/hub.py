@@ -39,6 +39,7 @@ from fastapi.responses import (
 from fastapi.templating import Jinja2Templates
 
 from ..auth import get_settings, maybe_require_auth
+from .. import tokens
 from ..knowledge import catalog as catalog_mod
 from ..knowledge import facets as facets_mod
 from ..knowledge import duckdb_browser
@@ -855,6 +856,15 @@ async def resolve_stream(
     # ``asyncio.to_thread`` hands the worker carries it into the
     # SPARQL probes. Harmless no-op when unset / malformed.
     stores.set_active_graph(graph)
+
+    # Apply the caller's per-token graph ceiling (Phase 1 data scoping): a
+    # scoped reader token only ever reads its allowed named graphs. Set in this
+    # async context so ``asyncio.to_thread`` carries it into every SPARQL probe
+    # (enforced at the Oxigraph endpoint — see stores.sparql_select). Empty for
+    # admin / full readers.
+    stores.set_scope_graphs(
+        tokens.token_scope_graphs(getattr(request.state, "token_id", None))
+    )
 
     # Defer the LLM narrative: build + ship the body first, then compose the
     # narrative and stream it in (see the "narrative" event below). This is
