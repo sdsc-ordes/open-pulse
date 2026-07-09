@@ -9,6 +9,7 @@ the same surface — see ``../db_examples.py`` for the welcome-mat snippets.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import re
 import sqlite3
@@ -23,6 +24,20 @@ from ..auth import get_settings, require_auth
 from ..db_examples import by_engine as db_examples_by_engine
 
 router = APIRouter(prefix="/api/databases", tags=["databases"])
+
+# The reader-token id of the caller, set at each query handler's entry so
+# ``_log_history`` can attribute the query to a token without threading the
+# id through all eleven call sites. Default None → admin / env-reader queries
+# are recorded untagged. Each request runs in its own copied context (async
+# task or threadpool worker), so a set here never leaks across requests.
+_LOG_TOKEN_ID: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "op_log_token_id", default=None
+)
+
+
+def _stamp_token(request: Request) -> None:
+    """Record the caller's reader-token id for this request's query logging."""
+    _LOG_TOKEN_ID.set(getattr(request.state, "token_id", None))
 
 
 def _ensure_dirs() -> tuple[Path, Path]:
@@ -54,11 +69,18 @@ def _sqlite() -> sqlite3.Connection:
         );
         """
     )
+    # Migration: attribute each console query to the reader token that ran it
+    # (NULL for admin / env-reader). Surfaced in the Users → Activity panel.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(query_history)")}
+    if "token_id" not in cols:
+        conn.execute("ALTER TABLE query_history ADD COLUMN token_id INTEGER")
+        conn.commit()
     return conn
 
 
 @router.post("/duckdb/query", dependencies=[Depends(require_auth)])
 def duckdb_query(
+    request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Run an arbitrary read-only DuckDB query against the scratch DB.
@@ -72,6 +94,7 @@ def duckdb_query(
         ATTACH '/data/hub/app.db' AS app (TYPE SQLITE);
         SELECT * FROM app.saved_queries;
     """
+    _stamp_token(request)
     query = (payload.get("query") or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
@@ -110,8 +133,9 @@ def _log_history(
     conn = _sqlite()
     try:
         conn.execute(
-            "INSERT INTO query_history(engine, query, row_count, error) VALUES (?, ?, ?, ?)",
-            (engine, query, row_count, error),
+            "INSERT INTO query_history(engine, query, row_count, error, token_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (engine, query, row_count, error, _LOG_TOKEN_ID.get()),
         )
         conn.commit()
     finally:
@@ -171,9 +195,11 @@ def save_query(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str
 
 @router.post("/sparql/query", dependencies=[Depends(require_auth)])
 async def sparql_query(
+    request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Run a SELECT against the SPARQL store and return raw bindings."""
+    _stamp_token(request)
     settings = get_settings()
     endpoint = (payload.get("endpoint") or settings.sparql_url).rstrip("/")
     if not endpoint.endswith("/query"):
@@ -225,6 +251,7 @@ def cypher_query(
     HUB_READONLY switch) run inside a Neo4j READ transaction, so any write
     clause is rejected server-side — the graph stays immutable for them.
     """
+    _stamp_token(request)
     settings = get_settings()
     query = (payload.get("query") or "").strip()
     if not query:
@@ -558,6 +585,7 @@ def _shape_dsl_response(body: dict[str, Any]) -> dict[str, Any]:
 
 @router.post("/opensearch/query", dependencies=[Depends(require_auth)])
 def opensearch_query(
+    request: Request,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
     """Run a query against OpenSearch.
@@ -576,6 +604,7 @@ def opensearch_query(
     ``index`` (target index) + the rest of the body (size, query, sort,
     aggs, …) as top-level keys.
     """
+    _stamp_token(request)
     settings = get_settings()
     mode = (payload.get("mode") or "sql").lower()
     text = (payload.get("query") or "").strip()
