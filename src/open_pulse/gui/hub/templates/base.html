@@ -264,6 +264,13 @@
             <button type="submit" class="logout-btn">Sign out</button>
           </form>
         </div>
+        {% if build_info %}
+        <div class="sidebar-build" title="built {{ build_info.built_at or 'dev' }} · deployed {{ build_info.deployed_at }}"
+             style="padding: 6px 12px; font-size: 10.5px; color: var(--fg-faint); border-top: 1px solid var(--border);">
+          v{{ build_info.version }}{% if build_info.git_sha and build_info.git_sha != 'dev' %} · {{ build_info.git_sha[:7] }}{% endif %}
+          · deployed {{ build_info.deployed_at[:16].replace('T',' ') }}
+        </div>
+        {% endif %}
       </aside>
 
       <main class="main main-{{ page }}">

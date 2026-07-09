@@ -33,7 +33,7 @@ from fastapi import APIRouter, Cookie, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from ..auth import _match_role, clear_session, issue_session
+from ..auth import _match_credential, clear_session, issue_session
 
 # Templates live next to the routes package; same directory as base.html.
 _TEMPLATES = Jinja2Templates(
@@ -92,20 +92,23 @@ def login_submit(
     next: str = Form("/hub/"),
 ) -> RedirectResponse:
     target = _safe_next(next)
-    role = _match_role(password)
-    if role is None:
+    # Accept admin, the env reader, AND admin-managed DB reader tokens (Gilles,
+    # Aruni, …) — same resolver the API Basic-auth path uses, so a token pasted
+    # into the login form behaves identically to `-u x:<token>`.
+    matched = _match_credential(password)
+    if matched is None:
         # Bounce back to the form with ?error=1 and the original ?next=
         # preserved so a second attempt still lands where the user wanted.
         return RedirectResponse(
             f"/login?error=1&next={target}", status_code=303,
         )
-    # Issue the cookie + stamp the role. 303 converts the POST into a GET
-    # so the browser re-renders the destination page cleanly. Readers who
-    # try to land on an expert-only page (e.g. /pipeline) will hit the
-    # template's role check, not a server-side redirect — keeps the URL
-    # they typed intact for a possible later upgrade.
+    role, token_id = matched
+    # Issue the cookie + stamp the role (and token id, so this session's calls
+    # log against the right token). 303 converts the POST into a GET so the
+    # browser re-renders the destination page cleanly. Readers who try to land
+    # on an expert-only page hit the template's role check, not a redirect.
     resp = RedirectResponse(target, status_code=303)
-    issue_session(resp, role)
+    issue_session(resp, role, token_id)
     return resp
 
 

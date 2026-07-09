@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+
+from open_pulse import __version__
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -129,6 +133,18 @@ templates.env.globals["sparql_browser_url"] = _settings.sparql_browser_url
 templates.env.globals["opensearch_dashboards_url"] = _settings.opensearch_dashboards_url
 templates.env.globals["crawler_docs_url"] = _settings.crawler_docs_url
 templates.env.globals["extractor_docs_url"] = _settings.extractor_docs_url
+
+# Build / deploy identity — surfaced at GET /version and in the sidebar footer
+# so it's always clear exactly what's running. ``git_sha`` + ``built_at`` are
+# baked into the image at build time (Dockerfile ARGs → env); ``deployed_at`` is
+# stamped when this process starts (the real "deployed" moment).
+_BUILD = {
+    "version": __version__,
+    "git_sha": os.environ.get("OPEN_PULSE_GIT_SHA", "dev"),
+    "built_at": os.environ.get("OPEN_PULSE_BUILT_AT", ""),
+    "deployed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+}
+templates.env.globals["build_info"] = _BUILD
 # Surface HUB_READONLY to every template so the sidebar / action buttons
 # can hide themselves when the deploy is locked down. The matching
 # auth.require_writable dependency enforces the same gate on every
@@ -225,6 +241,15 @@ async def _login_redirect_for_browsers(request: Request, exc):
 def healthz() -> dict[str, str]:
     """Public liveness — used by the compose healthcheck."""
     return {"status": "ok"}
+
+
+@app.get("/version")
+def version() -> dict[str, str]:
+    """Public build/deploy identity: version, source commit, build + deploy time.
+
+    Lets anyone confirm exactly what's running (e.g. is v2.1.0 live in prod?)
+    without guessing."""
+    return _BUILD
 
 
 @app.get("/", response_model=None)
