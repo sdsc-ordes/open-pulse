@@ -24,6 +24,7 @@ from .auth import (
     require_auth,
 )
 from .chaoss import routes as chaoss_routes
+from .deprecation import DeprecationMiddleware
 from .routes import (
     admin,
     ai,
@@ -38,6 +39,7 @@ from .routes import (
     services,
     stack,
     stats,
+    system,
     users,
 )
 
@@ -75,6 +77,11 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     lifespan=_lifespan,
 )
+
+# Legacy-path deprecation shim: rewrites pre-v1 paths to their /api/v1 target
+# and stamps Deprecation/Sunset/Link on the way out. Added outermost so the
+# rewrite happens before routing. See .deprecation / docs/reference/api-v1.md.
+app.add_middleware(DeprecationMiddleware)
 
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
@@ -185,6 +192,7 @@ app.include_router(extractor.router)
 app.include_router(users.router)
 app.include_router(ai.router)
 app.include_router(admin.router)
+app.include_router(system.router)
 app.include_router(hub.router)
 app.include_router(hub.api)
 app.include_router(chaoss_routes.router)

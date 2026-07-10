@@ -561,10 +561,6 @@ def _compute_one(
 
 
 @router.get("/api/v1/metrics/chaoss/topics", dependencies=[Depends(maybe_require_auth)])
-@router.get(
-    "/api/chaoss/v1/topics",  # deprecated alias
-    dependencies=[Depends(maybe_require_auth)],
-)
 def chaoss_api_topics() -> dict[str, Any]:
     """List the 3 metric buckets (Community / Popularity / Quality)
     with metric counts."""
@@ -585,10 +581,6 @@ def chaoss_api_topics() -> dict[str, Any]:
 
 
 @router.get("/api/v1/metrics/chaoss", dependencies=[Depends(maybe_require_auth)])
-@router.get(
-    "/api/chaoss/v1/metrics",  # deprecated alias
-    dependencies=[Depends(maybe_require_auth)],
-)
 def chaoss_api_metrics(
     category: str | None = Query(
         None,
@@ -606,10 +598,6 @@ def chaoss_api_metrics(
 @router.get(
     "/api/v1/metrics/chaoss/metrics/{slug}", dependencies=[Depends(maybe_require_auth)]
 )
-@router.get(
-    "/api/chaoss/v1/metrics/{slug}",  # deprecated alias
-    dependencies=[Depends(maybe_require_auth)],
-)
 def chaoss_api_metric_spec(slug: str) -> dict[str, Any]:
     """One metric spec by slug. 404 if unknown."""
     spec = metrics_mod.spec_for(slug)
@@ -620,10 +608,6 @@ def chaoss_api_metric_spec(slug: str) -> dict[str, Any]:
 
 @router.get(
     "/api/v1/metrics/chaoss/repositories/github.com/{owner}/{repo}/metrics",
-    dependencies=[Depends(maybe_require_auth)],
-)
-@router.get(
-    "/api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics",  # deprecated alias
     dependencies=[Depends(maybe_require_auth)],
 )
 def chaoss_api_repo_metrics(
@@ -694,10 +678,6 @@ def chaoss_api_repo_metrics(
 
 @router.get(
     "/api/v1/metrics/chaoss/repositories/github.com/{owner}/{repo}/metrics/{slug}",
-    dependencies=[Depends(maybe_require_auth)],
-)
-@router.get(
-    "/api/chaoss/v1/repositories/github.com/{owner}/{repo}/metrics/{slug}",  # alias
     dependencies=[Depends(maybe_require_auth)],
 )
 def chaoss_api_repo_metric_one(
