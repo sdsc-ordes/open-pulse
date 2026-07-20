@@ -292,10 +292,11 @@ services:
       ACCESS_TOKEN: "${GIMIE_GITHUB_TOKEN:-${EXTRACTOR_GITHUB_TOKEN:-}}"
     expose:
       - "15400"
-    ports:
-      # Dev convenience — reach the sidecar from the host. Internal callers
-      # use the container name on the compose network.
-      - "${GIMIE_API_PORT:-7000}:15400"
+    # No host port published: the gimie sidecar runs NO auth and must not be
+    # internet-facing (it fetches arbitrary git URLs → SSRF/compute abuse).
+    # Internal callers reach it on the compose network only — the extractor
+    # uses GIMIE_API_URL=http://gme-gimie-api:15400. Re-add a `ports:` mapping
+    # for local debugging only, never in a public deployment.
     healthcheck:
       test:
         ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:15400/', timeout=5)"]
