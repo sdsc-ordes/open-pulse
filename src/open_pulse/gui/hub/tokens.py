@@ -180,7 +180,7 @@ def match_token(password: str) -> int | None:
 
 _KIND_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("chaoss", ("/chaoss", "/metrics/chaoss")),
-    ("sparql", ("/databases/sparql",)),
+    ("sparql", ("/databases/sparql", "/sparql")),
     ("cypher", ("/databases/cypher",)),
     ("opensearch", ("/databases/opensearch",)),
     ("duckdb", ("/databases/duckdb",)),
