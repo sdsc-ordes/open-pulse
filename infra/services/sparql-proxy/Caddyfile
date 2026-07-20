@@ -15,7 +15,6 @@
 # The admin API is enabled on the default localhost:2019 inside the
 # container only (not exposed to the host). That's what powers
 # `caddy reload` for hot-reloading users without restarting the container.
-
 {
 	auto_https off
 }
@@ -43,43 +42,42 @@
 	}
 
 	# ── SPARQL reverse-proxy ──────────────────────────────────────────
-
-	# Read auth (on by default).
 	#
-	# The sparql-proxy service in docker-compose passes
-	# ``SPARQL_READ_AUTH_PATHS=/ /query /query/*`` by default, so this
-	# fallback only fires if compose-env doesn't reach us (e.g. when
-	# the container is started standalone via ``docker run``). Keeping
-	# both layers aligned avoids ever shipping an open YASGUI UI by
-	# accident.
+	# Read-auth is delegated to the hub via `forward_auth`, so ONE reader
+	# identity works both at the hub API and directly here: every hub reader
+	# token (managed in Admin → Users), the env reader, the hub admin, AND
+	# the store's own reader/admin passwords (so the hub's own internal
+	# connection and any legacy consumer keep working). The hub endpoint
+	# returns 204 (allow) / 401 (deny); on 401 Caddy relays the challenge to
+	# the client. Full store access — per-token named-graph scope is enforced
+	# only on the hub's own `/api/v1/query` path, by design.
 	#
-	# Override to ``__off__`` in ``infra/.env`` to expose reads anonymously.
-	#
-	# Both ``users/admin/*`` and ``users/reader/*`` are imported below,
-	# so admin credentials are accepted on reads (in addition to writes),
-	# while a dedicated reader credential can be issued for read-only
-	# access via ``SPARQL_READER_AUTH``.
-	@reads_protected {
-		path {$SPARQL_READ_AUTH_PATHS:/ /query /query/*}
-	}
-	basic_auth @reads_protected {
-		import /etc/caddy/users/admin/*
-		import /etc/caddy/users/reader/*
-	}
+	# Wrapped in a `route` so the directives run in written order. Set
+	# `SPARQL_READ_AUTH_PATHS=__off__` in `infra/.env` to expose reads
+	# anonymously (the reads matcher then matches nothing, so forward_auth
+	# is skipped).
+	route {
+		# Always-protected write paths — admin credential only.
+		@writes {
+			method POST PUT DELETE PATCH
+			path /update /update/* /store /store/*
+		}
+		basic_auth @writes {
+			import /etc/caddy/users/admin/*
+		}
 
-	# Always-protected write paths. Admin credential only.
-	@writes {
-		method POST PUT DELETE PATCH
-		path /update /update/* /store /store/*
-	}
-	basic_auth @writes {
-		import /etc/caddy/users/admin/*
-	}
+		# Reads (on by default) — delegated to the hub's token checkpoint.
+		@reads_protected {
+			path {$SPARQL_READ_AUTH_PATHS:/ /query /query/*}
+		}
+		forward_auth @reads_protected hub:8000 {
+			uri /api/v1/system/store-auth
+		}
 
-	# Everything (matched or not) is forwarded to Oxigraph. The matchers
-	# above determine whether basic_auth runs first.
-	reverse_proxy oxigraph:7878 {
-		header_up Host {host}
+		# Everything (matched or not) is forwarded to Oxigraph.
+		reverse_proxy oxigraph:7878 {
+			header_up Host {host}
+		}
 	}
 
 	log {
