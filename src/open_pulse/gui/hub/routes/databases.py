@@ -607,7 +607,16 @@ def opensearch_query(
     _stamp_token(request)
     settings = get_settings()
     mode = (payload.get("mode") or "sql").lower()
-    text = (payload.get("query") or "").strip()
+    # `query` is normally a string (SQL text, or JSON-as-text for DSL), but a
+    # JSON API caller naturally sends a DSL body as an object — accept that too
+    # rather than crashing on `.strip()`. Anything else stringifies cleanly.
+    raw_query = payload.get("query")
+    if isinstance(raw_query, (dict, list)):
+        text = json.dumps(raw_query)
+    elif raw_query is None:
+        text = ""
+    else:
+        text = str(raw_query).strip()
     if not text:
         raise HTTPException(status_code=400, detail="query is required")
 
