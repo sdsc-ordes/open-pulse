@@ -42,20 +42,44 @@ each has its own read-only credential where the engine supports one.
 | Store | Endpoint | Reader credential |
 | --- | --- | --- |
 | **Hub** (CHAOSS metrics, knowledge/search API, `/chaoss`) | `HUB_PORT` (7507) | `HUB_AUTH_READER` — password only, any username |
-| **SPARQL / Oxigraph** (Caddy proxy) | `SPARQL_PROXY_PORT` (7502) `/query` | `SPARQL_READER_AUTH` = `reader/<password>` — reads allowed, `/update` denied |
-| **OpenSearch** | `:9200` | user `openpulse_reader`, role `openpulse_reader` (read + monitor, no writes) |
+| **SPARQL / Oxigraph** (Caddy proxy) | `SPARQL_PROXY_PORT` (7502) `/query`, or `/sparql/` on 443 | `SPARQL_READER_AUTH` = `reader/<password>` **or any Hub reader token** (the proxy delegates read-auth to the Hub); reads allowed, `/update` denied |
+| **OpenSearch** | `:9200` | user `openpulse_reader`, role `openpulse_reader` — read + monitor + mappings, no writes ([provisioning](#opensearch-reader-role)) |
 | **Neo4j** | Bolt `:7687` | — none. Community Edition has a single user and no role-based access. |
 
-For the CHAOSS / OpenPulse API the reader credential is simply the Hub's
-`HUB_AUTH_READER` — there is no separate token (see
-[CHAOSS Metrics API](./chaoss-api.md)). Client `.env` form:
+A Hub reader credential is either the shared env value `HUB_AUTH_READER`, or a
+**managed reader token** — one of many labelled, individually revocable tokens
+minted in **Admin → Users**, each with its own activity log. Either works
+anywhere a reader is accepted (password only, any username). Because the
+SPARQL proxy delegates read-auth to the Hub, a reader token also works
+**directly** at the SPARQL `/query` endpoint — not only through the Hub API.
+See [CHAOSS Metrics API](./chaoss-api.md). Client `.env` form:
 
 ```dotenv
 CHAOSS_ENDPOINT=https://openpulse.epfl.ch
-CHAOSS_AUTH=dev/<HUB_AUTH_READER>          # dev/ is a cosmetic username
+CHAOSS_AUTH=dev/<reader-token-or-HUB_AUTH_READER>   # dev/ is a cosmetic username
 OPENPULSE_ENDPOINT=https://openpulse.epfl.ch
-OPENPULSE_AUTH=dev/<HUB_AUTH_READER>
+OPENPULSE_AUTH=dev/<reader-token-or-HUB_AUTH_READER>
 ```
+
+### OpenSearch reader role
+
+Unlike SPARQL, OpenSearch enforces its own role-based access, so the reader
+needs a matching user + role inside OpenSearch (the Hub connects as
+`OPENSEARCH_READER_USERNAME` / `OPENSEARCH_READER_PASSWORD` to serve the
+OpenSearch console). The `openpulse_reader` role grants, on every index:
+
+- `read` — `indices:data/read/*` (search, get, scroll, …);
+- `indices:monitor/*` + `cluster_composite_ops_ro`, `cluster:monitor/*`;
+- `indices:admin/mappings/get` — **required by the SQL plugin** (`_plugins/_sql`)
+  and *not* included in the built-in `read` action group. Without it, SQL
+  queries fail with `no permissions for [indices:admin/mappings/get]` while DSL
+  search still works.
+
+The role + user are provisioned idempotently by
+`infra/open-pulse-stack/grimoirelab/scripts/create_opensearch_reader.sh`, run
+automatically by `prepare-opensearch.sh` on stack bring-up (it reads the
+`OPENSEARCH_*` values from `infra/.env`). Re-run it after changing the reader
+password to re-sync the stored credential.
 
 ## Global read-only mode
 
