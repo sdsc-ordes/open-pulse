@@ -46,7 +46,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse
 
-from ..auth import require_auth
+from ..auth import require_auth, require_writable
 
 router = APIRouter(prefix="/api/extractor", tags=["extractor"])
 
@@ -133,7 +133,21 @@ async def extractor_v2_proxy(path: str, request: Request) -> Response:
     server-side. The body, query string, content-type, and method are
     preserved end-to-end. A long client-side timeout (15 min) matches
     the longest extract a single repo can take in hybrid mode.
+
+    Access policy (B): readers may READ — any ``GET`` and semantic search
+    (``POST .../search``) — but every mutating operation (extract, ingest,
+    runs, archives, job control, …) is admin-only. ``require_auth`` (the
+    route dependency) has already stamped ``request.state.user_role``, so we
+    apply ``require_writable`` here only for the non-read paths; it 403s
+    readers and honours ``HUB_READONLY``.
     """
+    _p = path.split("?", 1)[0].rstrip("/")
+    is_read = request.method in ("GET", "HEAD", "OPTIONS") or (
+        request.method == "POST" and _p.endswith("/search")
+    )
+    if not is_read:
+        require_writable(request)
+
     token = _extractor_token()
     if not token:
         raise HTTPException(
