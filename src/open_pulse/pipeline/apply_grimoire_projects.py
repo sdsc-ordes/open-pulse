@@ -99,6 +99,93 @@ def post_to_applier(
     return resp.json()
 
 
+def fetch_current_projects(
+    *, applier_url: str, bearer_token: str, timeout: float = 60.0
+) -> dict[str, Any]:
+    """GET the applier's current projects.json (so we can merge, not clobber)."""
+    url = applier_url.rstrip("/") + "/current"
+    with httpx.Client(timeout=timeout) as c:
+        resp = c.get(url, headers={"Authorization": f"Bearer {bearer_token}"})
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"applier /current returned HTTP {resp.status_code}: {resp.text[:200]}"
+        )
+    return resp.json()
+
+
+def _sparql_select_repo_urls(
+    sparql_endpoint: str, query: str, timeout: float = 600.0
+) -> list[str]:
+    """Run a SPARQL SELECT returning a single ``?repo`` column of GitHub URLs."""
+    import urllib.parse
+    import urllib.request
+
+    url = sparql_endpoint.rstrip("/") + "/query?query=" + urllib.parse.quote(query)
+    req = urllib.request.Request(url, headers={"Accept": "text/csv"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
+        lines = r.read().decode("utf-8", "replace").splitlines()
+    out: list[str] = []
+    for ln in lines[1:]:  # skip the CSV header row
+        v = ln.strip().strip('"')
+        if v.startswith("https://github.com/"):
+            out.append(v)
+    return out
+
+
+def _apply_single_group(
+    services: ServiceContainer, step_cfg: dict[str, Any], params: dict[str, Any]
+) -> None:
+    """Build ONE named group from a SPARQL repo-filter and MERGE it into the
+    live projects.json (preserving every other group). Config under ``params``:
+
+    * ``group_slug``  — projects.json key (slugified). e.g. ``EPFL`` -> ``epfl``.
+    * ``group_title`` — display title (default = group_slug).
+    * ``sparql_query``— SELECT returning one ``?repo`` column of GitHub URLs.
+    * ``merge``       — merge into /current (default true) vs replace-all (false).
+    """
+    slug = _slug(str(params.get("group_slug") or params.get("group_name") or "group"))
+    title = str(params.get("group_title") or params.get("group_slug") or slug)
+    query = params.get("sparql_query")
+    literal = params.get("repo_urls")  # optional materialized list (union'd with the query)
+    if not query and not literal:
+        raise RuntimeError(
+            "apply_grimoire_projects[single_group]: need 'sparql_query' and/or 'repo_urls'."
+        )
+    merge = bool(params.get("merge", True))
+
+    repos_set: set[str] = set()
+    if query:
+        repos_set.update(_sparql_select_repo_urls(services.sparql_store.endpoint, str(query)))
+    if literal:
+        repos_set.update(u for u in literal if str(u).startswith("https://github.com/"))
+    repos = sorted(repos_set)
+    group = {"meta": {"title": title}, "git": repos}
+
+    applier_url = str(
+        step_cfg.get("applier_url")
+        or os.environ.get("APPLIER_URL")
+        or "http://projects-applier:8000"
+    )
+    auth_env = str(step_cfg.get("applier_auth_env", "APPLIER_AUTH"))
+    bearer = os.environ.get(auth_env, "").strip()
+    if not bearer:
+        raise RuntimeError(
+            f"apply_grimoire_projects[single_group]: env var {auth_env!r} is empty."
+        )
+
+    if merge:
+        payload = fetch_current_projects(applier_url=applier_url, bearer_token=bearer)
+        payload[slug] = group  # add or replace only this one group
+    else:
+        payload = {slug: group}
+
+    result = post_to_applier(applier_url=applier_url, bearer_token=bearer, payload=payload)
+    logger.info(
+        "apply_grimoire_projects[single_group]: group=%s repos=%d merge=%s -> %d total groups (%s)",
+        slug, len(repos), merge, len(payload), result.get("status", ""),
+    )
+
+
 # ── Pipeline step ──────────────────────────────────────────────────────────
 
 
@@ -131,6 +218,13 @@ def run_apply_grimoire_projects(context: dict[str, object]) -> None:
     step_cfg = context.get("step_config") or {}
     if not isinstance(step_cfg, dict):
         raise RuntimeError("Pipeline context 'step_config' must be a dict.")
+
+    # Single named group built from a SPARQL repo-filter, MERGED into the live
+    # projects.json (does not overwrite). Opt-in via
+    # ``params: {mode: single_group, group_slug, group_title, sparql_query, merge}``.
+    if (step_cfg.get("params") or {}).get("mode") == "single_group":
+        _apply_single_group(services, step_cfg, step_cfg["params"])
+        return
 
     auth_env = services.neo4j.auth_env or "NEO4J_AUTH"
     raw = os.environ.get(auth_env, "")
