@@ -60,6 +60,43 @@ def _projects_path() -> Path:
     return _conf_dir() / "projects.json"
 
 
+# GitHub-API backends Mordred needs to collect issues + PRs + repo metadata
+# (as opposed to the ``git`` backend, which only clones commits).
+_GITHUB_BACKENDS = ("github:issue", "github:pull", "github:repo")
+
+
+def _derive_github_backends(payload: dict[str, Any]) -> None:
+    """Ensure every group that has a ``git`` list also collects GitHub issues,
+    PRs, and repo metadata — so the issue/PR/CR CHAOSS metrics have data, not
+    just commit metrics.
+
+    Every projects.json write goes through this endpoint, so deriving here makes
+    issue/PR collection correct-by-construction for *any* group source (quests,
+    owner-grouped build, hub UI, CLI) — no per-writer drift.
+
+    The GitHub API needs ``owner/repo`` without the ``.git`` suffix that cloning
+    uses, so we strip it. Idempotent and non-destructive: only fills a backend a
+    group hasn't already declared, so a group can opt out or customise by
+    setting e.g. ``"github:issue": []`` explicitly.
+    """
+    for group in payload.values():
+        if not isinstance(group, dict):
+            continue
+        git = group.get("git")
+        if not isinstance(git, list) or not git:
+            continue
+        clean = sorted(
+            {
+                u[:-4] if u.endswith(".git") else u
+                for u in git
+                if isinstance(u, str)
+            }
+        )
+        for backend in _GITHUB_BACKENDS:
+            if backend not in group:
+                group[backend] = clean
+
+
 def _expected_token() -> str:
     token = os.environ.get("APPLIER_AUTH", "")
     if not token:
@@ -117,6 +154,10 @@ def apply(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Body must be a non-empty JSON object",
         )
+
+    # Correct-by-construction: every group that clones a repo also collects its
+    # issues/PRs/repo metadata, regardless of which writer built the payload.
+    _derive_github_backends(payload)
 
     conf_dir = _conf_dir()
     conf_dir.mkdir(parents=True, exist_ok=True)
