@@ -108,7 +108,7 @@ services:
     cpus: ${DASHBOARDS_CPUS:-1.0}
 
   prepare-grimoire-config:
-    image: python:3.11-alpine
+    image: python:3.14-alpine
     restart: "no"
     working_dir: /workspace
     command:
