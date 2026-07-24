@@ -16,7 +16,7 @@ services:
     cpus: ${MARIADB_CPUS:-1.0}
 
   valkey:
-    image: valkey/valkey:8
+    image: valkey/valkey:9
     restart: unless-stopped
     # SortingHat (server + worker) authenticate with SORTINGHAT_REDIS_PASSWORD,
     # so Valkey must require that same password — otherwise the worker's AUTH is
