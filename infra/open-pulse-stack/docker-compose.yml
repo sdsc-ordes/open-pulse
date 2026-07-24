@@ -357,7 +357,7 @@ services:
     cpus: ${SELENIUM_CPUS:-1.0}
 
   oxigraph:
-    image: ghcr.io/oxigraph/oxigraph:0.4.7
+    image: ghcr.io/oxigraph/oxigraph:0.5.9
     container_name: oxigraph-open-pulse
     profiles:
       - sparql
