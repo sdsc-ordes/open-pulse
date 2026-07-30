@@ -470,14 +470,14 @@ def _metric_contributors(
             }
         },
         "aggs": {
-            "by_author": {"cardinality": {"field": "author_name"}},
+            "by_author": {"cardinality": {"field": "author_uuid"}},
             "by_month": {
                 "date_histogram": {
                     "field": "grimoire_creation_date",
                     "calendar_interval": "month",
                     "min_doc_count": 0,
                 },
-                "aggs": {"unique_authors": {"cardinality": {"field": "author_name"}}},
+                "aggs": {"unique_authors": {"cardinality": {"field": "author_uuid"}}},
             },
         },
     }
@@ -578,7 +578,7 @@ def _metric_contributors(
                 "bash": ".rows[0][0] | tonumber? // 0",
                 "js": "(r2.rows && r2.rows[0]) ? Number(r2.rows[0][0]) : 0",
             },
-            # trace 3 — OpenSearch ``cardinality(author_name)``
+            # trace 3 — OpenSearch ``cardinality(author_uuid)`` (deduplicated)
             {
                 "python": "r3.get('raw', {}).get('aggregations', {}).get('by_author', {}).get('value', 0)",
                 "bash": ".raw.aggregations.by_author.value // 0",
@@ -605,7 +605,7 @@ def _metric_contributors(
         secondary=" · ".join(bits),
         queries=traces,
         notes=(
-            "OpenSearch counts distinct ``author_name`` values on commits "
+            "OpenSearch counts distinct ``author_uuid`` values (SortingHat-merged identities, so a person's aliases count once) on commits "
             "indexed by GrimoireLab in the window. SPARQL uses the typed "
             "``pulse:lastContributionDate`` on the Contribution node. "
             "Neo4j is an all-time edge count — it ignores the window."
@@ -4882,9 +4882,9 @@ def _metric_committers(
 ) -> MetricResult:
     """How many distinct people *committed* code in the window?
 
-    CHAOSS "Committers" — distinct ``committer_name`` on commits
+    CHAOSS "Committers" — distinct committer identities (``Commit_uuid``) on commits
     GrimoireLab indexed. This is the commit-landing view, deliberately
-    narrower than ``contributors`` (which counts ``author_name`` and so
+    narrower than ``contributors`` (which counts ``author_uuid`` and so
     includes people whose patches someone else committed).
     """
     cutoff = _now_minus_days(window_days)
@@ -4905,14 +4905,14 @@ def _metric_committers(
             }
         },
         "aggs": {
-            "by_committer": {"cardinality": {"field": "committer_name"}},
+            "by_committer": {"cardinality": {"field": "Commit_uuid"}},
             "by_month": {
                 "date_histogram": {
                     "field": "grimoire_creation_date",
                     "calendar_interval": "month",
                     "min_doc_count": 0,
                 },
-                "aggs": {"unique_committers": {"cardinality": {"field": "committer_name"}}},
+                "aggs": {"unique_committers": {"cardinality": {"field": "Commit_uuid"}}},
             },
         },
     }
@@ -4939,7 +4939,7 @@ def _metric_committers(
             queries=traces,
             notes="No git commits indexed for this repo in the window.",
             unification=(
-                "Distinct ``committer_name`` on windowed commits via an "
+                "Distinct committer identities (``Commit_uuid``) on windowed commits via an "
                 "**OpenSearch** cardinality agg."
             ),
         )
@@ -4976,13 +4976,13 @@ def _metric_committers(
         series=series,
         series_unit="committers",
         notes=(
-            "Distinct ``committer_name`` values on commits GrimoireLab "
+            "Distinct committer identities (``Commit_uuid``) on commits GrimoireLab "
             "indexed in the window. Committers are whoever landed the "
             "commit — narrower than *contributors* (``author_name``), "
             "which also counts authors whose patch someone else committed."
         ),
         unification=(
-            "Distinct ``committer_name`` on windowed commits via an "
+            "Distinct committer identities (``Commit_uuid``) on windowed commits via an "
             "**OpenSearch** cardinality agg."
         ),
         headline_tone="info",
@@ -5626,7 +5626,7 @@ REGISTRY: list[MetricSpec] = [
         question="Who landed code recently?",
         description=(
             "Distinct people who committed code in the window "
-            "(`committer_name`). Narrower than Contributors — counts who "
+            "(deduplicated committer identities). Narrower than Contributors — counts who "
             "landed the commit, not every patch author."
         ),
         is_time_based=True,
