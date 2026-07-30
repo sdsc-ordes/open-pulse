@@ -9,6 +9,11 @@ server {
 
   server_name localhost nginx;
 
+  # SortingHat's `unify` posts large identity batches to /identities/api/;
+  # the default 1M cap 413s them and silently breaks deduplication. Give the
+  # GraphQL endpoint generous headroom.
+  client_max_body_size 100M;
+
   location / {
       proxy_pass ${KIBANA_HOST};
       proxy_redirect ${KIBANA_HOST} /;
