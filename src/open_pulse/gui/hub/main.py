@@ -26,6 +26,7 @@ from .routes import (
     canvas,
     crawler,
     databases,
+    everse,
     extractor,
     hub,
     login,
@@ -169,6 +170,7 @@ app.include_router(extractor.router)
 app.include_router(users.router)
 app.include_router(ai.router)
 app.include_router(admin.router)
+app.include_router(everse.router)
 app.include_router(hub.router)
 app.include_router(hub.api)
 app.include_router(chaoss_routes.router)
