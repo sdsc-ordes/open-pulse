@@ -214,6 +214,26 @@ services:
       # aren't shipped in the runtime image. Override to use real providers
       # (which call GitHub via GITHUB_TOKEN above).
       V2_USE_MOCK_PROVIDERS: "${EXTRACTOR_USE_MOCK_PROVIDERS:-false}"
+      # ── gimie sidecar (develop ≥ 2026-06 removed in-process gimie) ──
+      # When set, repo extraction calls the gme-gimie-api sidecar at this
+      # URL instead of in-process gimie. DEFAULT EMPTY on purpose: images
+      # that still bundle gimie keep working, and we don't auto-route to a
+      # sidecar until a matching image is pinned (the published
+      # gimie-api:latest is stale — /gimie/project, not /gimie/jsonld). Set
+      # to ``http://gme-gimie-api:15400`` in infra/.env to switch over.
+      GIMIE_API_URL: "${GIMIE_API_URL:-}"
+      GIMIE_API_TIMEOUT_SECONDS: "${GIMIE_API_TIMEOUT_SECONDS:-180}"
+      # ── new develop knobs (repository-enrichment + index bootstrap) ──
+      # Package-registry discovery (npm/PyPI/conda/crates/RubyGems/Maven/Go/
+      # NuGet) and the LLM README repo-signals refiner (apply/shadow/off).
+      V2_PACKAGE_REGISTRY_ENABLED: "${V2_PACKAGE_REGISTRY_ENABLED:-true}"
+      V2_REPO_SIGNALS_AGENT_MODE: "${V2_REPO_SIGNALS_AGENT_MODE:-apply}"
+      # Create every index DuckDB store at startup (incl. the gitlab_* family).
+      INDEX_BOOTSTRAP_ON_START: "${INDEX_BOOTSTRAP_ON_START:-true}"
+      # Optional GitLab tokens — public listings work without them.
+      GITLAB_EPFL_TOKEN: "${GITLAB_EPFL_TOKEN:-}"
+      GITLAB_ETHZ_TOKEN: "${GITLAB_ETHZ_TOKEN:-}"
+      GITLAB_DATASCIENCE_TOKEN: "${GITLAB_DATASCIENCE_TOKEN:-}"
     ports:
       - "${EXTRACTOR_PORT:-1234}:1234"
     volumes:
@@ -240,8 +260,51 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    mem_limit: ${EXTRACTOR_MEM_LIMIT:-1536m}
+    # The develop ≥ 2026-06 image is much heavier per extraction (8 package
+    # registries + releases/tags + selenium + gimie sidecar): a single worker
+    # uses 2–5 GB, so the old 1536m cap cgroup-OOM-killed the worker
+    # mid-extraction (container OOMKilled stays false — it's a child kill).
+    # Default raised to 4g; set EXTRACTOR_MEM_LIMIT=6g for large repos.
+    mem_limit: ${EXTRACTOR_MEM_LIMIT:-4g}
     cpus: ${EXTRACTOR_CPUS:-2.0}
+
+  # gimie-api sidecar. The GME develop image (≥ 2026-06) removed in-process
+  # gimie (calamus/marshmallow CVE cleanup); repo extraction now calls this
+  # service at ``GIMIE_API_URL`` (GET /gimie/jsonld/{owner}/{repo}).
+  #
+  # ⚠️ NOT wired by default. ``GIMIE_API_URL`` on the extractor is empty until
+  # set in infra/.env, AND the published ``ghcr.io/sdsc-ordes/gimie-api:latest``
+  # is stale (exposes /gimie/project, which errors, not the /gimie/jsonld the
+  # new GME calls). Pin ``GIMIE_API_IMAGE`` to the matching digest from the GME
+  # devs' prod compose, set GIMIE_API_URL=http://gme-gimie-api:15400, then
+  # recreate the extractor. Until then the extractor stays on an image that
+  # still bundles gimie.
+  gme-gimie-api:
+    image: ${GIMIE_API_IMAGE:-ghcr.io/sdsc-ordes/gimie-api:latest}
+    container_name: gme-gimie-api
+    profiles:
+      - extractor
+    restart: unless-stopped
+    environment:
+      # gimie's GitHub PAT. gimie wants ONE token (not the GME comma pool),
+      # so set GIMIE_GITHUB_TOKEN to a single PAT in infra/.env; it falls
+      # back to the raw EXTRACTOR_GITHUB_TOKEN (which may be a comma list).
+      ACCESS_TOKEN: "${GIMIE_GITHUB_TOKEN:-${EXTRACTOR_GITHUB_TOKEN:-}}"
+    expose:
+      - "15400"
+    ports:
+      # Dev convenience — reach the sidecar from the host. Internal callers
+      # use the container name on the compose network.
+      - "${GIMIE_API_PORT:-7000}:15400"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:15400/', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: ${GIMIE_API_MEM_LIMIT:-1g}
+    cpus: ${GIMIE_API_CPUS:-1.0}
 
   # Vector store the extractor's V2 RAG path talks to. Container name
   # `gme-qdrant` matches the default INDEX_QDRANT_URL (http://gme-qdrant:6333)
@@ -341,7 +404,9 @@ services:
       - ${OPEN_PULSE_DATA_DIR:-./data}/sparql-proxy/data:/data
       - ${OPEN_PULSE_DATA_DIR:-./data}/sparql-proxy/config:/config
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/ || exit 1"]
+      # Probe the public /healthz route (Caddyfile) — the SPARQL surface on
+      # `/` stays auth-gated, so hitting `/` here would 401 and false-fail.
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7878/healthz || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -360,6 +425,13 @@ services:
     profiles:
       - hub
     restart: unless-stopped
+    # Run as the host operator (not root) so everything written to the
+    # bind-mounted data dir stays host-owned. The docker group grants
+    # access to the mounted socket; HOME points at the writable mount so
+    # runtime caches (e.g. DuckDB extensions) persist.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-999}"
     ports:
       - "${HUB_PORT:-9090}:8000"
     # Pull the deployment env so any per-service knob set in infra/.env
@@ -368,6 +440,7 @@ services:
       - path: ../.env
         required: false
     environment:
+      HOME: /data/hub
       HUB_AUTH: "${HUB_AUTH:?HUB_AUTH must be set in infra/.env (e.g. openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')}"
       HUB_DATA_DIR: /data/hub
       HUB_APPLIER_URL: "${HUB_APPLIER_URL:-http://projects-applier:8000}"
@@ -381,6 +454,10 @@ services:
       HUB_OPENSEARCH_URL: "${HUB_OPENSEARCH_URL:-https://opensearch-node1:9200}"
       HUB_OPENSEARCH_USERNAME: "${HUB_OPENSEARCH_USERNAME:-${OPENSEARCH_USERNAME:-admin}}"
       HUB_OPENSEARCH_PASSWORD: "${HUB_OPENSEARCH_PASSWORD:-${OPENSEARCH_PASSWORD:-}}"
+      # Least-privilege reader creds — the hub prefers these over the admin
+      # creds above and connects to the stores read-only (config.py).
+      OPENSEARCH_READER_USERNAME: "${OPENSEARCH_READER_USERNAME:-}"
+      OPENSEARCH_READER_PASSWORD: "${OPENSEARCH_READER_PASSWORD:-}"
       HUB_OPENSEARCH_VERIFY_TLS: "${HUB_OPENSEARCH_VERIFY_TLS:-false}"
       # Crawler in-network URL + bearer token used by /api/crawler/* proxies
       HUB_CRAWLER_URL: "${HUB_CRAWLER_URL:-http://crawler:8000}"
@@ -391,6 +468,9 @@ services:
       # doesn't need to type anything.
       APPLIER_AUTH: "${APPLIER_AUTH:-}"
       SPARQL_AUTH: "${SPARQL_AUTH:-}"
+      # Read-only SPARQL creds — hub prefers these (config.py) so it can only
+      # read Oxigraph; /update stays admin-only at the proxy.
+      SPARQL_READER_AUTH: "${SPARQL_READER_AUTH:-}"
       # Used by /api/projects/build-by-owner to query Neo4j directly.
       NEO4J_AUTH: "${NEO4J_AUTH:-}"
       # User-facing dashboard URLs (host-published ports / external links).

@@ -1,0 +1,457 @@
+/* agent-chat.css — full-page agent chat. Uses app.css theme vars. */
+
+/* Fill the app's content area exactly so only the transcript scrolls —
+   no page-level scroll fighting the inner scroll. The .main column is a
+   flex child of .layout (height: 100vh - marquee), so we turn it into a
+   flex column on this page and let .page-body (then .agent-wrap) flex to
+   fill the space below the page header. */
+/* .main-agent is emitted by base.html (class="main main-{{ page }}"); it does
+   the same job as the :has() rule but works in browsers without :has()
+   support, where the transcript would otherwise grow to content height and
+   shove the composer below the fold. */
+.main-agent, .main:has(.agent-wrap) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Pin to the viewport (minus the 36px marquee) so the flex children have a
+     bounded height to distribute. The layout row in base.html (.flex.flex-1)
+     has no fixed height, so without this .main grows with the transcript and
+     pushes the composer below the fold once the conversation gets long. The
+     sidebar uses the same calc. */
+  height: calc(100vh - 36px);
+  max-height: calc(100vh - 36px);
+  overflow: hidden;   /* main never scrolls — only .agent-scroll does */
+}
+.main-agent .page-body, .main:has(.agent-wrap) .page-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 12px 24px 16px;
+}
+/* The shared .page-chrome is `position: sticky; top: 36px`, which is right
+   when the page scrolls under the marquee. But here .main-agent is the
+   overflow:hidden flex container, so it becomes the sticky containing block
+   and the 36px offset pushes the chrome down 36px — opening a gap under the
+   marquee AND overlapping the chat box. The chrome never scrolls on this
+   page, so pin it static. */
+.main-agent .page-chrome, .main:has(.agent-wrap) .page-chrome { position: static; }
+
+.agent-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* Cap the reading width on large screens; shrink to fit on small ones. */
+  width: 100%;
+  max-width: 920px;
+  margin-inline: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* The agent page has no thin header bar anymore — its actions (history,
+   new, clear) live next to the composer. Compact the shared page-chrome
+   so the transcript gets more room. */
+.main-agent .page-header { padding: 12px 32px; }
+.main-agent .page-heading p { -webkit-line-clamp: 2; }
+.agent-model {
+  width: 100%;
+  max-width: 340px;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  cursor: pointer;
+}
+
+/* transcript */
+.agent-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.agent-msg { display: flex; }
+.agent-msg-user { justify-content: flex-end; }
+.agent-msg-assistant, .agent-msg-tool { justify-content: flex-start; }
+
+/* Only the USER's message gets a bounding box, right-aligned. */
+.agent-bubble-user {
+  max-width: 85%;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 12px 12px 4px 12px;
+  padding: 9px 13px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+/* The assistant reply has no box and no label — it spans the full width. */
+.agent-answer {
+  width: 100%;
+  min-width: 0;
+}
+/* a finished pure tool-call turn — one quiet line, same height as a tool
+   card summary, instead of a lingering full assistant bubble. */
+.agent-callrow {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px;
+  font-size: 11.5px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+.agent-callrow-ico { opacity: 0.7; }
+.agent-callrow-name { color: var(--fg-muted); font-weight: 600; }
+.agent-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); animation: agent-pulse 1s ease-in-out infinite;
+  vertical-align: middle; margin-left: 4px;
+}
+@keyframes agent-pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+/* markdown body */
+.agent-msg-body { font-size: 14px; line-height: 1.55; color: var(--fg); overflow-wrap: anywhere; }
+.agent-msg-body > *:first-child { margin-top: 0; }
+.agent-msg-body > *:last-child { margin-bottom: 0; }
+.agent-msg-body p { margin: 8px 0; }
+.agent-msg-body pre {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 12.5px;
+}
+.agent-msg-body code {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.92em;
+}
+.agent-msg-body :not(pre) > code {
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.agent-msg-body table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12.5px;
+  display: block;
+  overflow-x: auto;
+}
+.agent-msg-body th, .agent-msg-body td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+}
+.agent-msg-body th { background: var(--surface-sunk); }
+.agent-msg-body img { max-width: 100%; border-radius: 6px; }
+.agent-msg-body a { color: var(--accent); }
+
+/* tool result card */
+.agent-tool {
+  max-width: min(820px, 90%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 9px;
+  background: var(--surface-sunk);
+  font-size: 12.5px;
+  overflow: hidden;
+}
+/* one-line summary: chevron · icon · name · meta (meta ellipsises) */
+.agent-tool > summary {
+  cursor: pointer;
+  padding: 7px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background 0.12s ease;
+}
+.agent-tool > summary:hover { background: color-mix(in srgb, var(--accent) 7%, var(--surface-sunk)); }
+.agent-tool > summary::-webkit-details-marker { display: none; }
+.agent-tool-chevron {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+.agent-tool[open] > summary .agent-tool-chevron { transform: rotate(90deg); }
+.agent-tool-icon { flex: 0 0 auto; font-size: 12px; opacity: 0.75; }
+.agent-tool-name {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--accent);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+/* compact summary tail (engine · N rows · ms) — truncates to keep one line */
+.agent-tool-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-tool[open] > summary { border-bottom: 1px solid var(--border); }
+.agent-tool.is-error { border-color: color-mix(in srgb, var(--danger, #e66) 50%, var(--border)); }
+.agent-tool.is-error .agent-tool-name { color: var(--danger, #e66); }
+.agent-tool-body { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+/* the multiline, syntax-highlighted query the tool ran */
+.agent-tool-q .agent-tool-query {
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.agent-tool-q .agent-tool-query code { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+.agent-tool-table { overflow: auto; max-height: 340px; border: 1px solid var(--border); border-radius: 6px; }
+.agent-tool-table table { border-collapse: collapse; width: 100%; background: var(--surface); }
+.agent-tool-table th, .agent-tool-table td {
+  border: 1px solid var(--border); padding: 4px 8px; text-align: left;
+  white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+}
+.agent-tool-table th { position: sticky; top: 0; background: var(--surface-sunk); z-index: 1; }
+.agent-tool-more { color: var(--fg-faint); font-size: 11px; }
+.agent-tool-err { color: var(--danger, #e66); font-size: 12.5px; }
+
+/* vega charts + sandboxed html */
+.agent-vega { margin: 10px 0; overflow-x: auto; width: 100%; }
+.agent-vega-err { color: var(--danger, #e66); font-size: 12px; }
+.agent-html { margin: 10px 0; }
+.agent-html-bar { margin-bottom: 6px; }
+.agent-html-frame {
+  width: 100%; min-height: 240px; border: 1px solid var(--border);
+  border-radius: 8px; background: #fff;
+}
+
+/* empty state */
+.agent-empty { margin: auto; max-width: 640px; text-align: center; padding: 24px; }
+.agent-empty-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.agent-examples { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+.agent-example {
+  text-align: left;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+.agent-example:hover { border-color: var(--accent); background: var(--surface); }
+
+/* composer */
+.agent-composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-sunk);
+  flex: 0 0 auto;   /* fixed at the bottom — never shrinks, never scrolls */
+}
+.agent-composer textarea {
+  flex: 1;
+  resize: none;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 14px;
+  line-height: 1.4;
+  font-family: inherit;
+  max-height: 200px;
+}
+.agent-composer textarea:focus { outline: none; border-color: var(--accent); }
+
+/* ── settings modal ─────────────────────────────────────────────── */
+.agent-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.agent-modal-card {
+  width: min(680px, 100%);
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+}
+.agent-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.agent-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.agent-set-wide { grid-column: 1 / -1; }
+.agent-set-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-muted); margin-bottom: 6px;
+}
+.agent-tool-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.agent-tool-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 9px; font-size: 12px; cursor: pointer; background: var(--surface);
+}
+.agent-tool-toggle:hover { border-color: var(--border-strong); }
+.agent-tool-toggle input { accent-color: var(--accent); }
+.agent-tool-toggle.is-action { border-style: dashed; }
+.agent-tool-act { font-size: 10px; }
+.agent-note {
+  width: 100%; resize: vertical; min-height: 40px;
+  background: var(--surface); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px 10px; font-size: 13px; font-family: inherit;
+}
+.agent-note:focus { outline: none; border-color: var(--accent); }
+.agent-files { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.agent-file-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 8px; font-size: 12px;
+}
+.agent-file-size { color: var(--fg-faint); font-size: 11px; }
+.agent-file-chip button {
+  background: none; border: none; color: var(--fg-muted); cursor: pointer; padding: 0 2px;
+}
+.agent-file-chip button:hover { color: var(--danger, #e66); }
+
+/* ── composer attach + slash palette ────────────────────────────── */
+.agent-composer { position: relative; }
+/* the ⚙ / 📎 / 🕘 / ＋ / 🗑 cluster left of the textarea */
+.agent-tools-group { display: flex; align-items: center; gap: 4px; align-self: flex-end; }
+.agent-iconbtn {
+  position: relative;
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  cursor: pointer; font-size: 15px; padding: 6px 8px;
+  line-height: 1; color: var(--fg-muted);
+}
+.agent-iconbtn:hover { border-color: var(--accent); color: var(--fg); }
+.agent-iconbtn-sep {
+  width: 1px; align-self: stretch; margin: 2px 3px;
+  background: var(--border);
+}
+.agent-iconbtn-badge {
+  position: absolute; top: -5px; right: -5px;
+  min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box;
+  border-radius: 8px; background: var(--accent); color: #fff;
+  font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
+}
+/* export (markdown / json) popover anchored to the ⬇ button */
+.agent-export { position: relative; display: inline-flex; }
+.agent-export-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0;
+  display: flex; flex-direction: column; min-width: 150px; z-index: 40;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 4px; box-shadow: var(--shadow);
+}
+.agent-export-menu button {
+  text-align: left; background: none; border: 0; cursor: pointer;
+  padding: 7px 10px; border-radius: 6px; font-size: 12.5px; color: var(--fg);
+}
+.agent-export-menu button:hover { background: var(--surface-sunk); }
+
+/* CSV export button floated over any rendered table */
+.agent-table-wrap { position: relative; }
+.agent-table-csv {
+  position: absolute; top: 4px; right: 4px; z-index: 2;
+  font-size: 10px; padding: 2px 7px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--fg-muted); cursor: pointer; opacity: 0; transition: opacity .12s ease;
+}
+.agent-table-wrap:hover .agent-table-csv,
+.agent-table-csv:focus { opacity: 1; }
+.agent-table-csv:hover { border-color: var(--accent); color: var(--fg); }
+.agent-slash {
+  position: absolute;
+  left: 12px; right: 12px; bottom: calc(100% + 6px);
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 8px; box-shadow: var(--shadow); overflow: hidden; z-index: 30;
+  max-height: 260px; overflow-y: auto;
+}
+.agent-slash-item {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 7px 12px; cursor: pointer; border-bottom: 1px solid var(--border);
+}
+.agent-slash-item:last-child { border-bottom: none; }
+.agent-slash-item.is-active { background: var(--surface-sunk); }
+.agent-slash-item code {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  color: var(--accent); font-size: 12.5px;
+}
+
+.agent-range { width: 100%; accent-color: var(--accent); }
+
+/* ── conversation history list ──────────────────────────────────── */
+.agent-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 62vh;
+  overflow-y: auto;
+}
+.agent-history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.agent-history-item:hover { border-color: var(--border-strong); }
+.agent-history-item.is-current {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+}
+.agent-history-main { flex: 1; min-width: 0; }
+.agent-history-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 1px;
+}
+.agent-history-del {
+  background: none; border: none; cursor: pointer;
+  color: var(--fg-muted); padding: 2px 6px; font-size: 13px; flex-shrink: 0;
+}
+.agent-history-del:hover { color: var(--danger, #e66); }
+
+@media (max-width: 720px) {
+  .agent-settings-grid { grid-template-columns: 1fr; }
+}

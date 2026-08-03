@@ -77,6 +77,11 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
         else float(v2_timeout_raw)
     )
     include_internal_fields = bool(step_cfg.get("include_internal_fields", False))
+    # Opt-in: also run the GME over the crawler-discovered users and orgs,
+    # not just repos. The GME v2 /extract auto-detects entity type from the
+    # URL, so the same submit path produces rich person / org profiles.
+    extract_users = bool(step_cfg.get("extract_users", False))
+    extract_orgs = bool(step_cfg.get("extract_orgs", False))
     # How many v2 submits run in flight at once. Mirrors the GME's
     # V2_MAX_CONCURRENT_AGENTS default of 6 — going higher than that
     # just makes requests queue server-side. ``1`` reverts to fully
@@ -125,13 +130,38 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
             f"metadata_extractor: {input_path} did not contain a JSON object."
         )
 
+    # Entities to extract. Repos always; users / orgs are opt-in. The GME
+    # v2 /extract auto-detects type from the URL (the crawler graph keys are
+    # full GitHub URLs: repos are owner/repo, users/orgs single-segment), so
+    # ``_process`` handles all three through the same submit path.
     repos: dict[str, Any] = graph.get("repos") or {}
-    if not repos:
+    users: dict[str, Any] = (graph.get("users") or {}) if extract_users else {}
+    orgs: dict[str, Any] = (graph.get("orgs") or {}) if extract_orgs else {}
+    # Order: repos, then users, then orgs. De-dupe preserving order (a login
+    # can show up as both an org and a repo owner).
+    _seen: set[str] = set()
+    entities: list[str] = [
+        e
+        for e in (*repos.keys(), *users.keys(), *orgs.keys())
+        if not (e in _seen or _seen.add(e))
+    ]
+    if not entities:
         logger.warning(
-            "metadata_extractor: crawler graph at %s has no repos to process",
+            "metadata_extractor: crawler graph at %s has nothing to process "
+            "(repos=%d, extract_users=%s, extract_orgs=%s)",
             input_path,
+            len(repos),
+            extract_users,
+            extract_orgs,
         )
         return
+    logger.info(
+        "metadata_extractor: %d entities to extract (repos=%d, users=%s, orgs=%s)",
+        len(entities),
+        len(repos),
+        len(users) if extract_users else "off",
+        len(orgs) if extract_orgs else "off",
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -158,7 +188,7 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
     # applies before we fan out to workers. Doing it inline-inside the
     # pool would let ``skipped`` rows still consume a worker slot.
     candidates: list[str] = []
-    for i, full_name in enumerate(repos.keys()):
+    for i, full_name in enumerate(entities):
         if cap is not None and i >= cap:
             logger.info("metadata_extractor: hit max_repos=%s, stopping early", cap)
             break
@@ -177,6 +207,7 @@ def run_metadata_extractor(context: dict[str, object]) -> None:
                     full_name,
                     agent_runtime=v2_agent_runtime,
                     include_internal_fields=include_internal_fields,
+                    refresh=force_refresh,
                     poll_interval=v2_poll,
                     timeout=v2_timeout,
                 )

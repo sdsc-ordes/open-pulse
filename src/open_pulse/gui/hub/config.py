@@ -150,6 +150,12 @@ class Settings:
     ``HUB_LLM_API_KEY`` is empty (so the hub piggybacks on the
     extractor's existing EPFL inference credentials)."""
 
+    agent_llm_api_key: str
+    """Optional key dedicated to the interactive agent / hub assistants
+    (``HUB_AGENT_LLM_API_KEY``). When set it overrides ``llm_api_key`` for the
+    agent chat, so the agent can run on a separate / rate-limited RCP key from
+    the rest of the hub. A browser-supplied per-request key still wins over it."""
+
     llm_model: str
     """Model name passed to the chat endpoint."""
 
@@ -195,11 +201,21 @@ def load_settings() -> Settings:
         opensearch_url=os.environ.get(
             "HUB_OPENSEARCH_URL", "https://opensearch-node1:9200"
         ),
+        # Least privilege: connect to OpenSearch as the read-only user when one
+        # is configured (OPENSEARCH_READER_*), so the hub can only read — it
+        # never needs to write. Falls back to the admin creds for legacy deploys.
         opensearch_username=os.environ.get(
-            "HUB_OPENSEARCH_USERNAME", os.environ.get("OPENSEARCH_USERNAME", "admin")
+            "OPENSEARCH_READER_USERNAME",
+            os.environ.get(
+                "HUB_OPENSEARCH_USERNAME",
+                os.environ.get("OPENSEARCH_USERNAME", "admin"),
+            ),
         ),
         opensearch_password=os.environ.get(
-            "HUB_OPENSEARCH_PASSWORD", os.environ.get("OPENSEARCH_PASSWORD", "")
+            "OPENSEARCH_READER_PASSWORD",
+            os.environ.get(
+                "HUB_OPENSEARCH_PASSWORD", os.environ.get("OPENSEARCH_PASSWORD", "")
+            ),
         ),
         opensearch_verify_tls=_env_bool("HUB_OPENSEARCH_VERIFY_TLS", default=False),
         neo4j_browser_url=os.environ.get(
@@ -224,8 +240,21 @@ def load_settings() -> Settings:
             "HUB_EXTRACTOR_DOCS_URL", "/api/extractor/docs"
         ),
         applier_auth=os.environ.get("APPLIER_AUTH", "").strip(),
-        sparql_user=(_parse_user_pass(os.environ.get("SPARQL_AUTH", ""))[0]),
-        sparql_password=(_parse_user_pass(os.environ.get("SPARQL_AUTH", ""))[1]),
+        # Least privilege: the hub only reads Oxigraph, so connect as the
+        # read-only SPARQL user (SPARQL_READER_AUTH) when set; the Caddy proxy
+        # accepts it on /query and denies /update. Falls back to SPARQL_AUTH.
+        sparql_user=(
+            _parse_user_pass(
+                os.environ.get("SPARQL_READER_AUTH")
+                or os.environ.get("SPARQL_AUTH", "")
+            )[0]
+        ),
+        sparql_password=(
+            _parse_user_pass(
+                os.environ.get("SPARQL_READER_AUTH")
+                or os.environ.get("SPARQL_AUTH", "")
+            )[1]
+        ),
         neo4j_user=(_parse_user_pass(os.environ.get("NEO4J_AUTH", ""))[0]),
         neo4j_password=(_parse_user_pass(os.environ.get("NEO4J_AUTH", ""))[1]),
         public_knowledge=_env_bool("HUB_PUBLIC_KNOWLEDGE", default=False),
@@ -280,5 +309,6 @@ def _llm_settings() -> dict[str, str]:
     return {
         "llm_base_url": base_url.rstrip("/"),
         "llm_api_key": api_key,
+        "agent_llm_api_key": os.environ.get("HUB_AGENT_LLM_API_KEY", "").strip(),
         "llm_model": model,
     }

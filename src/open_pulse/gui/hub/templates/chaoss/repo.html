@@ -94,6 +94,51 @@
   };
 </script>
 
+{# One dashboard section (header + card grid) for a category group. Featured
+   cards load immediately (x-init); advanced cards are marked .chaoss-lazy-card
+   and only fetched when the Advanced section is first expanded. #}
+{% macro repo_section(g, lazy=False) %}
+<section x-show="active.includes('{{ g.name }}')" style="margin-top: 14px;">
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+    {% if g.icon %}
+      <svg class="chaoss-topic-icon" fill="none" stroke="currentColor"
+           width="18" height="18" stroke-width="1.7" viewBox="0 0 24 24" aria-hidden="true"
+           style="width: 18px; height: 18px; flex: 0 0 18px; color: var(--fg-muted);">
+        <path stroke-linecap="round" stroke-linejoin="round" d="{{ g.icon }}" />
+      </svg>
+    {% endif %}
+    <span class="pill {{ g.css }}" style="font-size: 10px;">{{ g.name }}</span>
+    <span class="card-meta" style="font-size: 12px;">{{ g.blurb }}</span>
+    {% if g.url %}
+      <a class="card-meta" style="font-size: 11px;" href="{{ g.url }}" target="_blank" rel="noopener">CHAOSS catalogue ↗</a>
+    {% endif %}
+    <span class="card-meta" style="font-size: 11px; margin-left: auto;">{{ g.metrics | length }} metric{% if g.metrics|length != 1 %}s{% endif %}</span>
+  </div>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;">
+    {% for m in g.metrics %}
+      <article class="card{% if lazy %} chaoss-lazy-card{% endif %}"
+               {% if not lazy %}x-data='{ slug: "{{ m.slug }}" }' x-init="chaossLoadCard($el, slug)"{% endif %}
+               data-metric-slug="{{ m.slug }}"
+               data-metric-category="{{ g.name }}"
+               style="display: flex; flex-direction: column; gap: 10px; min-height: 200px;">
+        <div style="display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;">
+          {% if m.is_time_based %}
+            <span class="pill" style="font-size: 10px;">⏱ time-based</span>
+          {% endif %}
+          <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener" class="card-meta"
+             style="font-size: 11px; margin-left: auto;">CHAOSS · {{ m.category }} ↗</a>
+        </div>
+        <div class="card-title" style="margin: 0;">{{ m.name }}</div>
+        <div class="card-meta" style="font-size: 12px;">{{ m.question }}</div>
+        <div class="chaoss-card-body" style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--fg-muted); font-size: 13px;">
+          loading…
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+{% endmacro %}
+
 <div x-data="chaossRepo({{ window }})" style="display: flex; flex-direction: column; gap: 18px;">
 
   {# ── Top bar — repo, link out, window selector ─────────────────── #}
@@ -109,7 +154,7 @@
       <label for="window-select" class="card-meta" style="font-size: 12px;">window</label>
       <select id="window-select" x-model.number="window" @change="changeWindow()" class="btn" style="padding: 6px 10px;">
         {% for w in window_choices %}
-          <option value="{{ w }}" {% if w == window %}selected{% endif %}>{{ w }} days</option>
+          <option value="{{ w }}" {% if w == window %}selected{% endif %}>{{ w|window_label }}</option>
         {% endfor %}
       </select>
     </div>
@@ -121,14 +166,12 @@
      still gets every category name from ``categories`` so the JS
      state matches the section x-show predicates exactly. #}
   <div x-data='chaossFilter({{ categories | map(attribute="name") | list | tojson }})'>
+    {% set adv_count = advanced_groups | map(attribute='metrics') | map('length') | sum %}
     <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 6px;">
       <span class="card-meta" style="font-size: 12px; margin-right: 6px;">show:</span>
-      {% for g in groups %}
-        {# Inner quotes are single because the outer @click / :class
-           attributes are double-quoted. ``tojson`` would emit ``"…"``
-           which would break the attribute parser at the first inner
-           quote — single-quote the name directly. Our four topic
-           names contain no apostrophes so this is safe. #}
+      {% for g in featured_groups %}
+        {# Single-quote the name directly — the @click / :class attributes are
+           double-quoted and our topic names contain no apostrophes. #}
         <button type="button"
                 class="pill {{ g.css }}"
                 @click="toggle('{{ g.name }}')"
@@ -144,50 +187,23 @@
       </button>
     </div>
 
-    {% for g in groups %}
-      <section x-show="active.includes('{{ g.name }}')" style="margin-top: 14px;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-          {% if g.icon %}
-            <svg class="chaoss-topic-icon" fill="none" stroke="currentColor"
-                 width="18" height="18" stroke-width="1.7" viewBox="0 0 24 24"
-                 aria-hidden="true"
-                 style="width: 18px; height: 18px; flex: 0 0 18px; color: var(--fg-muted);">
-              <path stroke-linecap="round" stroke-linejoin="round" d="{{ g.icon }}" />
-            </svg>
-          {% endif %}
-          <span class="pill {{ g.css }}" style="font-size: 10px;">{{ g.name }}</span>
-          <span class="card-meta" style="font-size: 12px;">{{ g.blurb }}</span>
-          {% if g.url %}
-            <a class="card-meta" style="font-size: 11px;"
-               href="{{ g.url }}" target="_blank" rel="noopener">CHAOSS catalogue ↗</a>
-          {% endif %}
-          <span class="card-meta" style="font-size: 11px; margin-left: auto;">{{ g.metrics | length }} metric{% if g.metrics|length != 1 %}s{% endif %}</span>
+    {# Featured set — loads immediately #}
+    {% for g in featured_groups %}{{ repo_section(g, false) }}{% endfor %}
+
+    {# Everything else — collapsed; cards compute only once expanded #}
+    {% if adv_count %}
+      <details class="chaoss-advanced" style="margin-top: 20px;"
+               @toggle="$el.open && chaossLoadAdvanced($el)">
+        <summary class="chaoss-advanced-summary">
+          <span class="chaoss-trace-chevron" aria-hidden="true">▸</span>
+          <span>All metrics · Advanced</span>
+          <span class="card-meta" style="font-size: 11px;">{{ adv_count }} more — computed when you open this</span>
+        </summary>
+        <div style="padding-top: 4px;">
+          {% for g in advanced_groups %}{{ repo_section(g, true) }}{% endfor %}
         </div>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px;">
-          {% for m in g.metrics %}
-            <article class="card"
-                     x-data='{ slug: "{{ m.slug }}" }'
-                     x-init="chaossLoadCard($el, slug)"
-                     data-metric-slug="{{ m.slug }}"
-                     data-metric-category="{{ m.category }}"
-                     style="display: flex; flex-direction: column; gap: 10px; min-height: 200px;">
-              <div style="display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;">
-                {% if m.is_time_based %}
-                  <span class="pill" style="font-size: 10px;">⏱ time-based</span>
-                {% endif %}
-                <a href="{{ m.chaoss_url }}" target="_blank" rel="noopener" class="card-meta"
-                   style="font-size: 11px; margin-left: auto;">{{ m.chaoss_level }} ↗</a>
-              </div>
-              <div class="card-title" style="margin: 0;">{{ m.name }}</div>
-              <div class="card-meta" style="font-size: 12px;">{{ m.question }}</div>
-              <div class="chaoss-card-body" style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--fg-muted); font-size: 13px;">
-                loading…
-              </div>
-            </article>
-          {% endfor %}
-        </div>
-      </section>
-    {% endfor %}
+      </details>
+    {% endif %}
   </div>
 
   {# ── Footer — link back to landing + provenance ───────────────── #}
@@ -252,6 +268,15 @@ function chaossLoadCard(el, slug) {
       const target = el.querySelector('.chaoss-card-body');
       target.innerHTML = `<span class="card-meta">failed: ${err}</span>`;
     });
+}
+
+// Advanced metrics don't get an x-init loader — they'd compute on page load
+// even while collapsed. Load them the first time the Advanced section opens.
+function chaossLoadAdvanced(root) {
+  root.querySelectorAll('.chaoss-lazy-card:not([data-loaded])').forEach(el => {
+    el.setAttribute('data-loaded', '1');
+    chaossLoadCard(el, el.dataset.metricSlug);
+  });
 }
 </script>
 {% endblock %}

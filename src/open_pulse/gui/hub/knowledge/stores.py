@@ -8,7 +8,9 @@ readable.
 
 from __future__ import annotations
 
+import contextvars
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -16,6 +18,76 @@ import httpx
 from ..auth import get_settings
 
 log = logging.getLogger(__name__)
+
+# Per-request RDF named graph the hub should scope its SPARQL probes to.
+# Empty → query the store's default graph (today's behaviour). Set per
+# request from the ``graph`` query param on the resolve stream; propagates
+# into the worker thread because ``asyncio.to_thread`` copies the context.
+_active_graphs: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "op_active_graphs", default=()
+)
+# An RDF graph IRI we'll splice into ``GRAPH <...>`` — keep it to safe IRI
+# characters so the value (which originates in the browser) can't break out
+# of the angle brackets and inject SPARQL.
+_GRAPH_IRI_RE = re.compile(r"^https?://[^\s<>{}\"'`]+$")
+
+
+def set_active_graph(value: str) -> None:
+    """Pin one or more named graphs for SPARQL probes in this context.
+
+    Accepts a single IRI or a comma/space-separated list (the inline picker
+    lets the visitor select one *or another* — or several — graphs). Each is
+    validated against :data:`_GRAPH_IRI_RE`; invalid entries are dropped, an
+    empty result clears the scoping (query the default/union graph)."""
+    parts = re.split(r"[,\s]+", (value or "").strip())
+    _active_graphs.set(tuple(p for p in parts if p and _GRAPH_IRI_RE.match(p)))
+
+
+def get_active_graphs() -> tuple[str, ...]:
+    """The pinned named graphs for this context (empty → default/union)."""
+    return _active_graphs.get()
+
+
+def get_active_graph() -> str:
+    """First pinned graph (or ``""``) — back-compat for single-graph callers."""
+    graphs = _active_graphs.get()
+    return graphs[0] if graphs else ""
+
+
+# Per-token graph *ceiling* — a hard allow-list of named graphs a scoped reader
+# may read. Unlike the picker pin above (a UX narrowing that only scopes
+# descriptive facts), this is a security limit enforced at the Oxigraph
+# endpoint via the SPARQL-protocol ``default-graph-uri`` / ``named-graph-uri``
+# params: the query can only ever touch these graphs, no matter its text
+# (facts, relationships, ``GRAPH ?g``, or unscoped). Empty = no ceiling.
+_scope_graphs: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "op_scope_graphs", default=()
+)
+
+
+def set_scope_graphs(graphs: tuple[str, ...] | list[str] | None) -> None:
+    """Restrict every SPARQL read in this context to these named graphs
+    (endpoint-enforced). Empty/None clears the ceiling (full access)."""
+    _scope_graphs.set(
+        tuple(g for g in (graphs or ()) if g and _GRAPH_IRI_RE.match(g))
+    )
+
+
+def get_scope_graphs() -> tuple[str, ...]:
+    return _scope_graphs.get()
+
+
+def _graph_scoped(inner: str) -> str:
+    """Wrap a triple pattern in ``GRAPH`` scoping for the active graph(s):
+    one graph → ``GRAPH <g> { … }``; several → ``GRAPH ?g { … } FILTER(?g IN …)``;
+    none → the pattern unscoped (default/union graph)."""
+    graphs = get_active_graphs()
+    if not graphs:
+        return inner
+    if len(graphs) == 1:
+        return f"GRAPH <{graphs[0]}> {{ {inner} }}"
+    vals = ", ".join(f"<{g}>" for g in graphs)
+    return f"GRAPH ?g {{ {inner} }} FILTER(?g IN ({vals}))"
 
 # Neo4j 5.x emits a notification for every property name in a WHERE
 # clause that no node in the database carries. Our defensive OR-filter
@@ -79,10 +151,20 @@ def sparql_select(query: str) -> list[dict[str, Any]]:
     if settings.sparql_user or settings.sparql_password:
         auth = (settings.sparql_user, settings.sparql_password)
 
+    params: dict[str, Any] = {"query": query}
+    ceiling = _scope_graphs.get()
+    if ceiling:
+        # Restrict the queryable RDF dataset at the endpoint: the query can only
+        # ever see these graphs (merged as the default graph AND exposed as
+        # named graphs), regardless of its text. Enforced by Oxigraph, so a
+        # scoped reader cannot reach data outside its allow-list.
+        params["default-graph-uri"] = list(ceiling)
+        params["named-graph-uri"] = list(ceiling)
+
     try:
         r = httpx.get(
             url,
-            params={"query": query},
+            params=params,
             headers={"Accept": "application/sparql-results+json"},
             auth=auth,
             timeout=_SPARQL_TIMEOUT,
@@ -98,6 +180,28 @@ def sparql_select(query: str) -> list[dict[str, Any]]:
     except ValueError:
         return []
     return list((body.get("results") or {}).get("bindings") or [])
+
+
+def list_named_graphs() -> list[dict[str, Any]]:
+    """Named graphs in the SPARQL store.
+
+    Powers the hub's graph picker. Returns ``[{"iri", "count"}, ...]`` or an
+    empty list when the store is unreachable. ``count`` is always 0: the
+    empty group pattern ``GRAPH ?g {}`` enumerates each graph once *without*
+    scanning its triples, so it returns in milliseconds. An exact per-graph
+    ``COUNT(*)`` is O(all triples) and reliably times out on a large store —
+    which previously left the picker empty and stalled page load while the
+    client waited on it."""
+    rows = sparql_select("SELECT ?g WHERE { GRAPH ?g {} }")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in rows:
+        iri = r.get("g", {}).get("value", "")
+        if not iri or iri in seen:
+            continue
+        seen.add(iri)
+        out.append({"iri": iri, "count": 0})
+    return out
 
 
 def neo4j_run(
@@ -147,13 +251,22 @@ def neo4j_run(
             pass
 
 
-def sparql_describe(subject_iri: str, limit: int = 200) -> list[dict[str, Any]]:
+def sparql_describe(
+    subject_iri: str, limit: int = 200, *, scoped: bool = True
+) -> list[dict[str, Any]]:
     """Convenience: every ``?p ?o`` for a subject, capped at ``limit``.
 
     Used by every resolver as the first probe — if the store has any
     statements about the canonical URL, the entity counts as known.
+
+    Scoped to the pinned named graph when one is active. Pass ``scoped=False``
+    to always query the union across all graphs — used for relationship edges
+    (contributors / owners) so they don't vanish when a graph that lacks them
+    is pinned, even though the descriptive facts stay graph-scoped.
     """
-    query = f"SELECT ?p ?o WHERE {{ <{subject_iri}> ?p ?o }} LIMIT {int(limit)}"
+    inner = f"<{subject_iri}> ?p ?o"
+    body = _graph_scoped(inner) if scoped else inner
+    query = f"SELECT ?p ?o WHERE {{ {body} }} LIMIT {int(limit)}"
     return sparql_select(query)
 
 
@@ -218,12 +331,19 @@ def neo4j_repo_neighbours(slug: str, *, limit: int = 25) -> list[dict[str, Any]]
 def neo4j_user_or_org_neighbours(
     login: str, *, limit: int = 25
 ) -> list[dict[str, Any]]:
-    """1-hop neighbours of a User or Org node, identified by login."""
+    """1-hop neighbours of a User or Org node, identified by login.
+
+    GitHub logins are unique per account *type*, but the crawl graph can
+    hold a login as **both** an ``Org`` and a (spurious) ``User`` node — so
+    we pick a single node, preferring ``Org``, and return only that node's
+    edges (otherwise an org's repos/members get mixed with the stray user).
+    """
     if not login:
         return []
     cypher = (
         "MATCH (n) "
         "WHERE (n:User OR n:Org) AND n.login = $login "
+        "WITH n ORDER BY (CASE WHEN n:Org THEN 0 ELSE 1 END) LIMIT 1 "
         "OPTIONAL MATCH (n)-[r]-(m) "
         "WHERE m IS NOT NULL "
         "RETURN type(r) AS rel, "
@@ -256,8 +376,12 @@ def neo4j_user_org_profile(login: str) -> dict[str, Any] | None:
     """
     if not login:
         return None
+    # Prefer the Org node when a login exists as both Org + User (see
+    # neo4j_user_or_org_neighbours) so an org page reports org stats, not
+    # the stray user node's.
     cypher = (
         "MATCH (n) WHERE (n:User OR n:Org) AND n.login = $login "
+        "WITH n ORDER BY (CASE WHEN n:Org THEN 0 ELSE 1 END) LIMIT 1 "
         "OPTIONAL MATCH (n)-[:OWNS]->(r:Repo) "
         "OPTIONAL MATCH (n)-[:MEMBER_OF]->(parent_org:Org) "
         "OPTIONAL MATCH (n)<-[:MEMBER_OF]-(member:User) "

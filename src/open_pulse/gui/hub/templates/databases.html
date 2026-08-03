@@ -7,6 +7,13 @@
    page's Alpine x-data via spread; CSS is scoped under .tree-table). #}
 <link rel="stylesheet" href="/static/css/tree-table.css" />
 <script src="/static/js/tree-table.js"></script>
+{# D3 chart layer for the result panel (Table → Time series / Scatter).
+   D3 from a CDN, like Chart.js on the overview page; the glue (d3-viz.js)
+   + scoped CSS are first-party. The Table view never needs D3, so a
+   blocked CDN degrades gracefully to table-only. #}
+<link rel="stylesheet" href="/static/css/d3-viz.css" />
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="/static/js/d3-viz.js"></script>
 {# highlight.js for the snippet codeblock. CDN load — the dark theme
    (atom-one-dark) plays nicely with the existing dark code panel
    in both light and dark hub themes. #}
@@ -122,58 +129,75 @@
     <span class="card-meta ml-auto" style="padding: 10px 14px;" x-text="hint()"></span>
   </div>
 
-  <!-- Welcome-mat: clickable example chips (always visible) -->
-  <div class="examples-rail">
-    <span class="examples-label">Try one</span>
-    <template x-for="ex in (examples[engine] || [])" :key="ex.id">
-      <button class="example-chip"
-              :class="activeExampleId === ex.id ? 'is-active' : ''"
-              :title="ex.summary || ex.name"
-              @click="loadExample(ex)">
-        <span class="example-chip-name" x-text="ex.name"></span>
-        <span class="example-chip-mode" x-show="ex.mode" x-text="ex.mode"></span>
-      </button>
-    </template>
-    <template x-if="!(examples[engine] || []).length">
-      <span class="card-meta" style="font-style: italic;">no curated examples yet for <span x-text="engine"></span>.</span>
-    </template>
+  <!-- Examples modal -->
+  <div class="db-modal-backdrop" x-show="examplesOpen" x-cloak
+       @click.self="examplesOpen = false" @keydown.escape.window="examplesOpen = false">
+    <div class="db-modal-card">
+      <div class="db-modal-head">
+        <div>
+          <div class="card-title">Example queries</div>
+          <div class="card-meta" x-text="'Curated ' + (engineLabels[engine] || engine) + ' queries — click to load one into the editor.'"></div>
+        </div>
+        <button class="btn btn-ghost" @click="examplesOpen = false" title="Close (Esc)">✕</button>
+      </div>
+      <div class="db-modal-list">
+        <template x-for="ex in (examples[engine] || [])" :key="ex.id">
+          <button class="db-opt-row" :class="activeExampleId === ex.id ? 'is-active' : ''"
+                  @click="loadExample(ex); examplesOpen = false">
+            <div class="db-opt-head">
+              <span class="db-opt-name" x-text="ex.name"></span>
+              <span class="example-chip-mode" x-show="ex.mode" x-text="ex.mode"></span>
+            </div>
+            <div class="card-meta" x-show="ex.summary" x-text="ex.summary"></div>
+          </button>
+        </template>
+        <template x-if="!(examples[engine] || []).length">
+          <div class="card-meta" style="font-style: italic;">No curated examples yet for <span x-text="engine"></span>.</div>
+        </template>
+      </div>
+    </div>
   </div>
-  <p class="examples-summary" x-show="activeExampleSummary" x-text="activeExampleSummary"></p>
 
-  <!-- Snapshots rail: SPARQL-only. Lists the named graphs currently in
-       the store (typically ``YYYY-MM/{runtime}``). Clicking a chip
-       prepends a ``FROM <iri>`` to the editor so the query targets that
-       snapshot; clicking the same chip again removes it (toggle). The
-       ``default`` chip is always present so users can reset back to
-       the un-scoped query. -->
-  <div class="snapshots-rail" x-show="engine === 'sparql'" x-cloak>
-    <span class="examples-label">Snapshot</span>
-    <button class="example-chip"
-            :class="activeGraphFromUri === null ? 'is-active' : ''"
-            title="Run against the SPARQL store's default graph (un-scoped)."
-            @click="setActiveGraph(null)">
-      <span class="example-chip-name">default</span>
-      <span class="example-chip-mode" x-text="formatGraphCount(snapshotsDefaultCount)"></span>
-    </button>
-    <template x-for="g in (sparqlNamedGraphs || [])" :key="g.uri">
-      <button class="example-chip"
-              :class="activeGraphFromUri === g.uri ? 'is-active' : ''"
-              :title="g.uri + ' · ' + g.triples + ' triples'"
-              @click="setActiveGraph(g.uri)">
-        <span class="example-chip-name"
-              x-text="g.uri.replace('https://open-pulse.epfl.ch/graph/','')"></span>
-        <span class="example-chip-mode" x-text="formatGraphCount(g.triples)"></span>
-      </button>
-    </template>
-    <template x-if="!(sparqlNamedGraphs || []).length && !snapshotsLoading">
-      <span class="card-meta" style="font-style: italic;">no named graphs — only default.</span>
-    </template>
-    <span class="card-meta ml-auto" x-show="snapshotsLoading">probing store…</span>
-    <button class="btn btn-ghost"
-            @click="refreshSnapshots()"
-            :disabled="snapshotsLoading"
-            title="Re-probe the SPARQL store for new named graphs"
-            style="margin-left: 4px; padding: 2px 8px; font-size: 11px;">↻</button>
+  <!-- Snapshots modal (SPARQL): pick a named graph to scope the query. -->
+  <div class="db-modal-backdrop" x-show="snapshotsOpen" x-cloak
+       @click.self="snapshotsOpen = false" @keydown.escape.window="snapshotsOpen = false">
+    <div class="db-modal-card">
+      <div class="db-modal-head">
+        <div>
+          <div class="card-title">Snapshot graphs</div>
+          <div class="card-meta">Each ingest publishes a named graph (<span class="kbd">YYYY-MM/&lt;runtime&gt;</span>). Pick one to prepend a <span class="kbd">FROM &lt;iri&gt;</span> so the query targets just that snapshot; pick <b>default</b> for the un-scoped store.</div>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn btn-ghost" @click="refreshSnapshots()" :disabled="snapshotsLoading"
+                  title="Re-probe the SPARQL store for new named graphs">↻ refresh</button>
+          <button class="btn btn-ghost" @click="snapshotsOpen = false" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div class="db-modal-list">
+        <button class="db-opt-row" :class="activeGraphFromUri === null ? 'is-active' : ''"
+                @click="setActiveGraph(null); snapshotsOpen = false">
+          <div class="db-opt-head">
+            <span class="db-opt-name">default</span>
+            <span class="example-chip-mode" x-text="formatGraphCount(snapshotsDefaultCount)"></span>
+          </div>
+          <div class="card-meta">The store's default graph — every triple, un-scoped.</div>
+        </button>
+        <template x-for="g in (sparqlNamedGraphs || [])" :key="g.uri">
+          <button class="db-opt-row" :class="activeGraphFromUri === g.uri ? 'is-active' : ''"
+                  @click="setActiveGraph(g.uri); snapshotsOpen = false">
+            <div class="db-opt-head">
+              <span class="db-opt-name" x-text="g.uri.replace('https://open-pulse.epfl.ch/graph/','')"></span>
+              <span class="example-chip-mode" x-text="formatGraphCount(g.triples)"></span>
+            </div>
+            <div class="card-meta mono" x-text="g.uri"></div>
+          </button>
+        </template>
+        <template x-if="!(sparqlNamedGraphs || []).length && !snapshotsLoading">
+          <div class="card-meta" style="font-style: italic;">No named graphs — only the default graph is available.</div>
+        </template>
+        <div class="card-meta" x-show="snapshotsLoading">probing store…</div>
+      </div>
+    </div>
   </div>
 
   <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;">
@@ -239,8 +263,21 @@
         <div class="flex gap-2 mt-3" style="align-items: center;">
           <button class="btn btn-primary" @click="run()" :disabled="busy">Run <span class="kbd ml-1">⌘↵</span></button>
           <button class="btn" @click="showSnippets = !showSnippets" :title="showSnippets ? 'Hide examples' : 'Show curl / python / js examples'" style="padding-left: 10px; padding-right: 10px;">&lt;/&gt;</button>
-          <button class="btn" @click="libraryOpen = true" title="Open the saved-queries library" style="padding-left: 10px; padding-right: 10px;">📚 Library</button>
-          <span class="card-meta ml-auto" x-text="resultMeta()"></span>
+          <span class="card-meta" x-text="resultMeta()"></span>
+          <!-- Examples / Snapshot / Saved queries — right-aligned cluster. -->
+          <div class="db-row-actions ml-auto">
+            <span class="card-meta db-loaded" x-show="activeExampleSummary" x-text="activeExampleSummary"></span>
+            <button class="btn btn-ghost" @click="examplesOpen = true"
+                    title="Browse curated example queries for this engine">
+              📚 Examples<span class="db-count" x-show="(examples[engine]||[]).length" x-text="(examples[engine]||[]).length"></span>
+            </button>
+            <button class="btn btn-ghost" x-show="engine === 'sparql'" x-cloak
+                    @click="snapshotsOpen = true" title="Scope the query to a snapshot named graph">
+              📸 Snapshot<span class="db-scope" x-show="activeGraphFromUri"
+                    x-text="': ' + (activeGraphFromUri||'').replace('https://open-pulse.epfl.ch/graph/','')"></span>
+            </button>
+            <button class="btn" @click="libraryOpen = true" title="Open the saved-queries library">💾 Saved queries</button>
+          </div>
         </div>
 
         <div x-show="showSnippets" x-cloak class="card mt-3" style="padding: 10px 14px; background: var(--panel-bg, #0f1218);">
@@ -464,7 +501,7 @@
        @keydown.escape.window="libraryOpen = false">
     <div class="db-modal">
       <div class="db-modal-header">
-        <div class="card-title" style="margin: 0;">Library &middot; <span x-text="engine"></span></div>
+        <div class="card-title" style="margin: 0;">Saved queries &middot; <span x-text="engine"></span></div>
         <button class="btn-close" @click="libraryOpen = false" aria-label="Close">&times;</button>
       </div>
       <p class="card-meta" style="margin: 0;">
@@ -511,6 +548,45 @@
           ⬡ View as graph
         </button>
         <span class="card-meta" x-show="engine === 'cypher' && hasGraphData()" style="margin: 0 6px;">·</span>
+        <!-- View-as: render the same {columns, rows} as a D3 chart. Works
+             for every engine; Table is the default. Non-table options
+             disable when the result shape can't support them. -->
+        <div class="viz-controls">
+          <span class="viz-label">view as</span>
+          <select x-model="viewMode" @change="onViewModeChange()"
+                  title="How to render the result">
+            <option value="table">Table</option>
+            <option value="timeseries"
+                    :disabled="!applicableViews().includes('timeseries')">Time series</option>
+            <option value="scatter"
+                    :disabled="!applicableViews().includes('scatter')">2-D Scatter</option>
+          </select>
+          <span class="viz-axes" x-show="viewMode !== 'table'" x-cloak>
+            <span class="viz-axis"><span>x</span>
+              <select x-model="axisX" @change="renderViz()">
+                <template x-for="c in columns" :key="'vx'+c"><option :value="c" x-text="c"></option></template>
+              </select>
+            </span>
+            <span class="viz-axis"><span>y</span>
+              <select x-model="axisY" @change="renderViz()">
+                <template x-for="c in columns" :key="'vy'+c"><option :value="c" x-text="c"></option></template>
+              </select>
+            </span>
+            <span class="viz-axis" x-show="viewMode === 'scatter'"><span>color</span>
+              <select x-model="axisColor" @change="renderViz()">
+                <option value="">(none)</option>
+                <template x-for="c in columns" :key="'vc'+c"><option :value="c" x-text="c"></option></template>
+              </select>
+            </span>
+            <span class="viz-axis" x-show="viewMode === 'scatter'"><span>size</span>
+              <select x-model="axisSize" @change="renderViz()">
+                <option value="">(none)</option>
+                <template x-for="c in columns" :key="'vs'+c"><option :value="c" x-text="c"></option></template>
+              </select>
+            </span>
+          </span>
+        </div>
+        <span class="card-meta" style="margin: 0 6px;">·</span>
         <span class="card-meta" style="margin-right: 4px;">download</span>
         <button class="btn"        @click="download('csv')"      title="CSV (RFC 4180)">CSV</button>
         <button class="btn"        @click="download('md')"       title="Markdown table">MD</button>
@@ -525,11 +601,17 @@
          are escaped before injection (see _escape). The per-column type
          dropdown lives inside the level-0 thead cells; selecting one
          dispatches a delegated change handler that rewrites cellTypes. -->
-    <div x-show="rows.length" class="tree-table"
+    <div x-show="rows.length && viewMode === 'table'" class="tree-table"
          style="overflow: auto; max-height: 60vh; margin-top: 12px;"
          x-html="renderTreeTable()"
          @change="onCellTypeChange($event)"
          @click="onHeaderClick($event)"></div>
+
+    <!-- D3 chart container — sibling of the tree-table; exactly one shows
+         (gated on viewMode). Built/redrawn by renderViz() in d3-viz.js. -->
+    <div x-show="rows.length && viewMode !== 'table'" class="d3-viz" x-cloak>
+      <svg x-ref="d3Root" role="img" aria-label="query result chart"></svg>
+    </div>
 
     <p x-show="!rows.length && !busy" class="card-meta" style="font-style: italic; margin-top: 12px;">No rows yet — pick an example above or run a query.</p>
     <pre x-show="rawDump" class="console mt-3" x-text="rawDump"></pre>
@@ -667,6 +749,41 @@
   }
   .example-chip-mode { font-size: 9px; text-transform: uppercase; color: var(--fg-faint); letter-spacing: .08em; }
   .examples-summary { font-size: 12px; color: var(--fg-muted); margin: 8px 4px 0; font-style: italic; }
+
+  /* ── Examples / Snapshot / Saved-queries action cluster (run row) ── */
+  .db-row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .db-count {
+    margin-left: 6px; font-size: 10px; padding: 0 5px; border-radius: 8px;
+    background: var(--surface-sunk); color: var(--fg-muted);
+  }
+  .db-scope { margin-left: 4px; color: var(--accent); font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+  .db-loaded {
+    font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; max-width: 220px;
+  }
+
+  /* ── Examples / Snapshots modal card (shares .db-modal-backdrop) ── */
+  .db-modal-card {
+    width: min(680px, 100%); max-height: 84vh; overflow-y: auto;
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 12px; box-shadow: var(--shadow); padding: 16px 18px;
+  }
+  .db-modal-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 12px; margin-bottom: 14px;
+  }
+  .db-modal-list { display: flex; flex-direction: column; gap: 6px; }
+  .db-opt-row {
+    text-align: left; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 12px; cursor: pointer; width: 100%;
+  }
+  .db-opt-row:hover { border-color: var(--border-strong); background: var(--surface-sunk); }
+  .db-opt-row.is-active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  }
+  .db-opt-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+  .db-opt-name { font-weight: 600; font-size: 13px; color: var(--fg); }
 
   /* ── browser-style tab strip ───────────────────────────────────── */
   .tabs-strip {
@@ -939,6 +1056,7 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
     z-index: 1000;
     display: flex;
     align-items: center;
@@ -1563,6 +1681,12 @@ function dbConsole() {
     // (Alpine merges by spread order — later wins).
     ...window.treeTable(),
 
+    // Generic D3 chart layer: "View as" table / time series / scatter,
+    // driven by the same columns/rows the tree-table owns — so it works
+    // for every engine. Spread AFTER treeTable; all its keys (viewMode,
+    // axis*, _col*, _viz*) are namespaced so nothing collides.
+    ...window.d3Viz(),
+
     // Tab order + default match the reading order on the entity
     // pages: graph relations first (who connects to what), then
     // semantic properties, then operational data.
@@ -1610,6 +1734,10 @@ function dbConsole() {
     examples: {},
     activeExampleId: null,
     activeExampleSummary: '',
+    // Examples + Snapshots live in modals now (the always-visible rails
+    // ate too much vertical space).
+    examplesOpen: false,
+    snapshotsOpen: false,
 
     // ── tabs ─────────────────────────────────────────────────────
     tabs: [],
@@ -1671,6 +1799,9 @@ function dbConsole() {
       const first = this.tabs.find(t => t.engine === this.engine) || this.tabs[0];
       this.engine = first.engine;
       this.switchTab(first.id);
+      // Start polling for the CDN D3 so the chart layer is ready by the
+      // time a result lands (fire-and-forget; render gates on window.d3).
+      this._waitForD3();
 
       this.$watch('query', () => {
         this.recomputeGutter();
@@ -2197,7 +2328,7 @@ function dbConsole() {
     },
     async loadAiModels() {
       try {
-        const r = await fetch('/api/ai/models');
+        const r = await fetch('/api/ai/models', { headers: window.opLlm.headers() });
         if (!r.ok) return;
         const j = await r.json();
         // OpenAI shape: ``{"data":[{"id":…}, …]}``; some self-hosted
@@ -2209,7 +2340,9 @@ function dbConsole() {
           .sort((a, b) => a.id.localeCompare(b.id));
         // Prefer a sane default: previously-selected model from
         // localStorage > the GME's gpt-oss-120b > whatever's first.
-        const saved = localStorage.getItem(this.AI_STORAGE_KEY + ':model');
+        // Prefer the shared Settings preference, then the page-local memory.
+        const saved = window.opSecrets.get('llm_model')
+          || localStorage.getItem(this.AI_STORAGE_KEY + ':model');
         if (saved && this.aiModels.some(m => m.id === saved)) {
           this.aiModel = saved;
         } else {
@@ -2317,11 +2450,12 @@ function dbConsole() {
       this.aiPartial = '';
       try {
         if (this.aiModel) {
-          localStorage.setItem(this.AI_STORAGE_KEY + ':model', this.aiModel);
+          // Shared preference — also used by the agent chat + Settings.
+          window.opSecrets.set('llm_model', this.aiModel);
         }
         const resp = await fetch('/api/ai/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...window.opLlm.headers() },
           body: JSON.stringify({
             // ``aiMessages`` carries display-friendly tool / tool_calls
             // payloads (dicts, separate name/arguments fields). The
@@ -2607,6 +2741,9 @@ function dbConsole() {
         this.sortDir = 'asc';
         // New schema → drop any per-column type overrides from the previous query.
         this.cellTypes = {};
+        // Re-infer column types + default chart axes for this result, and
+        // demote the chart view back to Table if it no longer applies.
+        this.onResult();
         // Log the successful run for the session-log panel.
         this.appendSessionLog({
           ts: new Date().toISOString(),
