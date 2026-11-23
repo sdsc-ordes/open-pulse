@@ -48,6 +48,32 @@ openpulse.epfl.ch {
 		}
 	}
 
+	# ── /docs/* → static documentation site (public, no auth) ──────────
+	# The same Docusaurus docs-site published to GitHub Pages, built with
+	# baseUrl "/docs/" by scripts/build-edge-docs.sh and mounted read-only
+	# at /srv/docs. Served here, before the hub fallback, so the docs need
+	# no hub login. Re-run the build script to refresh — no reload needed.
+	redir /docs /docs/ 308
+	handle /docs/* {
+		root * /srv
+		try_files {path} {path}/index.html {path}.html
+		file_server
+	}
+
+	# Unknown /docs/* paths get the docs site's own 404 page; every other
+	# error keeps Caddy's default behaviour.
+	handle_errors {
+		@docs404 {
+			path /docs/*
+			expression {err.status_code} == 404
+		}
+		handle @docs404 {
+			root * /srv
+			rewrite * /docs/404.html
+			file_server
+		}
+	}
+
 	# ── everything else → hub (auth-gated control plane + path proxies
 	#                          for /api/crawler/* and /api/extractor/*) ──
 	reverse_proxy hub:8000 {

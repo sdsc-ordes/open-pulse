@@ -539,6 +539,8 @@ services:
       - "443:443/udp"
     volumes:
       - ../services/edge-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Static docs served at /docs/ — built by scripts/build-edge-docs.sh.
+      - ${OPEN_PULSE_DATA_DIR:-./data}/edge-proxy/docs:/srv/docs:ro
       - ${OPEN_PULSE_DATA_DIR:-./data}/edge-proxy/data:/data
       - ${OPEN_PULSE_DATA_DIR:-./data}/edge-proxy/config:/config
     healthcheck:

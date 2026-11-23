@@ -5,6 +5,12 @@ slug: /
 
 # Open Pulse Documentation
 
+:::tip New here?
+Start with **[What's inside Open Pulse](./explore/whats-inside.md)** — a
+plain-language tour of the software, AI models, datasets, publications,
+people, organisations and funding the platform brings together.
+:::
+
 Open Pulse is an open-science monitoring platform. It automates the
 discovery and monitoring of open-source software produced inside a
 research institution (or programme) and surfaces signals of
