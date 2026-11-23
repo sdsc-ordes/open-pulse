@@ -154,7 +154,13 @@ services:
     # container after writing a new projects.json. Without it, compose
     # generates `<project>-mordred-1` and the restart silently fails.
     container_name: open-pulse-mordred
-    restart: on-failure:5
+    # sirmordred is a long-running loop (update = true) whose RSS grows
+    # steadily over a full collection/enrichment cycle of ~20k data sources
+    # and is eventually OOM-killed (exit 137) by its cgroup limit. That is
+    # recoverable — the next run resumes incrementally — so always restart.
+    # `on-failure:N` counts restarts for the container's lifetime and gave up
+    # for good after the 5th OOM kill.
+    restart: unless-stopped
     image: grimoirelab/grimoirelab:latest
     # Override the upstream healthcheck — its `healthcheck.py` scans the log
     # file synchronously and routinely takes >6s, so docker keeps reporting
@@ -184,7 +190,32 @@ services:
       nginx:
         condition: service_healthy
     mem_limit: ${MORDRED_MEM_LIMIT:-2g}
+    # No swap on top of mem_limit (docker's default allows another
+    # mem_limit's worth): a leaking mordred would otherwise push GBs of
+    # cold pages into host swap before being killed.
+    memswap_limit: ${MORDRED_MEMSWAP_LIMIT:-${MORDRED_MEM_LIMIT:-2g}}
     cpus: ${MORDRED_CPUS:-2.0}
+
+  mordred-maintenance:
+    # Daily stop → rotate all.log → start of mordred (see the script header):
+    # releases its slowly-growing memory before the OOM killer does, and
+    # keeps all.log from growing without bound.
+    image: docker:27-cli
+    container_name: open-pulse-mordred-maintenance
+    restart: unless-stopped
+    # Host operator uid (so rotated archives stay host-owned) + the docker
+    # group for socket access.
+    user: "${HOST_UID:-1000}:${DOCKER_GID:-999}"
+    entrypoint: ["/bin/sh", "/scripts/mordred-maintenance.sh"]
+    environment:
+      MORDRED_CONTAINER_NAME: open-pulse-mordred
+      MORDRED_RESTART_AT: ${MORDRED_RESTART_AT:-03:00}
+      MORDRED_LOG_KEEP: ${MORDRED_LOG_KEEP:-3}
+    volumes:
+      - ./grimoirelab/scripts/mordred-maintenance.sh:/scripts/mordred-maintenance.sh:ro
+      - ${GRIMOIRE_DATA_DIR:-${OPEN_PULSE_DATA_DIR:-./data}/grimoirelab}/mordred/logs:/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    mem_limit: 64m
 
   sortinghat:
     restart: on-failure:3
