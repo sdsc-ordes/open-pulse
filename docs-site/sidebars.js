@@ -2,6 +2,11 @@
 const sidebars = {
   docsSidebar: [
     "index",
+    {
+      type: "doc",
+      id: "explore/whats-inside",
+      label: "What's inside (start here)"
+    },
     "getting-started/index",
     "architecture/index",
     {
