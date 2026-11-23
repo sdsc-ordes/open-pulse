@@ -82,12 +82,12 @@ api-token = ${GITHUB_API_TOKEN}
 category = issue
 #sleep-for-rate = true
 no-archive = true
-studies = [enrich_onion:github,
-           enrich_geolocation:user,
-           enrich_geolocation:assignee,
-           enrich_extra_data:github,
-           enrich_backlog_analysis,
-           enrich_demography:github]
+# Keep this list on ONE line: sirmordred parses `[a, b]` by stripping
+# spaces and splitting on commas, so a multi-line list leaves "\n" in the
+# study names and the whole github:issue enrichment aborts with
+# "Missing config for study". Geolocation/extra_data are left out on
+# purpose (external lookups, Bitergia demo gist).
+studies = [enrich_onion:github, enrich_demography:github]
 
 [github:repo]
 raw_index = github-repo_raw
